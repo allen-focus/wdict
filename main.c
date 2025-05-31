@@ -7,6 +7,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include "glyph_cache.h"
 #include "lib.h"
 #include "renderer.h"
 
@@ -18,38 +19,58 @@
 
 ///
 
+#define CLIENT_WIDTH 600
+#define CLIENT_HEIGHT 400
+#define MAX_WINDOW_TITLE_LENGTH 64
+
+///
+
 typedef struct {
     uint16_t client_width;
     uint16_t client_height;
     void (*on_resize)(uint16_t, uint16_t);
 } UI_Context;
 
+typedef struct {
+    UI_Context* ui_context;
+    GlyphCache* glyph_cache;
+} App_Context;
+
 ///
 
-#define MAX_WINDOW_TITLE_LENGTH 64
-wchar_t window_title[MAX_WINDOW_TITLE_LENGTH] = L"windows title";
+static wchar_t s_window_title[MAX_WINDOW_TITLE_LENGTH] = L"windows title";
 
 ///
 
-static void process_frame()
+static void process_frame(const GlyphCache* glyph_cache)
 {
-    renderer_rect_push((Rect){ 50, 50, 150, 150 }, (Color){ 255, 0, 0, 255 });
-    renderer_rect_push((Rect){ 250, 100, 350, 200 }, (Color){ 0, 255, 0, 255 });
+    renderer_draw_rect(glyph_cache, (Rect){ 50, 50, 150, 150 }, (Color){ 255, 0, 0, 255 });
+    renderer_draw_text(glyph_cache, "hello world", (Pos){ 250, 200 }, (Color){ 0, 0, 0, 255 });
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam, const LPARAM lparam)
 {
-    UI_Context* ui_context;
-    if (message == WM_CREATE)
+    UI_Context* ui_context = NULL;
+    GlyphCache* glyph_cache = NULL;
     {
-        CREATESTRUCT *create = (CREATESTRUCT*)(lparam);
-        ui_context = (UI_Context*)(create->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)ui_context);
-    }
-    else
-    {
-        LONG_PTR ptr = GetWindowLongPtrW(window, GWLP_USERDATA);
-        ui_context = (UI_Context*)ptr;
+        App_Context* app_context = NULL;
+        if (message == WM_CREATE)
+        {
+            CREATESTRUCT *create = (CREATESTRUCT*)(lparam);
+            app_context = (App_Context*)(create->lpCreateParams);
+            SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)app_context);
+        }
+        else
+        {
+            LONG_PTR ptr = GetWindowLongPtrW(window, GWLP_USERDATA);
+            app_context = (App_Context*)ptr;
+        }
+
+        if (app_context)
+        {
+            ui_context = app_context->ui_context;
+            glyph_cache = app_context->glyph_cache;
+        }
     }
 
     switch (message)
@@ -65,8 +86,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
                 QueryPerformanceFrequency(&frequency);
                 QueryPerformanceCounter(&starting_time);
 #endif
-                process_frame();
-                renderer_flush_and_present(ui_context->client_width, ui_context->client_height);
+                {
+                    process_frame(glyph_cache);
+                    renderer_flush_and_present(ui_context->client_width, ui_context->client_height);
+                }
 #ifndef NDEBUG
                 QueryPerformanceCounter(&ending_time);
                 elapsed_microseconds.QuadPart = ending_time.QuadPart - starting_time.QuadPart;
@@ -74,8 +97,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
                 elapsed_microseconds.QuadPart /= frequency.QuadPart;
 
                 // Set window title to show frame time
-                swprintf(window_title, MAX_WINDOW_TITLE_LENGTH, L"Frame Time: %lld μs", elapsed_microseconds.QuadPart);
-                SetWindowTextW(window, window_title);
+                swprintf(s_window_title, MAX_WINDOW_TITLE_LENGTH, L"Frame Time: %lld μs", elapsed_microseconds.QuadPart);
+                SetWindowTextW(window, s_window_title);
 #endif
             }
             EndPaint(window, &ps);
@@ -88,7 +111,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
             {
                 ui_context->on_resize(ui_context->client_width, ui_context->client_height);
-                // InvalidateRect(window, NULL, FALSE);
+
+                // Force an immediate repaint of the entire client area to ensure the updated content is rendered promptly
+                InvalidateRect(window, NULL, FALSE);
             }
             return 0;
         }
@@ -114,11 +139,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
     // Set DPI awareness for better scaling on high DPI displays (Windows 10, v1607)
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // Create UI context
-    UI_Context* ui_context = (UI_Context*)malloc(sizeof(UI_Context));
-    ui_context->on_resize = swapchain_resize;
-    ui_context->client_width = 600;
-    ui_context->client_height = 400;
+    // Allocate user data
+    UI_Context* ui_context = malloc(sizeof(UI_Context));
+    GlyphCache* glyph_cache = malloc(sizeof(GlyphCache));
 
     // Create window
     HWND window;
@@ -126,32 +149,43 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
         // Set the client position to screen center
         int screen_width  = GetSystemMetrics(SM_CXSCREEN);
         int screen_height = GetSystemMetrics(SM_CYSCREEN);
-        int x             = (screen_width - ui_context->client_width) / 2;
-        int y             = (screen_height - ui_context->client_height) / 2;
+        int x             = (screen_width - CLIENT_WIDTH) / 2;
+        int y             = (screen_height - CLIENT_HEIGHT) / 2;
 
         // Give the client area rectangle, get back the entire window rectangle
-        RECT rect         = { x, y, x + ui_context->client_width, y + ui_context->client_height };
+        RECT rect         = { x, y, x + CLIENT_WIDTH, y + CLIENT_HEIGHT };
         DWORD window_style = WS_OVERLAPPEDWINDOW;
         AdjustWindowRectEx(&rect, window_style, 0, 0);
 
-        // Register window class then create window
+        // Register window class
         WNDCLASSW wc = {};
         wc.lpfnWndProc = window_procedure;
         wc.hInstance = GetModuleHandleW(NULL);
         wc.lpszClassName = L"window class";
         RegisterClassW(&wc);
-        window = CreateWindowExW(0, wc.lpszClassName, window_title, window_style,
+
+        // Create window with user data
+        App_Context* app_context = malloc(sizeof(App_Context));
+        app_context->ui_context = ui_context;
+        app_context->glyph_cache = glyph_cache;
+        window = CreateWindowExW(0, wc.lpszClassName, s_window_title, window_style,
                                  rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
-                                 NULL, NULL, wc.hInstance, ui_context);
+                                 NULL, NULL, wc.hInstance, app_context);
     }
 
-    // Initialize renderer
-    renderer_create(window);
+    // Initialize ui context & glyph cache & renderer
+    {
+        ui_context->on_resize = swapchain_resize;
+        ui_context->client_width = CLIENT_WIDTH;
+        ui_context->client_height = CLIENT_HEIGHT;
+    }
+    glyph_cache_init_and_fill(window, glyph_cache, L"Segoe UI Symbol");
+    renderer_init(window, glyph_cache);
 
     // Show window
     ShowWindow(window, SW_SHOWDEFAULT);
 
-    // Run message and render loop
+    // Run message loop
     MSG message;
     while (GetMessageW(&message, NULL, 0, 0))
     {
@@ -160,7 +194,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
     }
 
     // Clean
-    renderer_destroy();
+    renderer_deinit();
+    glyph_cache_deinit(glyph_cache);
     free(ui_context);
 
     return 0;

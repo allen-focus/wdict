@@ -4,13 +4,18 @@
 #include <windows.h>
 
 #include "lib.h"
+#include "glyph_cache.h"
 #include <stdint.h>
 
 ///
 
 void swapchain_resize(const uint16_t client_width, const uint16_t client_height);
 
-void renderer_create(const HWND window);
+void renderer_init(const HWND window, const GlyphCache* glyph_cache);
 void renderer_flush_and_present(const uint16_t client_width, const uint16_t client_height);
-void renderer_destroy();
-void renderer_rect_push(const Rect destination, const Color color);
+void renderer_deinit();
+
+void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color);
+
+void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color);
+void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color);
