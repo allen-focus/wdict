@@ -14,7 +14,7 @@
 
 ///
 
-#define BUFFER_SIZE 1024
+#define VERTEX_SIZE 1024
 
 ///
 
@@ -25,6 +25,11 @@ typedef struct {
     float texture_rect[4];
     uint8_t color[4];
 } Vertex;
+
+typedef struct {
+    Vertex data[VERTEX_SIZE];
+    uint16_t count;
+} VertexStack;
 
 typedef struct {
     ID3D11Device*             device;
@@ -48,8 +53,7 @@ typedef struct {
 ///
 
 static RendererState s_renderer_state;
-static Vertex s_vertex_data[BUFFER_SIZE * 4];
-static uint16_t s_buffer_index = 0;
+static VertexStack s_vertex_stack = { 0 };
 
 //
 // swapchain resize
@@ -209,12 +213,12 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
     {
         D3D11_BUFFER_DESC desc =
         {
-            .ByteWidth = sizeof(s_vertex_data),
+            .ByteWidth = sizeof(s_vertex_stack.data),
             .Usage          = D3D11_USAGE_DYNAMIC,
             .BindFlags      = D3D11_BIND_VERTEX_BUFFER,
             .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
         };
-        D3D11_SUBRESOURCE_DATA initial = { .pSysMem = s_vertex_data };
+        D3D11_SUBRESOURCE_DATA initial = { .pSysMem = s_vertex_stack.data };
         ID3D11Device_CreateBuffer(s_renderer_state.device, &desc, &initial, &s_renderer_state.vertex_buffer);
     }
 
@@ -251,7 +255,7 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
     {
         D3D11_MAPPED_SUBRESOURCE mapped;
         ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-        memcpy(mapped.pData, s_vertex_data, sizeof(Vertex) * s_buffer_index);
+        memcpy(mapped.pData, s_vertex_stack.data, sizeof(Vertex) * s_vertex_stack.count);
         ID3D11DeviceContext_Unmap(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0);
     }
 
@@ -302,7 +306,7 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
     ID3D11DeviceContext_PSSetSamplers(s_renderer_state.context, 0, 1, &s_renderer_state.sampler_state);
     ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 1, &s_renderer_state.render_target_view, NULL); // OM: Output Merger
     ID3D11DeviceContext_OMSetBlendState(s_renderer_state.context, s_renderer_state.blend_state, NULL, 0xffffffff);
-    ID3D11DeviceContext_DrawInstanced(s_renderer_state.context, 4, s_buffer_index, 0, 0);
+    ID3D11DeviceContext_DrawInstanced(s_renderer_state.context, 4, s_vertex_stack.count, 0, 0);
 
     // Present
     // TODO: Need investigate the input latency issue more
@@ -317,8 +321,8 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
 #endif
     IDXGISwapChain1_Present(s_renderer_state.swapchain, vsync, flags);
 
-    // Reset buffer index
-    s_buffer_index = 0;
+    // Reset vertex stack
+    s_vertex_stack.count = 0;
 }
 
 void renderer_deinit()
@@ -345,26 +349,28 @@ void renderer_deinit()
 
 void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color)
 {
-    Assert(s_buffer_index != BUFFER_SIZE);
+    Assert(s_vertex_stack.count != VERTEX_SIZE);
+
+    Vertex* vertex = &s_vertex_stack.data[s_vertex_stack.count];
 
     // Update target rect
     {
-        s_vertex_data[s_buffer_index].target_rect[0] = target_rect.xmin;
-        s_vertex_data[s_buffer_index].target_rect[1] = target_rect.ymin;
-        s_vertex_data[s_buffer_index].target_rect[2] = target_rect.xmax;
-        s_vertex_data[s_buffer_index].target_rect[3] = target_rect.ymax;
+        vertex->target_rect[0] = target_rect.xmin;
+        vertex->target_rect[1] = target_rect.ymin;
+        vertex->target_rect[2] = target_rect.xmax;
+        vertex->target_rect[3] = target_rect.ymax;
     }
     // Update texture rect
     {
-        s_vertex_data[s_buffer_index].texture_rect[0] = texture_rect.xmin / (float)GLYPH_ATLAS_WIDTH;
-        s_vertex_data[s_buffer_index].texture_rect[1] = texture_rect.ymin / (float)GLYPH_ATLAS_HEIGHT;
-        s_vertex_data[s_buffer_index].texture_rect[2] = texture_rect.xmax / (float)GLYPH_ATLAS_WIDTH;
-        s_vertex_data[s_buffer_index].texture_rect[3] = texture_rect.ymax / (float)GLYPH_ATLAS_HEIGHT;
+        vertex->texture_rect[0] = texture_rect.xmin / (float)GLYPH_ATLAS_WIDTH;
+        vertex->texture_rect[1] = texture_rect.ymin / (float)GLYPH_ATLAS_HEIGHT;
+        vertex->texture_rect[2] = texture_rect.xmax / (float)GLYPH_ATLAS_WIDTH;
+        vertex->texture_rect[3] = texture_rect.ymax / (float)GLYPH_ATLAS_HEIGHT;
     }
     // Update color
-    memcpy(s_vertex_data[s_buffer_index].color, &color, sizeof(color));
+    memcpy(s_vertex_stack.data[s_vertex_stack.count].color, &color, sizeof(color));
 
-    s_buffer_index++;
+    s_vertex_stack.count++;
 }
 
 //
