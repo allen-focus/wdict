@@ -349,22 +349,61 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 
     // Update target rect
     {
-        s_vertex_data[s_buffer_index].target_rect[0] = target_rect.x0;
-        s_vertex_data[s_buffer_index].target_rect[1] = target_rect.y0;
-        s_vertex_data[s_buffer_index].target_rect[2] = target_rect.x1;
-        s_vertex_data[s_buffer_index].target_rect[3] = target_rect.y1;
+        s_vertex_data[s_buffer_index].target_rect[0] = target_rect.xmin;
+        s_vertex_data[s_buffer_index].target_rect[1] = target_rect.ymin;
+        s_vertex_data[s_buffer_index].target_rect[2] = target_rect.xmax;
+        s_vertex_data[s_buffer_index].target_rect[3] = target_rect.ymax;
     }
     // Update texture rect
     {
-        s_vertex_data[s_buffer_index].texture_rect[0] = texture_rect.x0 / (float)GLYPH_ATLAS_WIDTH;
-        s_vertex_data[s_buffer_index].texture_rect[1] = texture_rect.y0 / (float)GLYPH_ATLAS_HEIGHT;
-        s_vertex_data[s_buffer_index].texture_rect[2] = texture_rect.x1 / (float)GLYPH_ATLAS_WIDTH;
-        s_vertex_data[s_buffer_index].texture_rect[3] = texture_rect.y1 / (float)GLYPH_ATLAS_HEIGHT;
+        s_vertex_data[s_buffer_index].texture_rect[0] = texture_rect.xmin / (float)GLYPH_ATLAS_WIDTH;
+        s_vertex_data[s_buffer_index].texture_rect[1] = texture_rect.ymin / (float)GLYPH_ATLAS_HEIGHT;
+        s_vertex_data[s_buffer_index].texture_rect[2] = texture_rect.xmax / (float)GLYPH_ATLAS_WIDTH;
+        s_vertex_data[s_buffer_index].texture_rect[3] = texture_rect.ymax / (float)GLYPH_ATLAS_HEIGHT;
     }
     // Update color
     memcpy(s_vertex_data[s_buffer_index].color, &color, sizeof(color));
 
     s_buffer_index++;
+}
+
+//
+// text width & height
+// 
+
+uint32_t renderer_get_text_width(const GlyphCache* glyph_cache, const char* text)
+{
+    uint32_t text_width = 0;
+    for (const char* c = text; *c; c++)
+    {
+        Glyph* glyph = &glyph_cache->glyphs[*c - ASCII_START];
+        text_width += glyph->xadvance;
+    }
+    return text_width;
+}
+
+// TODO: Future support for multiple fonts per line is planned. This will require calculating text height
+// based on varying font line spaces rather than relying on a single font's line space.
+uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* text)
+{
+    uint16_t font_english_capital_height = 0;
+    Font* font = NULL;
+    for (const char* c = text; *c; c++)
+    {
+        Glyph* glyph = &glyph_cache->glyphs[*c - ASCII_START];
+
+        // Check if the glyph is from the same font as the previous glyph.
+        if (font == NULL)
+        {
+            font = glyph->font;
+            font_english_capital_height = glyph->font->english_capital_height;
+        }
+        else
+        {
+            Assert(font == glyph->font);
+        }
+    }
+    return (uint32_t)font_english_capital_height;
 }
 
 //
@@ -376,34 +415,35 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
     Glyph* glyph_white = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
     Rect glyph_white_rect =
     {
-        .x0 = (float)glyph_white->atlas_x,
-        .y0 = (float)glyph_white->atlas_y,
-        .x1 = (float)(glyph_white->atlas_x + glyph_white->w),
-        .y1 = (float)(glyph_white->atlas_y + glyph_white->h),
+        .xmin = (float)glyph_white->atlas_x,
+        .ymin = (float)glyph_white->atlas_y,
+        .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
+        .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push((Rect){ 50, 50, 150, 150 }, glyph_white_rect, (Color){ 255, 0, 0, 255 });
+    renderer_rect_push(rect, glyph_white_rect, color);
 }
 
 void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color)
 {
     float next_pos_x = pos.x;
+    float pos_y = pos.y + (float)renderer_get_text_height(glyph_cache, text);
 
     for (const char* c = text; *c; c++)
     {
         Glyph* glyph = &glyph_cache->glyphs[*c - ASCII_START];
         Rect target_rect = 
         {
-            .x0 = next_pos_x + (float)glyph->xoff,
-            .y0 = pos.y + (float)glyph->yoff,
-            .x1 = next_pos_x + (float)glyph->xoff + (float)glyph->w,
-            .y1 = pos.y + (float)glyph->yoff + (float)glyph->h,
+            .xmin = next_pos_x + (float)glyph->xoff,
+            .ymin = pos_y + (float)glyph->yoff,
+            .xmax = next_pos_x + (float)glyph->xoff + (float)glyph->w,
+            .ymax = pos_y + (float)glyph->yoff + (float)glyph->h,
         };
         Rect texture_rect =
         {
-            .x0 = (float)glyph->atlas_x,
-            .y0 = (float)glyph->atlas_y,
-            .x1 = (float)(glyph->atlas_x + glyph->w),
-            .y1 = (float)(glyph->atlas_y + glyph->h),
+            .xmin = (float)glyph->atlas_x,
+            .ymin = (float)glyph->atlas_y,
+            .xmax = (float)(glyph->atlas_x + glyph->w),
+            .ymax = (float)(glyph->atlas_y + glyph->h),
         };
         renderer_rect_push(target_rect, texture_rect, (Color){ 0, 255, 0, 255 });
 

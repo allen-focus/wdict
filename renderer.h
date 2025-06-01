@@ -19,3 +19,6 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 
 void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color);
 void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color);
+
+uint32_t renderer_get_text_width(const GlyphCache* glyph_cache, const char* text);
+uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* text);

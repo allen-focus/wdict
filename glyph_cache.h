@@ -5,25 +5,37 @@
 
 #define GLYPH_ATLAS_WIDTH 1024
 #define GLYPH_ATLAS_HEIGHT 1024
+
+#define FONT_SIZE 64
+
 #define ASCII_START 32
 #define GLYPHS_LENGTH (127 - ASCII_START + 1 + 1) // ascii glyphs ([32, 126]) plus a close icon glyph and a white region
+
 
 ///
 
 typedef struct {
-    IDWriteFactory3* dwrite_factory;
-    IDWriteFontFace* font_face;
-    IDWriteFontFace3* font_face3;
-    float font_size; // In pixel
+    IDWriteFontFace* face;
+    IDWriteFontFace3* face3;
+
+    float size; // in pixel
     float dpi;
+
+    uint16_t ascent;
+    uint16_t descent;
+    int16_t line_gap;
+    uint16_t english_capital_height;
 } Font;
 
 typedef struct {
-    const Font* font;
+    Font* font;
+
+    // glyph metrics
     uint32_t codepoint;
     uint16_t w, h, xadvance;
     int16_t xoff, yoff;
-    // To locate this glyph in the atlas
+
+    // to locate this glyph in the atlas
     uint16_t atlas_x, atlas_y;
 } Glyph;
 
@@ -48,7 +60,7 @@ Font* font_create(IDWriteFactory3* dwrite_factory, const wchar_t* font_name, con
 void font_destroy(Font* font);
 
 void glyph_cache_init(GlyphCache* glyph_cache, const uint16_t glyphs_length);
-void glyph_cache_pack_codepoints(GlyphCache* glyph_cache, const Font* font, const uint32_t* codepoints, const uint16_t codepoints_length);
+void glyph_cache_pack_codepoints(IDWriteFactory3* dwrite_factory, GlyphCache* glyph_cache, Font* font, const uint32_t* codepoints, const uint16_t codepoints_length);
 void glyph_cache_deinit(GlyphCache* glyph_cache);
 
 void glyph_cache_init_and_fill(const HWND window, GlyphCache* glyph_cache, const wchar_t* font_family);
