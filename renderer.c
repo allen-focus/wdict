@@ -451,7 +451,7 @@ void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const P
             .xmax = (float)(glyph->atlas_x + glyph->w),
             .ymax = (float)(glyph->atlas_y + glyph->h),
         };
-        renderer_rect_push(target_rect, texture_rect, (Color){ 0, 255, 0, 255 });
+        renderer_rect_push(target_rect, texture_rect, color);
 
         // Update x position for next char
         next_pos_x += (float)glyph->xadvance;
