@@ -25,6 +25,7 @@ typedef struct
     float target_rect[4];
     float texture_rect[4];
     uint8_t color[4];
+    float corner_radius;
 } Vertex;
 
 typedef struct
@@ -71,7 +72,7 @@ void swapchain_resize(const uint16_t client_width, const uint16_t client_height)
     // Resize swapchain
     UINT flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 #ifndef NDEBUG
-    j flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 #endif
     IDXGISwapChain1_ResizeBuffers(s_renderer_state.swapchain, 0, client_width, client_height, DXGI_FORMAT_UNKNOWN, flags);
 
@@ -237,10 +238,11 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
     {
         // clang-format off
         D3D11_INPUT_ELEMENT_DESC desc[] = {
-            // SemanticName,  SemanticIndex, Format,             InputSlot, AlignedByteOffset,              InputSlotClass,                InstanceDataStepRate
-            { "TARGET_RECT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, target_rect),  D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "TEXTURE_RECT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, texture_rect), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",        0, DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, color),        D3D11_INPUT_PER_INSTANCE_DATA, 1 }
+            // SemanticName,      SemanticIndex, Format,                         InputSlot, AlignedByteOffset,               InputSlotClass,                InstanceDataStepRate
+            { "TARGET_RECT",      0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, target_rect),   D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TEXTURE_RECT",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, texture_rect),  D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",            0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, color),         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "CORNER_RADIUS",    0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, corner_radius), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
         };
         // clang-format on
         ID3D11Device_CreateVertexShader(s_renderer_state.device, d3d11_vshader, sizeof(d3d11_vshader), NULL, &s_renderer_state.vertex_shader);
@@ -346,7 +348,7 @@ void renderer_deinit()
 // rect push
 //
 
-void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color)
+void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const float corner_radius)
 {
     Assert(s_vertex_stack.count != VERTEX_SIZE);
 
@@ -367,7 +369,10 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
         vertex->texture_rect[3] = texture_rect.ymax / (float)GLYPH_ATLAS_HEIGHT;
     }
     // Update color
-    memcpy(s_vertex_stack.data[s_vertex_stack.count].color, &color, sizeof(color));
+    memcpy(vertex->color, &color, sizeof(color));
+
+    // Update style parameters
+    vertex->corner_radius = corner_radius;
 
     s_vertex_stack.count++;
 }
@@ -415,7 +420,7 @@ uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* tex
 // draw
 //
 
-void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color)
+void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const float corner_radius)
 {
     Glyph* glyph_white = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
     Rect glyph_white_rect = {
@@ -424,7 +429,7 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push(rect, glyph_white_rect, color);
+    renderer_rect_push(rect, glyph_white_rect, color, corner_radius);
 }
 
 void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color)
@@ -447,7 +452,7 @@ void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const P
             .xmax = (float)(glyph->atlas_x + glyph->w),
             .ymax = (float)(glyph->atlas_y + glyph->h),
         };
-        renderer_rect_push(target_rect, texture_rect, color);
+        renderer_rect_push(target_rect, texture_rect, color, 0);
 
         // Update x position for next char
         next_pos_x += (float)glyph->xadvance;

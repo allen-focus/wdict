@@ -49,17 +49,21 @@ static void process_frame(const GlyphCache* glyph_cache)
 {
     const char* text = "Hello glyph";
     Pos text_pos = (Pos){ 50, 50 };
-    renderer_draw_text(glyph_cache, text, text_pos, (Color){ 0, 0, 0, 255 });
+    renderer_draw_text(glyph_cache, text, text_pos, (Color){ 0, 255, 0, 255 });
 
     // Draw top/bottom bar to test text width and height
     uint32_t text_width = renderer_get_text_width(glyph_cache, text);
     uint32_t text_height = renderer_get_text_height(glyph_cache, text);
 
     Rect text_top_bar = (Rect){ text_pos.x, text_pos.y - 1, text_pos.x + text_width, text_pos.y };
-    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 });
+    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 }, 0);
 
     Rect text_bottom_bar = (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1 };
-    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 });
+    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 }, 0);
+
+    // Test rounded corner
+    Rect rect_with_rounded_corner = (Rect){ 150, 150, 250, 250 };
+    renderer_draw_rect(glyph_cache, rect_with_rounded_corner, (Color){ 255, 255, 0, 255 }, 16);
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam, const LPARAM lparam)
