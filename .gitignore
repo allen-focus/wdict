@@ -1,3 +1,6 @@
-/build/ 
-/shaders/ 
-/.cache/ 
+/build/
+/shaders/
+/.cache/
+/*.10x
+/*.raddbg_user
+/*.raddbg_project

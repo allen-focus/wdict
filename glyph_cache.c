@@ -1,6 +1,6 @@
-#include "thirdparty/cdwrite.h"
 #include "glyph_cache.h"
 #include "lib.h"
+#include "thirdparty/cdwrite.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -62,7 +62,7 @@ void font_destroy(Font* font)
 // glyph
 //
 
-// TODO: For small font size, ClearType provides a better appearance compared to GrayScale. In the future, 
+// TODO: For small font size, ClearType provides a better appearance compared to GrayScale. In the future,
 // we might want to implement ClearType support. The [dwrite-hlsl](https://github.com/lhecker/dwrite-hlsl)
 // library could be useful for blending when this change is made.
 //
@@ -278,4 +278,3 @@ void glyph_cache_init_and_fill(const HWND window, GlyphCache* glyph_cache, const
     font_destroy(font);
     IDWriteFactory3_Release(dwrite_factory);
 }
-

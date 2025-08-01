@@ -19,19 +19,22 @@
 
 ///
 
-#define CLIENT_WIDTH 600
+#define CLIENT_WIDTH  600
 #define CLIENT_HEIGHT 400
+
 #define MAX_WINDOW_TITLE_LENGTH 64
 
 ///
 
-typedef struct {
+typedef struct
+{
     uint16_t client_width;
     uint16_t client_height;
     void (*on_resize)(uint16_t, uint16_t);
 } UI_Context;
 
-typedef struct {
+typedef struct
+{
     UI_Context* ui_context;
     GlyphCache* glyph_cache;
 } App_Context;
@@ -52,7 +55,7 @@ static void process_frame(const GlyphCache* glyph_cache)
     uint32_t text_width = renderer_get_text_width(glyph_cache, text);
     uint32_t text_height = renderer_get_text_height(glyph_cache, text);
 
-    Rect text_top_bar = (Rect){ text_pos.x, text_pos.y-1, text_pos.x + text_width, text_pos.y };
+    Rect text_top_bar = (Rect){ text_pos.x, text_pos.y - 1, text_pos.x + text_width, text_pos.y };
     renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 });
 
     Rect text_bottom_bar = (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1 };
@@ -67,7 +70,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
         App_Context* app_context = NULL;
         if (message == WM_CREATE)
         {
-            CREATESTRUCT *create = (CREATESTRUCT*)(lparam);
+            CREATESTRUCT* create = (CREATESTRUCT*)(lparam);
             app_context = (App_Context*)(create->lpCreateParams);
             SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)app_context);
         }
@@ -158,13 +161,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
     HWND window;
     {
         // Set the client position to screen center
-        int screen_width  = GetSystemMetrics(SM_CXSCREEN);
+        int screen_width = GetSystemMetrics(SM_CXSCREEN);
         int screen_height = GetSystemMetrics(SM_CYSCREEN);
-        int x             = (screen_width - CLIENT_WIDTH) / 2;
-        int y             = (screen_height - CLIENT_HEIGHT) / 2;
+        int x = (screen_width - CLIENT_WIDTH) / 2;
+        int y = (screen_height - CLIENT_HEIGHT) / 2;
 
         // Give the client area rectangle, get back the entire window rectangle
-        RECT rect         = { x, y, x + CLIENT_WIDTH, y + CLIENT_HEIGHT };
+        RECT rect = { x, y, x + CLIENT_WIDTH, y + CLIENT_HEIGHT };
         DWORD window_style = WS_OVERLAPPEDWINDOW;
         AdjustWindowRectEx(&rect, window_style, 0, 0);
 

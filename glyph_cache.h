@@ -3,18 +3,18 @@
 #include "thirdparty/cdwrite.h"
 #include <stdint.h>
 
-#define GLYPH_ATLAS_WIDTH 1024
+#define GLYPH_ATLAS_WIDTH  1024
 #define GLYPH_ATLAS_HEIGHT 1024
 
 #define FONT_SIZE 64
 
-#define ASCII_START 32
+#define ASCII_START   32
 #define GLYPHS_LENGTH (127 - ASCII_START + 1 + 1) // ascii glyphs ([32, 126]) plus a close icon glyph and a white region
-
 
 ///
 
-typedef struct {
+typedef struct
+{
     IDWriteFontFace* face;
     IDWriteFontFace3* face3;
 
@@ -27,7 +27,8 @@ typedef struct {
     uint16_t english_capital_height;
 } Font;
 
-typedef struct {
+typedef struct
+{
     Font* font;
 
     // glyph metrics
@@ -39,7 +40,8 @@ typedef struct {
     uint16_t atlas_x, atlas_y;
 } Glyph;
 
-typedef struct {
+typedef struct
+{
     uint8_t* bitmap;
     uint16_t w, h;
     // Manages the next position for placing glyphs within the atlas
@@ -49,7 +51,8 @@ typedef struct {
     uint16_t maxy;
 } GlyphAtlas;
 
-typedef struct {
+typedef struct
+{
     Glyph* glyphs;
     GlyphAtlas* atlas;
 } GlyphCache;
