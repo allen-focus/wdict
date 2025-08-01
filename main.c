@@ -69,9 +69,9 @@ static void process_frame(const GlyphCache* glyph_cache)
     renderer_draw_rect(glyph_cache, rect_with_rounded_corner, (Color){ 255, 255, 0, 255 }, 16, 8,
                        (Color){ 0, 0, 255, 255 }, 8, (Pos){ 0, 0 });
 
-    Rect rect_with_rounded_corner2 = (Rect){ 350, 50, 400, 200 };
-    renderer_draw_rect(glyph_cache, rect_with_rounded_corner2, (Color){ 163, 220, 255, 255 }, 16, 1,
-                       (Color){ 100, 100, 255, 255 }, 4, (Pos){ 8, 16 });
+    Rect rect_with_rounded_corner2 = (Rect){ 350, 50, 550, 200 };
+    renderer_draw_rect(glyph_cache, rect_with_rounded_corner2, (Color){ 247, 247, 247, 255 }, 8, 1,
+                       (Color){ 230, 230, 230, 255 }, 4, (Pos){ 0, 2 });
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam,

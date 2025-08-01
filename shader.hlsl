@@ -251,7 +251,7 @@ float4 ps(PS_INPUT input) : SV_TARGET
     }
 
     // Alpha compositing using Porter-Duff "Over" operation
-    float3 shadow_color = float3(0, 0, 0);  // black shadow
+    float3 shadow_color = float3(0.8, 0.8, 0.8);
     float3 composed_rgb_linear = base_alpha * base_linear + shadow_alpha * shadow_color * (1.0 - base_alpha);
     float composed_alpha = base_alpha + shadow_alpha * (1.0 - base_alpha);
 

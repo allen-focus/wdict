@@ -310,7 +310,7 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
     };
 
     // Clear screen
-    FLOAT color[4] = { 0.3f, 0.6f, 0.9f, 1.0f };
+    FLOAT color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     ID3D11DeviceContext_ClearRenderTargetView(s_renderer_state.context, s_renderer_state.render_target_view, color);
 
     // IA-VS-RS-PS-OM, Draw
