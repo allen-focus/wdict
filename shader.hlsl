@@ -18,6 +18,8 @@ struct VS_Input
     float corner_radius : CORNER_RADIUS;
     float border_thickness : BORDER_THICKNESS;
     float4 border_color : BORDER_COLOR;
+    float shadow_sigma : SHADOW_SIGMA;
+    float2 shadow_offset : SHADOW_OFFSET;
     uint vertex_id : SV_VertexID;
 };
 
@@ -30,6 +32,8 @@ struct PS_INPUT
     float2 target_rect_center : TARGET_RECT_CENTER;
     float corner_radius : CORNER_RADIUS;
     float border_thickness : BORDER_THICKNESS;
+    float shadow_sigma : SHADOW_SIGMA;
+    float2 shadow_offset : SHADOW_OFFSET;
     float4 border_color : BORDER_COLOR;
 };
 
@@ -42,9 +46,9 @@ PS_INPUT vs(VS_Input input)
     static float2 vertices[] =
     {
         { -1, -1 },
-        { + 1, -1 },
-        { -1, + 1 },
-        { + 1, + 1 },
+        { +1, -1 },
+        { -1, +1 },
+        { +1, +1 },
     };
 
     // Calculate target position (screen space)
@@ -69,6 +73,8 @@ PS_INPUT vs(VS_Input input)
     output.corner_radius = input.corner_radius;
     output.border_thickness = input.border_thickness;
     output.border_color = input.border_color;
+    output.shadow_sigma = input.shadow_sigma;
+    output.shadow_offset = input.shadow_offset;
     return output;
 }
 
@@ -92,7 +98,7 @@ float rect_sdf(float2 distance_to_shrunk_corner, float corner_radius)
 }
 
 //
-// sRGB decode & encode
+// sRGB decode & encode (TODO: Need to learn about sRGB)
 //
 
 float3 sRGBToLinear(float3 srgb)
@@ -115,6 +121,67 @@ float3 linearToSRGB(float3 lin)
     );
 }
 
+
+//
+// Rounded Rectangle Blur (see: https://madebyevan.com/shaders/fast-rounded-rectangle-shadows)
+//
+
+// NOTE: Raph Levien post a relative blog that step further based Evan Wallace's method.
+// See: https://raphlinus.github.io/graphics/2020/04/21/blurred-rounded-rects.html
+
+// A standard gaussian function, used for weighting samples
+float gaussian(float x, float sigma)
+{
+    const float pi = 3.141592653589793;
+    return exp(-(x * x) / (2.0 * sigma * sigma)) / (sqrt(2.0 * pi) * sigma);
+}
+
+// Approximate the error function (erf) for a float2 input
+float2 erf(float2 x)
+{
+    float2 s = sign(x);
+    float2 a = abs(x);
+    x = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+    x *= x;
+    return s - s / (x * x);
+}
+
+// Return the blurred mask along the x dimension
+float roundedBoxShadowX(float x, float y, float sigma, float corner, float2 halfSize)
+{
+    float delta = min(halfSize.y - corner - abs(y), 0.0);
+    float curved = halfSize.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
+    float2 erfArgs = (x + float2(-curved, curved)) * (sqrt(0.5) / sigma);
+    float2 integral = 0.5 + 0.5 * erf(erfArgs);
+    return integral.y - integral.x;
+}
+
+// Return the mask for the shadow of a box from lower to upper
+float roundedBoxShadow(float2 lower, float2 upper, float2 pixel, float sigma, float corner)
+{
+    // Center everything
+    float2 center = (lower + upper) * 0.5;
+    float2 halfSize = (upper - lower) * 0.5;
+    pixel -= center;
+
+    float low = pixel.y - halfSize.y;
+    float high = pixel.y + halfSize.y;
+    float start = clamp(-3.0 * sigma, low, high);
+    float end = clamp(3.0 * sigma, low, high);
+
+    float step = (end - start) / 4.0;
+    float y = start + step * 0.5;
+    float value = 0.0;
+
+    [unroll]
+    for (int i = 0; i < 4; i++) {
+        value += roundedBoxShadowX(pixel.x, pixel.y - y, sigma, corner, halfSize) * gaussian(y, sigma) * step;
+        y += step;
+    }
+
+    return value;
+}
+
 //
 // pixel shader
 //
@@ -123,7 +190,7 @@ float4 ps(PS_INPUT input) : SV_TARGET
 {
     float glyph_texture_grayscale_ratio = glyph_atlas_texture.Sample(mysampler, input.uv).r;
     float4 texture_based_color = float4(input.color.rgb, input.color.a * glyph_texture_grayscale_ratio);
-    
+
     // SDF-based rounded rectangle generation
     float2 distance_to_shrunk_corner = calculate_distance_to_shrunk_corner(
         input.position.xy, 
@@ -131,13 +198,13 @@ float4 ps(PS_INPUT input) : SV_TARGET
         input.target_rect_half_size, 
         input.corner_radius
     );
-    
+
     // NOTE: The SDF function calculates distance to the geometric boundary of the shape,
     // but we sample at pixel centers. Need to create a half-pixel (0.5) offset to distance.
     // See: https://www.shadertoy.com/view/dtsXzH#
     float sdf_outer = rect_sdf(distance_to_shrunk_corner, input.corner_radius) + 0.5;
     float sdf_inner = sdf_outer + input.border_thickness;
-    
+
     // Anti-aliased alpha mask generation
     float is_outer = 1.0 - smoothstep(0.0, 1.0, sdf_outer);
     float is_inner = 1.0 - smoothstep(0.0, 1.0, sdf_inner);
@@ -145,10 +212,30 @@ float4 ps(PS_INPUT input) : SV_TARGET
     // Color space conversion and blending
     float3 border_linear = sRGBToLinear(input.border_color.rgb);
     float3 texture_linear = sRGBToLinear(texture_based_color.rgb);
-    float3 mixed_linear = lerp(border_linear, texture_linear, is_inner);
-    float3 final_srgb = linearToSRGB(mixed_linear);
+    float3 base_linear = lerp(border_linear, texture_linear, is_inner);
+    float base_alpha = texture_based_color.a * is_outer;
 
-    // The outer mask ensures pixels outside the rounded rectangle are fully transparent
-    float4 final_color = float4(final_srgb, texture_based_color.a * is_outer);
-    return final_color;
+    // Calculate shadow
+    float shadow_alpha = 0;
+    if (input.shadow_sigma)
+    {
+        float2 rect_min = input.target_rect_center - input.target_rect_half_size;
+        float2 rect_max = input.target_rect_center + input.target_rect_half_size;
+        shadow_alpha = roundedBoxShadow(
+            rect_min + input.shadow_offset,
+            rect_max + input.shadow_offset,
+            input.position.xy,
+            input.shadow_sigma,
+            input.corner_radius
+        );
+    }
+
+    // Alpha compositing using Porter-Duff "Over" operation
+    float3 shadow_color = float3(0, 0, 0);  // black shadow
+    float3 composed_rgb_linear = base_alpha * base_linear + shadow_alpha * shadow_color * (1.0 - base_alpha);
+    float composed_alpha = base_alpha + shadow_alpha * (1.0 - base_alpha);
+
+    // Convert back to sRGB and handle premultiplied alpha (1e-6 to avoid division by zero when alpha is 0)
+    float3 shadowed_srgb = linearToSRGB(composed_rgb_linear / max(composed_alpha, 1e-6));
+    return float4(shadowed_srgb, composed_alpha);
 }

@@ -28,6 +28,8 @@ typedef struct
     float corner_radius;
     float border_thickness;
     uint8_t border_color[4];
+    float shadow_sigma;
+    float shadow_offset[2];
 } Vertex;
 
 typedef struct
@@ -253,6 +255,8 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
             { "CORNER_RADIUS",    0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, corner_radius),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "BORDER_THICKNESS", 0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, border_thickness), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "BORDER_COLOR",     0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, border_color),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "SHADOW_SIGMA",     0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, shadow_sigma),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "SHADOW_OFFSET",    0,             DXGI_FORMAT_R32G32_FLOAT,       0,         offsetof(Vertex, shadow_offset),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
         };
         // clang-format on
         ID3D11Device_CreateVertexShader(s_renderer_state.device, d3d11_vshader, sizeof(d3d11_vshader), NULL,
@@ -366,7 +370,7 @@ void renderer_deinit()
 //
 
 void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const float corner_radius,
-                        const float border_thickness, const Color border_color)
+                        const float border_thickness, const Color border_color, const float shadow_sigma, const Pos shadow_offset)
 {
     Assert(s_vertex_stack.count != VERTEX_SIZE);
 
@@ -393,6 +397,9 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
     vertex->corner_radius = corner_radius;
     vertex->border_thickness = border_thickness;
     memcpy(vertex->border_color, &border_color, sizeof(border_color));
+    vertex->shadow_sigma = shadow_sigma;
+    vertex->shadow_offset[0] = shadow_offset.x;
+    vertex->shadow_offset[1] = shadow_offset.y;
 
     s_vertex_stack.count++;
 }
@@ -441,7 +448,7 @@ uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* tex
 //
 
 void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const float corner_radius,
-                        const float border_thickness, const Color border_color)
+                        const float border_thickness, const Color border_color, const float shadow_sigma, const Pos shadow_offset)
 {
     Glyph* glyph_white = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
     Rect glyph_white_rect = {
@@ -450,7 +457,7 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push(rect, glyph_white_rect, color, corner_radius, border_thickness, border_color);
+    renderer_rect_push(rect, glyph_white_rect, color, corner_radius, border_thickness, border_color, shadow_sigma, shadow_offset);
 }
 
 void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color)
@@ -473,7 +480,7 @@ void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const P
             .xmax = (float)(glyph->atlas_x + glyph->w),
             .ymax = (float)(glyph->atlas_y + glyph->h),
         };
-        renderer_rect_push(target_rect, texture_rect, color, 0, 0, (Color){ 0, 0, 0, 0 });
+        renderer_rect_push(target_rect, texture_rect, color, 0, 0, (Color){ 0, 0, 0, 0 }, 0, (Pos){ 0, 0 });
 
         // Update x position for next char
         next_pos_x += (float)glyph->xadvance;

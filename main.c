@@ -56,16 +56,22 @@ static void process_frame(const GlyphCache* glyph_cache)
     uint32_t text_height = renderer_get_text_height(glyph_cache, text);
 
     Rect text_top_bar = (Rect){ text_pos.x, text_pos.y - 1, text_pos.x + text_width, text_pos.y };
-    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 });
+    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 }, 0,
+                       (Pos){ 0, 0 });
 
     Rect text_bottom_bar =
         (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1 };
-    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 });
+    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 }, 0,
+                       (Pos){ 0, 0 });
 
-    // Test rounded corner
-    Rect rect_with_rounded_corner = (Rect){ 150, 150, 250, 250 };
+    // Test rounded shadow
+    Rect rect_with_rounded_corner = (Rect){ 150, 150, 300, 250 };
     renderer_draw_rect(glyph_cache, rect_with_rounded_corner, (Color){ 255, 255, 0, 255 }, 16, 8,
-                       (Color){ 0, 0, 255, 255 });
+                       (Color){ 0, 0, 255, 255 }, 8, (Pos){ 0, 0 });
+
+    Rect rect_with_rounded_corner2 = (Rect){ 350, 50, 400, 200 };
+    renderer_draw_rect(glyph_cache, rect_with_rounded_corner2, (Color){ 163, 220, 255, 255 }, 16, 1,
+                       (Color){ 100, 100, 255, 255 }, 4, (Pos){ 4, 16 });
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam,
@@ -134,8 +140,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
             {
                 ui_context->on_resize(ui_context->client_width, ui_context->client_height);
 
-                // Force an immediate repaint of the entire client area to ensure the updated content is rendered
-                // promptly
+                // Force an immediate repaint of entire client area to ensure the updated content is rendered promptly
                 InvalidateRect(window, NULL, FALSE);
             }
             return 0;
