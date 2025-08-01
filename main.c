@@ -56,17 +56,20 @@ static void process_frame(const GlyphCache* glyph_cache)
     uint32_t text_height = renderer_get_text_height(glyph_cache, text);
 
     Rect text_top_bar = (Rect){ text_pos.x, text_pos.y - 1, text_pos.x + text_width, text_pos.y };
-    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 }, 0);
+    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 });
 
-    Rect text_bottom_bar = (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1 };
-    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 }, 0);
+    Rect text_bottom_bar =
+        (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1 };
+    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 });
 
     // Test rounded corner
     Rect rect_with_rounded_corner = (Rect){ 150, 150, 250, 250 };
-    renderer_draw_rect(glyph_cache, rect_with_rounded_corner, (Color){ 255, 255, 0, 255 }, 16);
+    renderer_draw_rect(glyph_cache, rect_with_rounded_corner, (Color){ 255, 255, 0, 255 }, 16, 8,
+                       (Color){ 0, 0, 255, 255 });
 }
 
-static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam, const LPARAM lparam)
+static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam,
+                                         const LPARAM lparam)
 {
     UI_Context* ui_context = NULL;
     GlyphCache* glyph_cache = NULL;
@@ -115,7 +118,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
                 elapsed_microseconds.QuadPart /= frequency.QuadPart;
 
                 // Set window title to show frame time
-                swprintf(s_window_title, MAX_WINDOW_TITLE_LENGTH, L"Frame Time: %lld μs", elapsed_microseconds.QuadPart);
+                swprintf(s_window_title, MAX_WINDOW_TITLE_LENGTH, L"Frame Time: %lld μs",
+                         elapsed_microseconds.QuadPart);
                 SetWindowTextW(window, s_window_title);
 #endif
             }
@@ -130,7 +134,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
             {
                 ui_context->on_resize(ui_context->client_width, ui_context->client_height);
 
-                // Force an immediate repaint of the entire client area to ensure the updated content is rendered promptly
+                // Force an immediate repaint of the entire client area to ensure the updated content is rendered
+                // promptly
                 InvalidateRect(window, NULL, FALSE);
             }
             return 0;
@@ -186,9 +191,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
         App_Context* app_context = malloc(sizeof(App_Context));
         app_context->ui_context = ui_context;
         app_context->glyph_cache = glyph_cache;
-        window = CreateWindowExW(0, wc.lpszClassName, s_window_title, window_style,
-                                 rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
-                                 NULL, NULL, wc.hInstance, app_context);
+        window = CreateWindowExW(0, wc.lpszClassName, s_window_title, window_style, rect.left, rect.top,
+                                 rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, app_context);
     }
 
     // Initialize ui context & glyph cache & renderer

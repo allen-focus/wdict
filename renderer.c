@@ -26,6 +26,8 @@ typedef struct
     float texture_rect[4];
     uint8_t color[4];
     float corner_radius;
+    float border_thickness;
+    uint8_t border_color[4];
 } Vertex;
 
 typedef struct
@@ -74,12 +76,14 @@ void swapchain_resize(const uint16_t client_width, const uint16_t client_height)
 #ifndef NDEBUG
     flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 #endif
-    IDXGISwapChain1_ResizeBuffers(s_renderer_state.swapchain, 0, client_width, client_height, DXGI_FORMAT_UNKNOWN, flags);
+    IDXGISwapChain1_ResizeBuffers(s_renderer_state.swapchain, 0, client_width, client_height, DXGI_FORMAT_UNKNOWN,
+                                  flags);
 
     // Create render target view for new backbuffer texture
     ID3D11Texture2D* texture;
     IDXGISwapChain1_GetBuffer(s_renderer_state.swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
-    ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, NULL, &s_renderer_state.render_target_view);
+    ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, NULL,
+                                        &s_renderer_state.render_target_view);
     ID3D11Texture2D_Release(texture);
 }
 
@@ -96,8 +100,8 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
         flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
         D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0 };
-        D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, levels, ARRAYSIZE(levels),
-                          D3D11_SDK_VERSION, &s_renderer_state.device, NULL, &s_renderer_state.context);
+        D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
+                          &s_renderer_state.device, NULL, &s_renderer_state.context);
     }
 
 #ifndef NDEBUG
@@ -144,18 +148,22 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
 #ifndef NDEBUG
         desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING,
 #endif
-            IDXGIFactory2_CreateSwapChainForHwnd(factory, (IUnknown*)s_renderer_state.device, window, &desc, NULL, NULL, &s_renderer_state.swapchain);
+            IDXGIFactory2_CreateSwapChainForHwnd(factory, (IUnknown*)s_renderer_state.device, window, &desc, NULL, NULL,
+                                                 &s_renderer_state.swapchain);
         IDXGIFactory_MakeWindowAssociation(factory, window, DXGI_MWA_NO_ALT_ENTER);
         IDXGIFactory2_Release(factory);
-        IDXGISwapChain1_QueryInterface(s_renderer_state.swapchain, &IID_IDXGISwapChain2, (void**)&s_renderer_state.swapchain2);
-        s_renderer_state.frame_latency_waitable_object = IDXGISwapChain2_GetFrameLatencyWaitableObject(s_renderer_state.swapchain2);
+        IDXGISwapChain1_QueryInterface(s_renderer_state.swapchain, &IID_IDXGISwapChain2,
+                                       (void**)&s_renderer_state.swapchain2);
+        s_renderer_state.frame_latency_waitable_object =
+            IDXGISwapChain2_GetFrameLatencyWaitableObject(s_renderer_state.swapchain2);
     }
 
     // Create render target view for backbuffer texture
     {
         ID3D11Texture2D* texture;
         IDXGISwapChain1_GetBuffer(s_renderer_state.swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
-        ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, NULL, &s_renderer_state.render_target_view);
+        ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, NULL,
+                                            &s_renderer_state.render_target_view);
         ID3D11Texture2D_Release(texture);
     }
 
@@ -174,13 +182,12 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
     // Create blend state
     {
         D3D11_BLEND_DESC desc = {
-            .RenderTarget[0] = {
-                                .BlendEnable = TRUE,
+            .RenderTarget[0] = { .BlendEnable = TRUE,
                                 .SrcBlend = D3D11_BLEND_SRC_ALPHA,
                                 .DestBlend = D3D11_BLEND_INV_SRC_ALPHA,
                                 .BlendOp = D3D11_BLEND_OP_ADD,
                                 .SrcBlendAlpha = D3D11_BLEND_ONE,
-                                .DestBlendAlpha = D3D11_BLEND_ZERO,
+                                .DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA,
                                 .BlendOpAlpha = D3D11_BLEND_OP_ADD,
                                 .RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL }
         };
@@ -208,8 +215,9 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
     }
 
     // Create texture view (glyph atlas)
-    ID3D11Device_CreateShaderResourceView(s_renderer_state.device, (ID3D11Resource*)s_renderer_state.glyph_atlas_texture,
-                                          0, &s_renderer_state.glyph_atlas_shader_resource_view);
+    ID3D11Device_CreateShaderResourceView(s_renderer_state.device,
+                                          (ID3D11Resource*)s_renderer_state.glyph_atlas_texture, 0,
+                                          &s_renderer_state.glyph_atlas_shader_resource_view);
 
     // Create vertex buffer
     {
@@ -238,16 +246,21 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
     {
         // clang-format off
         D3D11_INPUT_ELEMENT_DESC desc[] = {
-            // SemanticName,      SemanticIndex, Format,                         InputSlot, AlignedByteOffset,               InputSlotClass,                InstanceDataStepRate
-            { "TARGET_RECT",      0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, target_rect),   D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "TEXTURE_RECT",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, texture_rect),  D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",            0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, color),         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "CORNER_RADIUS",    0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, corner_radius), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            // SemanticName,      SemanticIndex, Format,                         InputSlot, AlignedByteOffset,                  InputSlotClass,                InstanceDataStepRate
+            { "TARGET_RECT",      0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, target_rect),      D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TEXTURE_RECT",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, texture_rect),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",            0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, color),            D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "CORNER_RADIUS",    0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, corner_radius),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "BORDER_THICKNESS", 0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, border_thickness), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "BORDER_COLOR",     0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, border_color),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
         };
         // clang-format on
-        ID3D11Device_CreateVertexShader(s_renderer_state.device, d3d11_vshader, sizeof(d3d11_vshader), NULL, &s_renderer_state.vertex_shader);
-        ID3D11Device_CreatePixelShader(s_renderer_state.device, d3d11_pshader, sizeof(d3d11_pshader), NULL, &s_renderer_state.pixel_shader);
-        ID3D11Device_CreateInputLayout(s_renderer_state.device, desc, ARRAYSIZE(desc), d3d11_vshader, sizeof(d3d11_vshader), &s_renderer_state.layout);
+        ID3D11Device_CreateVertexShader(s_renderer_state.device, d3d11_vshader, sizeof(d3d11_vshader), NULL,
+                                        &s_renderer_state.vertex_shader);
+        ID3D11Device_CreatePixelShader(s_renderer_state.device, d3d11_pshader, sizeof(d3d11_pshader), NULL,
+                                       &s_renderer_state.pixel_shader);
+        ID3D11Device_CreateInputLayout(s_renderer_state.device, desc, ARRAYSIZE(desc), d3d11_vshader,
+                                       sizeof(d3d11_vshader), &s_renderer_state.layout);
     }
 }
 
@@ -256,7 +269,8 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
     // Map vertex buffer
     {
         D3D11_MAPPED_SUBRESOURCE mapped;
-        ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+        ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0,
+                                D3D11_MAP_WRITE_DISCARD, 0, &mapped);
         memcpy(mapped.pData, s_vertex_stack.data, sizeof(Vertex) * s_vertex_stack.count);
         ID3D11DeviceContext_Unmap(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0);
     }
@@ -274,7 +288,8 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
             { (R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f },
         };
         D3D11_MAPPED_SUBRESOURCE mapped;
-        ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.constant_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+        ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.constant_buffer, 0,
+                                D3D11_MAP_WRITE_DISCARD, 0, &mapped);
         memcpy(mapped.pData, mvp, sizeof(mvp));
         ID3D11DeviceContext_Unmap(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.constant_buffer, 0);
     }
@@ -294,20 +309,22 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
     ID3D11DeviceContext_ClearRenderTargetView(s_renderer_state.context, s_renderer_state.render_target_view, color);
 
     // IA-VS-RS-PS-OM, Draw
+    // clang-format off
     UINT stride = sizeof(Vertex);
     UINT offset = 0;
-    ID3D11DeviceContext_IASetInputLayout(s_renderer_state.context, s_renderer_state.layout); // IA: Input Assembly
+    ID3D11DeviceContext_IASetInputLayout(s_renderer_state.context, s_renderer_state.layout);
     ID3D11DeviceContext_IASetPrimitiveTopology(s_renderer_state.context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     ID3D11DeviceContext_IASetVertexBuffers(s_renderer_state.context, 0, 1, &s_renderer_state.vertex_buffer, &stride, &offset);
     ID3D11DeviceContext_VSSetConstantBuffers(s_renderer_state.context, 0, 1, &s_renderer_state.constant_buffer);
-    ID3D11DeviceContext_VSSetShader(s_renderer_state.context, s_renderer_state.vertex_shader, NULL, 0); // VS: Vertex Shader
-    ID3D11DeviceContext_RSSetViewports(s_renderer_state.context, 1, &viewport); // RS: Rasterizer Stage
-    ID3D11DeviceContext_PSSetShader(s_renderer_state.context, s_renderer_state.pixel_shader, NULL, 0); // PS: Pixel Shader
+    ID3D11DeviceContext_VSSetShader(s_renderer_state.context, s_renderer_state.vertex_shader, NULL, 0);
+    ID3D11DeviceContext_RSSetViewports(s_renderer_state.context, 1, &viewport);
+    ID3D11DeviceContext_PSSetShader(s_renderer_state.context, s_renderer_state.pixel_shader, NULL, 0);
     ID3D11DeviceContext_PSSetShaderResources(s_renderer_state.context, 0, 1, &s_renderer_state.glyph_atlas_shader_resource_view);
     ID3D11DeviceContext_PSSetSamplers(s_renderer_state.context, 0, 1, &s_renderer_state.sampler_state);
-    ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 1, &s_renderer_state.render_target_view, NULL); // OM: Output Merger
+    ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 1, &s_renderer_state.render_target_view, NULL);
     ID3D11DeviceContext_OMSetBlendState(s_renderer_state.context, s_renderer_state.blend_state, NULL, 0xffffffff);
     ID3D11DeviceContext_DrawInstanced(s_renderer_state.context, 4, s_vertex_stack.count, 0, 0);
+    // clang-format on 
 
     // Present
     // TODO: Need investigate the input latency issue more
@@ -348,7 +365,8 @@ void renderer_deinit()
 // rect push
 //
 
-void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const float corner_radius)
+void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const float corner_radius,
+                        const float border_thickness, const Color border_color)
 {
     Assert(s_vertex_stack.count != VERTEX_SIZE);
 
@@ -373,6 +391,8 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 
     // Update style parameters
     vertex->corner_radius = corner_radius;
+    vertex->border_thickness = border_thickness;
+    memcpy(vertex->border_color, &border_color, sizeof(border_color));
 
     s_vertex_stack.count++;
 }
@@ -420,7 +440,8 @@ uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* tex
 // draw
 //
 
-void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const float corner_radius)
+void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const float corner_radius,
+                        const float border_thickness, const Color border_color)
 {
     Glyph* glyph_white = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
     Rect glyph_white_rect = {
@@ -429,7 +450,7 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push(rect, glyph_white_rect, color, corner_radius);
+    renderer_rect_push(rect, glyph_white_rect, color, corner_radius, border_thickness, border_color);
 }
 
 void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color)
@@ -452,7 +473,7 @@ void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const P
             .xmax = (float)(glyph->atlas_x + glyph->w),
             .ymax = (float)(glyph->atlas_y + glyph->h),
         };
-        renderer_rect_push(target_rect, texture_rect, color, 0);
+        renderer_rect_push(target_rect, texture_rect, color, 0, 0, (Color){ 0, 0, 0, 0 });
 
         // Update x position for next char
         next_pos_x += (float)glyph->xadvance;
