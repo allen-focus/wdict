@@ -191,11 +191,31 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float glyph_texture_grayscale_ratio = glyph_atlas_texture.Sample(mysampler, input.uv).r;
     float4 texture_based_color = float4(input.color.rgb, input.color.a * glyph_texture_grayscale_ratio);
 
+    // Calculate original rect by shrinking target rect based on shadow parameters
+    float2 original_rect_half_size = input.target_rect_half_size;
+    float2 original_rect_center = input.target_rect_center;
+    if (input.shadow_sigma > 0)
+    {
+        float shadow_radius = 3.0 * input.shadow_sigma;
+
+        // Calculate how much we expanded in each direction
+        float expand_left = shadow_radius + max(0, -input.shadow_offset.x);
+        float expand_right = shadow_radius + max(0, input.shadow_offset.x);
+        float expand_top = shadow_radius + max(0, -input.shadow_offset.y);
+        float expand_bottom = shadow_radius + max(0, input.shadow_offset.y);
+
+        // Shrink back to original size
+        original_rect_half_size.x -= (expand_left + expand_right) * 0.5;
+        original_rect_half_size.y -= (expand_top + expand_bottom) * 0.5;
+        original_rect_center.x -= input.shadow_offset.x * 0.5;
+        original_rect_center.y -= input.shadow_offset.y * 0.5;
+    }
+
     // SDF-based rounded rectangle generation
     float2 distance_to_shrunk_corner = calculate_distance_to_shrunk_corner(
-        input.position.xy, 
-        input.target_rect_center, 
-        input.target_rect_half_size, 
+        input.position.xy,
+        original_rect_center,
+        original_rect_half_size,
         input.corner_radius
     );
 
@@ -219,8 +239,8 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float shadow_alpha = 0;
     if (input.shadow_sigma)
     {
-        float2 rect_min = input.target_rect_center - input.target_rect_half_size;
-        float2 rect_max = input.target_rect_center + input.target_rect_half_size;
+        float2 rect_min = original_rect_center - original_rect_half_size;
+        float2 rect_max = original_rect_center + original_rect_half_size;
         shadow_alpha = roundedBoxShadow(
             rect_min + input.shadow_offset,
             rect_max + input.shadow_offset,

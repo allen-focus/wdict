@@ -23,6 +23,7 @@
 typedef struct
 {
     float target_rect[4];
+    float original_rect[4];
     float texture_rect[4];
     uint8_t color[4];
     float corner_radius;
@@ -328,7 +329,7 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
     ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 1, &s_renderer_state.render_target_view, NULL);
     ID3D11DeviceContext_OMSetBlendState(s_renderer_state.context, s_renderer_state.blend_state, NULL, 0xffffffff);
     ID3D11DeviceContext_DrawInstanced(s_renderer_state.context, 4, s_vertex_stack.count, 0, 0);
-    // clang-format on 
+    // clang-format on
 
     // Present
     // TODO: Need investigate the input latency issue more
@@ -450,6 +451,17 @@ uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* tex
 void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const float corner_radius,
                         const float border_thickness, const Color border_color, const float shadow_sigma, const Pos shadow_offset)
 {
+    // Calculate expanded rect
+    Rect expanded_rect = rect;
+    if (shadow_sigma > 0)
+    {
+        float shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
+        expanded_rect.xmin -= shadow_radius + max(0, -shadow_offset.x);
+        expanded_rect.xmax += shadow_radius + max(0, shadow_offset.x);
+        expanded_rect.ymin -= shadow_radius + max(0, -shadow_offset.y);
+        expanded_rect.ymax += shadow_radius + max(0, shadow_offset.y);
+    }
+
     Glyph* glyph_white = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
     Rect glyph_white_rect = {
         .xmin = (float)glyph_white->atlas_x,
@@ -457,7 +469,7 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push(rect, glyph_white_rect, color, corner_radius, border_thickness, border_color, shadow_sigma, shadow_offset);
+    renderer_rect_push(expanded_rect, glyph_white_rect, color, corner_radius, border_thickness, border_color, shadow_sigma, shadow_offset);
 }
 
 void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color)

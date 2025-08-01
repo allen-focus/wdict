@@ -71,7 +71,7 @@ static void process_frame(const GlyphCache* glyph_cache)
 
     Rect rect_with_rounded_corner2 = (Rect){ 350, 50, 400, 200 };
     renderer_draw_rect(glyph_cache, rect_with_rounded_corner2, (Color){ 163, 220, 255, 255 }, 16, 1,
-                       (Color){ 100, 100, 255, 255 }, 4, (Pos){ 4, 16 });
+                       (Color){ 100, 100, 255, 255 }, 4, (Pos){ 8, 16 });
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam,
