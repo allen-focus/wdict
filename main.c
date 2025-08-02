@@ -56,22 +56,21 @@ static void process_frame(const GlyphCache* glyph_cache)
     uint32_t text_height = renderer_get_text_height(glyph_cache, text);
 
     Rect text_top_bar = (Rect){ text_pos.x, text_pos.y - 1, text_pos.x + text_width, text_pos.y };
-    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 }, 0,
-                       (Pos){ 0, 0 });
+    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 }, 0);
 
     Rect text_bottom_bar =
         (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1 };
-    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 }, 0,
-                       (Pos){ 0, 0 });
+    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 }, 0);
 
     // Test rounded shadow
-    Rect rect_with_rounded_corner = (Rect){ 150, 150, 300, 250 };
-    renderer_draw_rect(glyph_cache, rect_with_rounded_corner, (Color){ 255, 255, 0, 255 }, 16, 8,
-                       (Color){ 0, 0, 255, 255 }, 8, (Pos){ 0, 0 });
+    Rect rect = (Rect){ 100, 100, 500, 350 };
+    renderer_draw_rect(glyph_cache, rect, (Color){ 247, 247, 247, 255 }, 8, 1, (Color){ 230, 230, 230, 255 }, 1);
 
-    Rect rect_with_rounded_corner2 = (Rect){ 350, 50, 550, 200 };
-    renderer_draw_rect(glyph_cache, rect_with_rounded_corner2, (Color){ 247, 247, 247, 255 }, 8, 1,
-                       (Color){ 230, 230, 230, 255 }, 4, (Pos){ 0, 2 });
+    Rect sub_rect = (Rect){ 105, 105, 495, 135 };
+    renderer_draw_rect(glyph_cache, sub_rect, (Color){ 234, 234, 234, 255 }, 8, 0, (Color){ 0, 0, 0, 0 }, 0);
+
+    Rect rect2 = (Rect){ 350, 50, 550, 300 };
+    renderer_draw_rect(glyph_cache, rect2, (Color){ 247, 247, 247, 255 }, 8, 1, (Color){ 80, 120, 230, 255 }, 1);
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam,

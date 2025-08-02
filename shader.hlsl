@@ -15,11 +15,10 @@ struct VS_Input
     float4 target_rect : TARGET_RECT;
     float4 texture_rect : TEXTURE_RECT;
     float4 color : COLOR;
+    float4 border_color : BORDER_COLOR;
     float corner_radius : CORNER_RADIUS;
     float border_thickness : BORDER_THICKNESS;
-    float4 border_color : BORDER_COLOR;
-    float shadow_sigma : SHADOW_SIGMA;
-    float2 shadow_offset : SHADOW_OFFSET;
+    float enable_shadow : ENABLE_SHADOW;
     uint vertex_id : SV_VertexID;
 };
 
@@ -30,11 +29,13 @@ struct PS_INPUT
     float4 color : COLOR;
     float2 target_rect_half_size : TARGET_RECT_HALF_SIZE;
     float2 target_rect_center : TARGET_RECT_CENTER;
+    float2 original_rect_half_size : ORIGINAL_RECT_HALF_SIZE;
+    float2 original_rect_center : ORIGINAL_RECT_CENTER;
+    float4 border_color : BORDER_COLOR;
     float corner_radius : CORNER_RADIUS;
     float border_thickness : BORDER_THICKNESS;
     float shadow_sigma : SHADOW_SIGMA;
     float2 shadow_offset : SHADOW_OFFSET;
-    float4 border_color : BORDER_COLOR;
 };
 
 //
@@ -61,6 +62,38 @@ PS_INPUT vs(VS_Input input)
     float2 texture_rect_center = (input.texture_rect.xy + input.texture_rect.zw) / 2;
     float2 texture_position = vertices[input.vertex_id] * texture_rect_half_size + texture_rect_center;
 
+    // Calculate original rect based shadow
+    float shadow_sigma = 0;
+    float2 shadow_offset = float2(0, 0);
+    float2 original_rect_half_size = target_rect_half_size;
+    float2 original_rect_center = target_rect_center;
+    if (input.enable_shadow >= 1)
+    {
+        shadow_sigma = 4;
+        shadow_offset = float2(0, 2);
+
+        // NOTE: As we hard-coded shadow sigma and offset, we could just use the 
+        // pre-calculated original rect. The detail of that calculation is below:
+        // ```
+        // float shadow_radius = 3.0 * shadow_sigma;
+        //
+        // // Calculate how much we expanded in each direction
+        // float expand_left = shadow_radius + max(0, -input.shadow_offset.x);
+        // float expand_right = shadow_radius + max(0, input.shadow_offset.x);
+        // float expand_top = shadow_radius + max(0, -input.shadow_offset.y);
+        // float expand_bottom = shadow_radius + max(0, input.shadow_offset.y);
+        //
+        // // Shrink back to original size
+        // original_rect_half_size.x -= (expand_left + expand_right) * 0.5;
+        // original_rect_half_size.y -= (expand_top + expand_bottom) * 0.5;
+        // original_rect_center.x -= input.shadow_offset.x * 0.5;
+        // original_rect_center.y -= input.shadow_offset.y * 0.5;
+        // ```
+        original_rect_half_size.x -= 12;
+        original_rect_half_size.y -= 13;
+        original_rect_center.y -= 1;
+    }
+
     // Output
     PS_INPUT output;
     output.position = mul(projection_matrix, float4(target_position, 0.0f, 1.0f)); // convert to clip space
@@ -70,11 +103,14 @@ PS_INPUT vs(VS_Input input)
     output.target_rect_half_size = target_rect_half_size;
     output.target_rect_center = target_rect_center;
 
+    output.original_rect_half_size = original_rect_half_size;
+    output.original_rect_center = original_rect_center;
+
     output.corner_radius = input.corner_radius;
     output.border_thickness = input.border_thickness;
     output.border_color = input.border_color;
-    output.shadow_sigma = input.shadow_sigma;
-    output.shadow_offset = input.shadow_offset;
+    output.shadow_sigma = shadow_sigma;
+    output.shadow_offset = shadow_offset;
     return output;
 }
 
@@ -191,31 +227,11 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float glyph_texture_grayscale_ratio = glyph_atlas_texture.Sample(mysampler, input.uv).r;
     float4 texture_based_color = float4(input.color.rgb, input.color.a * glyph_texture_grayscale_ratio);
 
-    // Calculate original rect by shrinking target rect based on shadow parameters
-    float2 original_rect_half_size = input.target_rect_half_size;
-    float2 original_rect_center = input.target_rect_center;
-    if (input.shadow_sigma > 0)
-    {
-        float shadow_radius = 3.0 * input.shadow_sigma;
-
-        // Calculate how much we expanded in each direction
-        float expand_left = shadow_radius + max(0, -input.shadow_offset.x);
-        float expand_right = shadow_radius + max(0, input.shadow_offset.x);
-        float expand_top = shadow_radius + max(0, -input.shadow_offset.y);
-        float expand_bottom = shadow_radius + max(0, input.shadow_offset.y);
-
-        // Shrink back to original size
-        original_rect_half_size.x -= (expand_left + expand_right) * 0.5;
-        original_rect_half_size.y -= (expand_top + expand_bottom) * 0.5;
-        original_rect_center.x -= input.shadow_offset.x * 0.5;
-        original_rect_center.y -= input.shadow_offset.y * 0.5;
-    }
-
     // SDF-based rounded rectangle generation
     float2 distance_to_shrunk_corner = calculate_distance_to_shrunk_corner(
         input.position.xy,
-        original_rect_center,
-        original_rect_half_size,
+        input.original_rect_center,
+        input.original_rect_half_size,
         input.corner_radius
     );
 
@@ -239,8 +255,8 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float shadow_alpha = 0;
     if (input.shadow_sigma)
     {
-        float2 rect_min = original_rect_center - original_rect_half_size;
-        float2 rect_max = original_rect_center + original_rect_half_size;
+        float2 rect_min = input.original_rect_center - input.original_rect_half_size;
+        float2 rect_max = input.original_rect_center + input.original_rect_half_size;
         shadow_alpha = roundedBoxShadow(
             rect_min + input.shadow_offset,
             rect_max + input.shadow_offset,

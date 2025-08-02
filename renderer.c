@@ -29,8 +29,7 @@ typedef struct
     float corner_radius;
     float border_thickness;
     uint8_t border_color[4];
-    float shadow_sigma;
-    float shadow_offset[2];
+    float enable_shadow;
 } Vertex;
 
 typedef struct
@@ -256,8 +255,7 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
             { "CORNER_RADIUS",    0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, corner_radius),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "BORDER_THICKNESS", 0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, border_thickness), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "BORDER_COLOR",     0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, border_color),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "SHADOW_SIGMA",     0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, shadow_sigma),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "SHADOW_OFFSET",    0,             DXGI_FORMAT_R32G32_FLOAT,       0,         offsetof(Vertex, shadow_offset),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "ENABLE_SHADOW",    0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, enable_shadow),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
         };
         // clang-format on
         ID3D11Device_CreateVertexShader(s_renderer_state.device, d3d11_vshader, sizeof(d3d11_vshader), NULL,
@@ -371,7 +369,7 @@ void renderer_deinit()
 //
 
 void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const float corner_radius,
-                        const float border_thickness, const Color border_color, const float shadow_sigma, const Pos shadow_offset)
+                        const float border_thickness, const Color border_color, const float enable_shadow)
 {
     Assert(s_vertex_stack.count != VERTEX_SIZE);
 
@@ -398,9 +396,7 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
     vertex->corner_radius = corner_radius;
     vertex->border_thickness = border_thickness;
     memcpy(vertex->border_color, &border_color, sizeof(border_color));
-    vertex->shadow_sigma = shadow_sigma;
-    vertex->shadow_offset[0] = shadow_offset.x;
-    vertex->shadow_offset[1] = shadow_offset.y;
+    vertex->enable_shadow = enable_shadow;
 
     s_vertex_stack.count++;
 }
@@ -449,17 +445,26 @@ uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* tex
 //
 
 void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const float corner_radius,
-                        const float border_thickness, const Color border_color, const float shadow_sigma, const Pos shadow_offset)
+                        const float border_thickness, const Color border_color, const float enable_shadow)
 {
     // Calculate expanded rect
     Rect expanded_rect = rect;
-    if (shadow_sigma > 0)
+    if (enable_shadow > 0)
     {
-        float shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
-        expanded_rect.xmin -= shadow_radius + max(0, -shadow_offset.x);
-        expanded_rect.xmax += shadow_radius + max(0, shadow_offset.x);
-        expanded_rect.ymin -= shadow_radius + max(0, -shadow_offset.y);
-        expanded_rect.ymax += shadow_radius + max(0, shadow_offset.y);
+        // NOTE: As we hard-coded shadow sigma and offset, we could just use the 
+        // pre-calculated original rect. The detail of that calculation is below:
+        // ```
+        // float shadow_sigma = 4;
+        // float shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
+        // expanded_rect.xmin -= shadow_radius + max(0, -shadow_offset.x);
+        // expanded_rect.xmax += shadow_radius + max(0, shadow_offset.x);
+        // expanded_rect.ymin -= shadow_radius + max(0, -shadow_offset.y);
+        // expanded_rect.ymax += shadow_radius + max(0, shadow_offset.y);
+        // ```
+        expanded_rect.xmin -= 12;
+        expanded_rect.xmax += 12;
+        expanded_rect.ymin -= 12;
+        expanded_rect.ymax += 14;
     }
 
     Glyph* glyph_white = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
@@ -469,7 +474,7 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push(expanded_rect, glyph_white_rect, color, corner_radius, border_thickness, border_color, shadow_sigma, shadow_offset);
+    renderer_rect_push(expanded_rect, glyph_white_rect, color, corner_radius, border_thickness, border_color, enable_shadow);
 }
 
 void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color)
@@ -492,7 +497,7 @@ void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const P
             .xmax = (float)(glyph->atlas_x + glyph->w),
             .ymax = (float)(glyph->atlas_y + glyph->h),
         };
-        renderer_rect_push(target_rect, texture_rect, color, 0, 0, (Color){ 0, 0, 0, 0 }, 0, (Pos){ 0, 0 });
+        renderer_rect_push(target_rect, texture_rect, color, 0, 0, (Color){ 0, 0, 0, 0 }, 0);
 
         // Update x position for next char
         next_pos_x += (float)glyph->xadvance;
