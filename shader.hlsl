@@ -16,9 +16,7 @@ struct VS_Input
     float4 texture_rect : TEXTURE_RECT;
     float4 color : COLOR;
     float4 border_color : BORDER_COLOR;
-    float corner_radius : CORNER_RADIUS;
-    float border_thickness : BORDER_THICKNESS;
-    float enable_shadow : ENABLE_SHADOW;
+    float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: enable_shadow, w: unused
     uint vertex_id : SV_VertexID;
 };
 
@@ -67,7 +65,8 @@ PS_INPUT vs(VS_Input input)
     float2 shadow_offset = float2(0, 0);
     float2 original_rect_half_size = target_rect_half_size;
     float2 original_rect_center = target_rect_center;
-    if (input.enable_shadow >= 1)
+    float enable_shadow = input.style_params.z;
+    if (enable_shadow)
     {
         shadow_sigma = 4;
         shadow_offset = float2(0, 2);
@@ -106,9 +105,9 @@ PS_INPUT vs(VS_Input input)
     output.original_rect_half_size = original_rect_half_size;
     output.original_rect_center = original_rect_center;
 
-    output.corner_radius = input.corner_radius;
-    output.border_thickness = input.border_thickness;
     output.border_color = input.border_color;
+    output.corner_radius = input.style_params.x;
+    output.border_thickness = input.style_params.y;
     output.shadow_sigma = shadow_sigma;
     output.shadow_offset = shadow_offset;
     return output;

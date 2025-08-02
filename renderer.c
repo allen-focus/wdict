@@ -26,10 +26,8 @@ typedef struct
     float original_rect[4];
     float texture_rect[4];
     uint8_t color[4];
-    float corner_radius;
-    float border_thickness;
     uint8_t border_color[4];
-    float enable_shadow;
+    float style_params[4];
 } Vertex;
 
 typedef struct
@@ -252,10 +250,8 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
             { "TARGET_RECT",      0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, target_rect),      D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "TEXTURE_RECT",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, texture_rect),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "COLOR",            0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, color),            D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "CORNER_RADIUS",    0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, corner_radius),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "BORDER_THICKNESS", 0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, border_thickness), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "BORDER_COLOR",     0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, border_color),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "ENABLE_SHADOW",    0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, enable_shadow),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "STYLE_PARAMS",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, style_params),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
         };
         // clang-format on
         ID3D11Device_CreateVertexShader(s_renderer_state.device, d3d11_vshader, sizeof(d3d11_vshader), NULL,
@@ -382,6 +378,7 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
         vertex->target_rect[2] = target_rect.xmax;
         vertex->target_rect[3] = target_rect.ymax;
     }
+
     // Update texture rect
     {
         vertex->texture_rect[0] = texture_rect.xmin / (float)GLYPH_ATLAS_WIDTH;
@@ -389,14 +386,15 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
         vertex->texture_rect[2] = texture_rect.xmax / (float)GLYPH_ATLAS_WIDTH;
         vertex->texture_rect[3] = texture_rect.ymax / (float)GLYPH_ATLAS_HEIGHT;
     }
-    // Update color
+
+    // Update color & border color
     memcpy(vertex->color, &color, sizeof(color));
+    memcpy(vertex->border_color, &border_color, sizeof(border_color));
 
     // Update style parameters
-    vertex->corner_radius = corner_radius;
-    vertex->border_thickness = border_thickness;
-    memcpy(vertex->border_color, &border_color, sizeof(border_color));
-    vertex->enable_shadow = enable_shadow;
+    vertex->style_params[0] = corner_radius;
+    vertex->style_params[1] = border_thickness;
+    vertex->style_params[2] = enable_shadow;
 
     s_vertex_stack.count++;
 }
@@ -451,7 +449,7 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
     Rect expanded_rect = rect;
     if (enable_shadow > 0)
     {
-        // NOTE: As we hard-coded shadow sigma and offset, we could just use the 
+        // NOTE: As we hard-coded shadow sigma and offset, we could just use the
         // pre-calculated original rect. The detail of that calculation is below:
         // ```
         // float shadow_sigma = 4;
@@ -474,7 +472,8 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push(expanded_rect, glyph_white_rect, color, corner_radius, border_thickness, border_color, enable_shadow);
+    renderer_rect_push(expanded_rect, glyph_white_rect, color, corner_radius, border_thickness, border_color,
+                       enable_shadow);
 }
 
 void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color)
