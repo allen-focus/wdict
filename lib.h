@@ -1,12 +1,13 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
-#define Assert(cond)        \
-    do                      \
-    {                       \
-        if (!(cond))        \
-            __debugbreak(); \
+#define Assert(cond)                                                                                                   \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(cond))                                                                                                   \
+            __debugbreak();                                                                                            \
     } while (0)
 
 typedef struct
@@ -23,3 +24,10 @@ typedef struct
 {
     uint8_t r, g, b, a;
 } Color;
+
+typedef struct
+{
+    uint8_t border_color[4];
+    float corner_radius, border_thickness;
+    bool enable_shadow;
+} RectStyle;

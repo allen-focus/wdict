@@ -91,7 +91,7 @@ void swapchain_resize(const uint16_t client_width, const uint16_t client_height)
 // renderer core
 //
 
-void renderer_init(const HWND window, const GlyphCache* glyph_cache)
+void renderer_init(const HWND window)
 {
     // Create device and context
     {
@@ -196,7 +196,7 @@ void renderer_init(const HWND window, const GlyphCache* glyph_cache)
 
     // Create texture (glyph atlas)
     {
-        GlyphAtlas* glyph_atlas = glyph_cache->atlas;
+        GlyphAtlas* glyph_atlas = g_glyph_cache->atlas;
         D3D11_TEXTURE2D_DESC desc = {
             .Width = glyph_atlas->w,
             .Height = glyph_atlas->h,
@@ -364,8 +364,7 @@ void renderer_deinit()
 // rect push
 //
 
-void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const float corner_radius,
-                        const float border_thickness, const Color border_color, const float enable_shadow)
+void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const RectStyle style)
 {
     Assert(s_vertex_stack.count != VERTEX_SIZE);
 
@@ -389,12 +388,12 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 
     // Update color & border color
     memcpy(vertex->color, &color, sizeof(color));
-    memcpy(vertex->border_color, &border_color, sizeof(border_color));
+    memcpy(vertex->border_color, style.border_color, sizeof(style.border_color));
 
     // Update style parameters
-    vertex->style_params[0] = corner_radius;
-    vertex->style_params[1] = border_thickness;
-    vertex->style_params[2] = enable_shadow;
+    vertex->style_params[0] = style.corner_radius;
+    vertex->style_params[1] = style.border_thickness;
+    vertex->style_params[2] = (float)style.enable_shadow;
 
     s_vertex_stack.count++;
 }
@@ -403,12 +402,12 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 // text width & height
 //
 
-uint32_t renderer_get_text_width(const GlyphCache* glyph_cache, const char* text)
+uint32_t renderer_get_text_width(const char* text)
 {
     uint32_t text_width = 0;
     for (const char* c = text; *c; c++)
     {
-        Glyph* glyph = &glyph_cache->glyphs[*c - ASCII_START];
+        Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
         text_width += glyph->xadvance;
     }
     return text_width;
@@ -416,13 +415,13 @@ uint32_t renderer_get_text_width(const GlyphCache* glyph_cache, const char* text
 
 // TODO: Future support for multiple fonts per line is planned. This will require calculating text height
 // based on varying font line spaces rather than relying on a single font's line space.
-uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* text)
+uint32_t renderer_get_text_height(const char* text)
 {
     uint16_t font_english_capital_height = 0;
     Font* font = NULL;
     for (const char* c = text; *c; c++)
     {
-        Glyph* glyph = &glyph_cache->glyphs[*c - ASCII_START];
+        Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
 
         // Check if the glyph is from the same font as the previous glyph.
         if (font == NULL)
@@ -442,12 +441,11 @@ uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* tex
 // draw
 //
 
-void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const float corner_radius,
-                        const float border_thickness, const Color border_color, const float enable_shadow)
+void renderer_draw_rect(const Rect rect, const Color color, const RectStyle style)
 {
     // Calculate expanded rect
     Rect expanded_rect = rect;
-    if (enable_shadow > 0)
+    if (style.enable_shadow)
     {
         // NOTE: As we hard-coded shadow sigma and offset, we could just use the
         // pre-calculated original rect. The detail of that calculation is below:
@@ -465,25 +463,24 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         expanded_rect.ymax += 14;
     }
 
-    Glyph* glyph_white = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
+    Glyph* glyph_white = &g_glyph_cache->glyphs[GLYPHS_LENGTH - 1];
     Rect glyph_white_rect = {
         .xmin = (float)glyph_white->atlas_x,
         .ymin = (float)glyph_white->atlas_y,
         .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push(expanded_rect, glyph_white_rect, color, corner_radius, border_thickness, border_color,
-                       enable_shadow);
+    renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
 }
 
-void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color)
+void renderer_draw_text(const char* text, const Pos pos, const Color color)
 {
     float next_pos_x = pos.x;
-    float pos_y = pos.y + (float)renderer_get_text_height(glyph_cache, text);
+    float pos_y = pos.y + (float)renderer_get_text_height(text);
 
     for (const char* c = text; *c; c++)
     {
-        Glyph* glyph = &glyph_cache->glyphs[*c - ASCII_START];
+        Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
         Rect target_rect = {
             .xmin = next_pos_x + (float)glyph->xoff,
             .ymin = pos_y + (float)glyph->yoff,
@@ -496,7 +493,11 @@ void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const P
             .xmax = (float)(glyph->atlas_x + glyph->w),
             .ymax = (float)(glyph->atlas_y + glyph->h),
         };
-        renderer_rect_push(target_rect, texture_rect, color, 0, 0, (Color){ 0, 0, 0, 0 }, 0);
+        RectStyle rect_style = {
+            { 0, 0, 0, 0 },
+            0, 0, 0
+        };
+        renderer_rect_push(target_rect, texture_rect, color, rect_style);
 
         // Update x position for next char
         next_pos_x += (float)glyph->xadvance;

@@ -36,48 +36,57 @@ typedef struct
 typedef struct
 {
     UI_Context* ui_context;
-    GlyphCache* glyph_cache;
 } App_Context;
 
 ///
+
+GlyphCache* g_glyph_cache;
 
 static wchar_t s_window_title[MAX_WINDOW_TITLE_LENGTH] = L"windows title";
 
 ///
 
-static void process_frame(const GlyphCache* glyph_cache)
+static void process_frame()
 {
-    const char* text = "Hello glyph";
-    Pos text_pos = (Pos){ 50, 50 };
-    renderer_draw_text(glyph_cache, text, text_pos, (Color){ 0, 255, 0, 255 });
+    RectStyle simple_rect_style = {
+        .border_color = { 0, 0, 0, 0 },
+          .corner_radius = 8, .border_thickness = 0, .enable_shadow = false
+    };
+    RectStyle shadowed_rect_style = {
+        .border_color = { 180, 180, 180, 255 },
+          .corner_radius = 8, .border_thickness = 1, .enable_shadow = true
+    };
 
-    // Draw top/bottom bar to test text width and height
-    uint32_t text_width = renderer_get_text_width(glyph_cache, text);
-    uint32_t text_height = renderer_get_text_height(glyph_cache, text);
+    // Test text
+    {
+        // const char* text = "Hello glyph";
+        // Pos text_pos = (Pos){ 50, 50 };
+        // renderer_draw_text(text, text_pos, (Color){ 0, 255, 0, 255 });
 
-    Rect text_top_bar = (Rect){ text_pos.x, text_pos.y - 1, text_pos.x + text_width, text_pos.y };
-    renderer_draw_rect(glyph_cache, text_top_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 }, 0);
+        // // Draw top/bottom bar to test text width and height
+        // uint32_t text_width = renderer_get_text_width(text);
+        // uint32_t text_height = renderer_get_text_height(text);
 
-    Rect text_bottom_bar =
-        (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1 };
-    renderer_draw_rect(glyph_cache, text_bottom_bar, (Color){ 255, 0, 0, 255 }, 0, 0, (Color){ 0, 0, 0, 0 }, 0);
+        // Rect text_top_bar = (Rect){ text_pos.x, text_pos.y - 1, text_pos.x + text_width, text_pos.y };
+        // renderer_draw_rect(text_top_bar, (Color){ 255, 0, 0, 255 }, simple_rect_style);
 
-    // Test rounded shadow
-    Rect rect = (Rect){ 100, 100, 500, 350 };
-    renderer_draw_rect(glyph_cache, rect, (Color){ 247, 247, 247, 255 }, 8, 1, (Color){ 230, 230, 230, 255 }, 1);
+        // Rect text_bottom_bar =
+        //     (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1
+        //     };
+        // renderer_draw_rect(text_bottom_bar, (Color){ 255, 0, 0, 255 }, simple_rect_style);
+    }
 
-    Rect sub_rect = (Rect){ 105, 105, 495, 135 };
-    renderer_draw_rect(glyph_cache, sub_rect, (Color){ 234, 234, 234, 255 }, 8, 0, (Color){ 0, 0, 0, 0 }, 0);
-
-    Rect rect2 = (Rect){ 350, 50, 550, 300 };
-    renderer_draw_rect(glyph_cache, rect2, (Color){ 247, 247, 247, 255 }, 8, 1, (Color){ 80, 120, 230, 255 }, 1);
+    // Test auto layout
+    {
+        Rect rect = (Rect){ 50, 50, 500, 350 };
+        renderer_draw_rect(rect, (Color){ 234, 234, 234, 255 }, shadowed_rect_style);
+    }
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam,
                                          const LPARAM lparam)
 {
     UI_Context* ui_context = NULL;
-    GlyphCache* glyph_cache = NULL;
     {
         App_Context* app_context = NULL;
         if (message == WM_CREATE)
@@ -95,7 +104,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
         if (app_context)
         {
             ui_context = app_context->ui_context;
-            glyph_cache = app_context->glyph_cache;
         }
     }
 
@@ -113,7 +121,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
                 QueryPerformanceCounter(&starting_time);
 #endif
                 {
-                    process_frame(glyph_cache);
+                    process_frame();
                     renderer_flush_and_present(ui_context->client_width, ui_context->client_height);
                 }
 #ifndef NDEBUG
@@ -168,7 +176,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
     // Allocate user data
     UI_Context* ui_context = malloc(sizeof(UI_Context));
-    GlyphCache* glyph_cache = malloc(sizeof(GlyphCache));
+    g_glyph_cache = malloc(sizeof(GlyphCache));
 
     // Create window
     HWND window;
@@ -194,7 +202,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
         // Create window with user data
         App_Context* app_context = malloc(sizeof(App_Context));
         app_context->ui_context = ui_context;
-        app_context->glyph_cache = glyph_cache;
         window = CreateWindowExW(0, wc.lpszClassName, s_window_title, window_style, rect.left, rect.top,
                                  rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, app_context);
     }
@@ -205,8 +212,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
         ui_context->client_width = CLIENT_WIDTH;
         ui_context->client_height = CLIENT_HEIGHT;
     }
-    glyph_cache_init_and_fill(window, glyph_cache, L"Segoe UI Symbol");
-    renderer_init(window, glyph_cache);
+    glyph_cache_init_and_fill(window, g_glyph_cache, L"Segoe UI Symbol");
+    renderer_init(window);
 
     // Show window
     ShowWindow(window, SW_SHOWDEFAULT);
@@ -221,7 +228,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
     // Clean
     renderer_deinit();
-    glyph_cache_deinit(glyph_cache);
+    glyph_cache_deinit(g_glyph_cache);
     free(ui_context);
 
     return 0;

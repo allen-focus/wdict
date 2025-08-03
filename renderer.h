@@ -11,16 +11,14 @@
 
 void swapchain_resize(const uint16_t client_width, const uint16_t client_height);
 
-void renderer_init(const HWND window, const GlyphCache* glyph_cache);
+void renderer_init(const HWND window);
 void renderer_flush_and_present(const uint16_t client_width, const uint16_t client_height);
 void renderer_deinit();
 
-void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const float corner_radius,
-                        const float border_thickness, const Color border_color, const float enable_shadow);
+void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const RectStyle style);
 
-void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const float corner_radius,
-                        const float border_thickness, const Color border_color, const float enable_shadow);
-void renderer_draw_text(const GlyphCache* glyph_cache, const char* text, const Pos pos, const Color color);
+void renderer_draw_rect(const Rect rect, const Color color, const RectStyle style);
+void renderer_draw_text(const char* text, const Pos pos, const Color color);
 
-uint32_t renderer_get_text_width(const GlyphCache* glyph_cache, const char* text);
-uint32_t renderer_get_text_height(const GlyphCache* glyph_cache, const char* text);
+uint32_t renderer_get_text_width(const char* text);
+uint32_t renderer_get_text_height(const char* text);
