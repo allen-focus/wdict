@@ -84,31 +84,38 @@ static void process_frame()
 
     {
         ui_init();
-        ui_layout({ .position = { 15, 15 },
-                    .size = { 960, 540 },
+        ui_layout({ .size = { 960, 540 },
                     .color = blue,
                     .rect_style = rect_style,
-                    .padding = { 32, 32, 32, 32 } })
+                    .padding = { 32, 32, 32, 32 },
+                    .direction = UI_LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_layout({ .position = { 10, 10 },
-                        .size = { 300, 300 },
+            ui_layout({ .size = { 300, 300 },
                         .color = pink,
                         .rect_style = rect_style,
-                        .padding = { 16, 16, 16, 16 } })
+                        .padding = { 16, 16, 16, 16 },
+                        .direction = UI_LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_layout({ .position = { 5, 5 },
-                            .size = { 100, 100 },
+                ui_layout({ .size = { 100, 100 },
                             .color = yellow,
                             .rect_style = rect_style,
-                            .padding = { 8, 8, 8, 8 } })
+                            .padding = { 8, 8, 8, 8 },
+                            .direction = UI_LAYOUT_LEFT_TO_RIGHT })
+                {
+                }
+                ui_layout({ .size = { 100, 100 },
+                            .color = yellow,
+                            .rect_style = rect_style,
+                            .padding = { 8, 8, 8, 8 },
+                            .direction = UI_LAYOUT_LEFT_TO_RIGHT })
                 {
                 }
             }
-            ui_layout({ .position = { 320, 10 },
-                        .size = { 300, 300 },
+            ui_layout({ .size = { 300, 300 },
                         .color = pink,
                         .rect_style = rect_style,
-                        .padding = { 16, 16, 16, 16 } })
+                        .padding = { 16, 16, 16, 16 },
+                        .direction = UI_LAYOUT_LEFT_TO_RIGHT })
             {
             }
         }

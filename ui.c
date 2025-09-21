@@ -12,22 +12,27 @@ static Stack(UILayout*, STACK_SIZE) ui_layout_stack = { 0 };
 
 ///
 
-static void ui_calculate_absolute_position(Position* position, const UILayout* layout)
+void ui_layout_draw(UILayout* layout)
 {
     if (layout->parent)
     {
-        position->x += layout->parent->style.position.x;
-        position->y += layout->parent->style.position.y;
-        ui_calculate_absolute_position(position, layout->parent);
+        UILayout* parent = layout->parent;
+        layout->position.x += parent->position.x + parent->style.padding.left;
+        layout->position.y += parent->position.y + parent->style.padding.top;
+        if (parent->style.direction == UI_LAYOUT_LEFT_TO_RIGHT)
+        {
+            layout->position.x += parent->next_child_offset_x;
+            parent->next_child_offset_x += layout->style.size.width;
+        }
+        else
+        {
+            layout->position.y += parent->next_child_offset_y;
+            parent->next_child_offset_y += layout->style.size.height;
+        }
     }
-}
 
-void ui_layout_draw(const UILayout* layout)
-{
-    Position position = { layout->style.position.x, layout->style.position.y };
-    ui_calculate_absolute_position(&position, layout);
-    Rect rect = { position.x, position.y, position.x + layout->style.size.width,
-                  position.y + layout->style.size.height };
+    Rect rect = { layout->position.x, layout->position.y, layout->position.x + layout->style.size.width,
+                  layout->position.y + layout->style.size.height };
     renderer_draw_rect(rect, layout->style.color, layout->style.rect_style);
 
     for (int i = 0; i < CHILDEN_SIZE; i++)

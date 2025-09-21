@@ -17,18 +17,27 @@ static int ui_layout_macro_flag;
 
 ///
 
+typedef enum
+{
+    UI_LAYOUT_LEFT_TO_RIGHT,
+    UI_LAYOUT_TOP_TO_BOTTOM
+} Direction;
+
 typedef struct
 {
-    Position position;
     Size size;
     Color color;
     RectStyle rect_style;
     Padding padding;
+    Direction direction;
 } UILayoutStyle;
 
 typedef struct UILayout UILayout;
 struct UILayout
 {
+    Position position;
+    float next_child_offset_x;
+    float next_child_offset_y;
     UILayoutStyle style;
     UILayout* parent;
     UILayout* children[CHILDEN_SIZE];
@@ -44,4 +53,4 @@ UILayout* ui_layout_start();
 void ui_layout_config(UILayout* layout, UILayoutStyle* style);
 void ui_layout_end();
 
-void ui_layout_draw(const UILayout* layout);
+void ui_layout_draw(UILayout* layout);
