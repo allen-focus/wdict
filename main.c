@@ -27,6 +27,14 @@
 
 ///
 
+// TODO: Need to consider the necessity
+typedef struct
+{
+    uint16_t client_width;
+    uint16_t client_height;
+    void (*on_resize)(uint16_t, uint16_t);
+} UIContext;
+
 typedef struct
 {
     UIContext* ui_context;
@@ -76,27 +84,34 @@ static void process_frame()
 
     {
         ui_init();
-
-        // clang-format off
-        UILayout* root = ui_layout_start();
-        ui_layout_config(root, (Position){ 15, 15 }, (Size){ 960, 540 }, blue, rect_style, (Padding){ 32, 32, 32, 32 });
+        ui_layout({ .position = { 15, 15 },
+                    .size = { 960, 540 },
+                    .color = blue,
+                    .rect_style = rect_style,
+                    .padding = { 32, 32, 32, 32 } })
         {
-            UILayout* child = ui_layout_start();
-            ui_layout_config(child, (Position){ 10, 10 }, (Size){ 300, 300 }, pink, rect_style, (Padding){ 16, 16, 16, 16 });
+            ui_layout({ .position = { 10, 10 },
+                        .size = { 300, 300 },
+                        .color = pink,
+                        .rect_style = rect_style,
+                        .padding = { 16, 16, 16, 16 } })
             {
-                UILayout* child_child = ui_layout_start();
-                ui_layout_config(child_child, (Position){ 5, 5 }, (Size){ 100, 100 }, yellow, rect_style, (Padding){ 8, 8, 8, 8 });
-                ui_layout_end();
+                ui_layout({ .position = { 5, 5 },
+                            .size = { 100, 100 },
+                            .color = yellow,
+                            .rect_style = rect_style,
+                            .padding = { 8, 8, 8, 8 } })
+                {
+                }
             }
-            ui_layout_end();
-
-            UILayout* child2 = ui_layout_start();
-            ui_layout_config(child2, (Position){ 320, 10 }, (Size){ 300, 300 }, pink, rect_style, (Padding){ 16, 16, 16, 16 });
-            ui_layout_end();
+            ui_layout({ .position = { 320, 10 },
+                        .size = { 300, 300 },
+                        .color = pink,
+                        .rect_style = rect_style,
+                        .padding = { 16, 16, 16, 16 } })
+            {
+            }
         }
-        ui_layout_end();
-        // clang-format on
-
         ui_layout_draw(ui_layout_get_root());
     }
 }

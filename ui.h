@@ -4,29 +4,35 @@
 // TODO: Don't hard-code
 #define CHILDEN_SIZE 16
 
+// NOTE: Suppress `warning C4068: unknown pragma 'clang'`
+#pragma warning(disable : 4068)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+static int ui_layout_macro_flag;
+#pragma clang diagnostic pop
+
+#define ui_layout(...)                                                                                                 \
+    for (ui_layout_macro_flag = (ui_layout_config(ui_layout_start(), &(UILayoutStyle)__VA_ARGS__), 0);                 \
+         ui_layout_macro_flag < 1; ui_layout_macro_flag = 1, ui_layout_end())
+
 ///
+
+typedef struct
+{
+    Position position;
+    Size size;
+    Color color;
+    RectStyle rect_style;
+    Padding padding;
+} UILayoutStyle;
 
 typedef struct UILayout UILayout;
 struct UILayout
 {
-    // Basic
-    Position position;
-    Size size;
-    Color color;
-    RectStyle style;
-    // Visual
-    Padding padding;
-    // Tree
+    UILayoutStyle style;
     UILayout* parent;
     UILayout* children[CHILDEN_SIZE];
 };
-
-typedef struct
-{
-    uint16_t client_width;
-    uint16_t client_height;
-    void (*on_resize)(uint16_t, uint16_t);
-} UIContext;
 
 ///
 
@@ -35,7 +41,7 @@ void ui_init();
 UILayout* ui_layout_get_root();
 
 UILayout* ui_layout_start();
-void ui_layout_config(UILayout* layout, Position position, Size size, Color color, RectStyle style, Padding padding);
+void ui_layout_config(UILayout* layout, UILayoutStyle* style);
 void ui_layout_end();
 
 void ui_layout_draw(const UILayout* layout);

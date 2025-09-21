@@ -49,8 +49,8 @@ set CommonCompilerFlags=/nologo /W3 /WX /MP /D_CRT_SECURE_NO_WARNINGS
 set CompilerReleaseFlags= /O2 /DNDEBUG
 
 :: Comment sanitize flag as it is too slow
-:: /fsanitize=address
 set CompilerDebugFlags=/Od /Zi /RTC1
+::set CompilerDebugFlags=/Od /Zi /RTC1 /fsanitize=address
 
 set LinkerReleaseFlags=/incremental:no /opt:icf /opt:ref
 set LinkerDebugFlags=

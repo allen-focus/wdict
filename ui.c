@@ -16,18 +16,19 @@ static void ui_calculate_absolute_position(Position* position, const UILayout* l
 {
     if (layout->parent)
     {
-        position->x += layout->parent->position.x;
-        position->y += layout->parent->position.y;
+        position->x += layout->parent->style.position.x;
+        position->y += layout->parent->style.position.y;
         ui_calculate_absolute_position(position, layout->parent);
     }
 }
 
 void ui_layout_draw(const UILayout* layout)
 {
-    Position position = { layout->position.x, layout->position.y };
+    Position position = { layout->style.position.x, layout->style.position.y };
     ui_calculate_absolute_position(&position, layout);
-    Rect rect = { position.x, position.y, position.x + layout->size.width, position.y + layout->size.height };
-    renderer_draw_rect(rect, layout->color, layout->style);
+    Rect rect = { position.x, position.y, position.x + layout->style.size.width,
+                  position.y + layout->style.size.height };
+    renderer_draw_rect(rect, layout->style.color, layout->style.rect_style);
 
     for (int i = 0; i < CHILDEN_SIZE; i++)
     {
@@ -83,13 +84,9 @@ void ui_layout_end()
     ui_layout_stack.items[ui_layout_stack.depth--] = NULL;
 }
 
-void ui_layout_config(UILayout* layout, Position position, Size size, Color color, RectStyle style, Padding padding)
+void ui_layout_config(UILayout* layout, UILayoutStyle* style)
 {
-    memcpy(&layout->position, &position, sizeof(position));
-    memcpy(&layout->size, &size, sizeof(size));
-    memcpy(&layout->color, &color, sizeof(color));
-    memcpy(&layout->style, &style, sizeof(style));
-    memcpy(&layout->padding, &padding, sizeof(padding));
+    memcpy(&layout->style, style, sizeof(*style));
 }
 
 void ui_init()
