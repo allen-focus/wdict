@@ -88,18 +88,21 @@ static void process_frame()
                     .color = blue,
                     .rect_style = rect_style,
                     .padding = { 32, 32, 32, 32 },
+                    .child_gap = 16,
                     .direction = UI_LAYOUT_LEFT_TO_RIGHT })
         {
             ui_layout({ .size = { 300, 300 },
                         .color = pink,
                         .rect_style = rect_style,
                         .padding = { 16, 16, 16, 16 },
+                        .child_gap = 8,
                         .direction = UI_LAYOUT_TOP_TO_BOTTOM })
             {
                 ui_layout({ .size = { 100, 100 },
                             .color = yellow,
                             .rect_style = rect_style,
                             .padding = { 8, 8, 8, 8 },
+                            .child_gap = 4,
                             .direction = UI_LAYOUT_LEFT_TO_RIGHT })
                 {
                 }
@@ -107,6 +110,7 @@ static void process_frame()
                             .color = yellow,
                             .rect_style = rect_style,
                             .padding = { 8, 8, 8, 8 },
+                            .child_gap = 4,
                             .direction = UI_LAYOUT_LEFT_TO_RIGHT })
                 {
                 }
@@ -115,6 +119,7 @@ static void process_frame()
                         .color = pink,
                         .rect_style = rect_style,
                         .padding = { 16, 16, 16, 16 },
+                        .child_gap = 8,
                         .direction = UI_LAYOUT_LEFT_TO_RIGHT })
             {
             }

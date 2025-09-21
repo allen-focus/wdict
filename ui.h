@@ -29,6 +29,7 @@ typedef struct
     Color color;
     RectStyle rect_style;
     Padding padding;
+    float child_gap;
     Direction direction;
 } UILayoutStyle;
 

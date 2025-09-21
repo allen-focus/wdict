@@ -22,12 +22,12 @@ void ui_layout_draw(UILayout* layout)
         if (parent->style.direction == UI_LAYOUT_LEFT_TO_RIGHT)
         {
             layout->position.x += parent->next_child_offset_x;
-            parent->next_child_offset_x += layout->style.size.width;
+            parent->next_child_offset_x += layout->style.size.width + parent->style.child_gap;
         }
         else
         {
             layout->position.y += parent->next_child_offset_y;
-            parent->next_child_offset_y += layout->style.size.height;
+            parent->next_child_offset_y += layout->style.size.height + parent->style.child_gap;
         }
     }
 

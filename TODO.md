@@ -1,6 +1,6 @@
 Use ~~x~~ to mark item as completed.
 
-1. Simple without fit
+1. ~~Simple without fit~~
 2. Fit (x axis only)
 3. Fit
 4. Simple grow
@@ -103,4 +103,3 @@ title=Summary 2
 ```
 ffmpeg -y -i "How Clay's UI Layout Algorithm Works [by9lQvpvMIc].mkv" -i chapters.txt -map_metadata 1 -codec copy output.mkv
 ```
-
