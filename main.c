@@ -10,6 +10,7 @@
 #include "glyph_cache.h"
 #include "lib.h"
 #include "renderer.h"
+#include "ui.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -19,8 +20,8 @@
 
 ///
 
-#define CLIENT_WIDTH  600
-#define CLIENT_HEIGHT 400
+#define CLIENT_WIDTH  1080
+#define CLIENT_HEIGHT 720
 
 #define MAX_WINDOW_TITLE_LENGTH 64
 
@@ -28,15 +29,8 @@
 
 typedef struct
 {
-    uint16_t client_width;
-    uint16_t client_height;
-    void (*on_resize)(uint16_t, uint16_t);
-} UI_Context;
-
-typedef struct
-{
-    UI_Context* ui_context;
-} App_Context;
+    UIContext* ui_context;
+} AppContext;
 
 ///
 
@@ -48,14 +42,18 @@ static wchar_t s_window_title[MAX_WINDOW_TITLE_LENGTH] = L"windows title";
 
 static void process_frame()
 {
-    RectStyle simple_rect_style = {
+    // clang-format off
+    RectStyle rect_style = {
         .border_color = { 0, 0, 0, 0 },
-          .corner_radius = 8, .border_thickness = 0, .enable_shadow = false
+        .corner_radius = 0,
+        .border_thickness = 0,
+        .enable_shadow = false
     };
-    RectStyle shadowed_rect_style = {
-        .border_color = { 180, 180, 180, 255 },
-          .corner_radius = 8, .border_thickness = 1, .enable_shadow = true
-    };
+    // clang-format on
+
+    Color blue = (Color){ 10, 110, 137, 255 };
+    Color pink = (Color){ 252, 147, 144, 255 };
+    Color yellow = (Color){ 254, 216, 77, 255 };
 
     // Test text
     {
@@ -76,29 +74,49 @@ static void process_frame()
         // renderer_draw_rect(text_bottom_bar, (Color){ 255, 0, 0, 255 }, simple_rect_style);
     }
 
-    // Test auto layout
     {
-        Rect rect = (Rect){ 50, 50, 500, 350 };
-        renderer_draw_rect(rect, (Color){ 234, 234, 234, 255 }, shadowed_rect_style);
+        ui_init();
+
+        // clang-format off
+        UILayout* root = ui_layout_start();
+        ui_layout_config(root, (Position){ 15, 15 }, (Size){ 960, 540 }, blue, rect_style, (Padding){ 32, 32, 32, 32 });
+        {
+            UILayout* child = ui_layout_start();
+            ui_layout_config(child, (Position){ 10, 10 }, (Size){ 300, 300 }, pink, rect_style, (Padding){ 16, 16, 16, 16 });
+            {
+                UILayout* child_child = ui_layout_start();
+                ui_layout_config(child_child, (Position){ 5, 5 }, (Size){ 100, 100 }, yellow, rect_style, (Padding){ 8, 8, 8, 8 });
+                ui_layout_end();
+            }
+            ui_layout_end();
+
+            UILayout* child2 = ui_layout_start();
+            ui_layout_config(child2, (Position){ 320, 10 }, (Size){ 300, 300 }, pink, rect_style, (Padding){ 16, 16, 16, 16 });
+            ui_layout_end();
+        }
+        ui_layout_end();
+        // clang-format on
+
+        ui_layout_draw(ui_layout_get_root());
     }
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam,
                                          const LPARAM lparam)
 {
-    UI_Context* ui_context = NULL;
+    UIContext* ui_context = NULL;
     {
-        App_Context* app_context = NULL;
+        AppContext* app_context = NULL;
         if (message == WM_CREATE)
         {
             CREATESTRUCT* create = (CREATESTRUCT*)(lparam);
-            app_context = (App_Context*)(create->lpCreateParams);
+            app_context = (AppContext*)(create->lpCreateParams);
             SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)app_context);
         }
         else
         {
             LONG_PTR ptr = GetWindowLongPtrW(window, GWLP_USERDATA);
-            app_context = (App_Context*)ptr;
+            app_context = (AppContext*)ptr;
         }
 
         if (app_context)
@@ -175,7 +193,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     // Allocate user data
-    UI_Context* ui_context = malloc(sizeof(UI_Context));
+    UIContext* ui_context = malloc(sizeof(UIContext));
     g_glyph_cache = malloc(sizeof(GlyphCache));
 
     // Create window
@@ -200,7 +218,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
         RegisterClassW(&wc);
 
         // Create window with user data
-        App_Context* app_context = malloc(sizeof(App_Context));
+        AppContext* app_context = malloc(sizeof(AppContext));
         app_context->ui_context = ui_context;
         window = CreateWindowExW(0, wc.lpszClassName, s_window_title, window_style, rect.left, rect.top,
                                  rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, app_context);

@@ -181,16 +181,14 @@ void renderer_init(const HWND window)
 
     // Create blend state
     {
-        D3D11_BLEND_DESC desc = {
-            .RenderTarget[0] = { .BlendEnable = TRUE,
-                                .SrcBlend = D3D11_BLEND_SRC_ALPHA,
-                                .DestBlend = D3D11_BLEND_INV_SRC_ALPHA,
-                                .BlendOp = D3D11_BLEND_OP_ADD,
-                                .SrcBlendAlpha = D3D11_BLEND_ONE,
-                                .DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA,
-                                .BlendOpAlpha = D3D11_BLEND_OP_ADD,
-                                .RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL }
-        };
+        D3D11_BLEND_DESC desc = { .RenderTarget[0] = { .BlendEnable = TRUE,
+                                                       .SrcBlend = D3D11_BLEND_SRC_ALPHA,
+                                                       .DestBlend = D3D11_BLEND_INV_SRC_ALPHA,
+                                                       .BlendOp = D3D11_BLEND_OP_ADD,
+                                                       .SrcBlendAlpha = D3D11_BLEND_ONE,
+                                                       .DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA,
+                                                       .BlendOpAlpha = D3D11_BLEND_OP_ADD,
+                                                       .RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL } };
         ID3D11Device_CreateBlendState(s_renderer_state.device, &desc, &s_renderer_state.blend_state);
     }
 
@@ -280,12 +278,14 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
         float R = (float)client_width;
         float T = 0.f;
         float B = (float)client_height;
+        // clang-format off
         float mvp[4][4] = {
             { 2.0f / (R - L),    0.0f,              0.0f, 0.0f },
             { 0.0f,              2.0f / (T - B),    0.0f, 0.0f },
             { 0.0f,              0.0f,              0.5f, 0.0f },
             { (R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f },
         };
+        // clang-format on
         D3D11_MAPPED_SUBRESOURCE mapped;
         ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.constant_buffer, 0,
                                 D3D11_MAP_WRITE_DISCARD, 0, &mapped);
@@ -449,14 +449,14 @@ void renderer_draw_rect(const Rect rect, const Color color, const RectStyle styl
     {
         // NOTE: As we hard-coded shadow sigma and offset, we could just use the
         // pre-calculated original rect. The detail of that calculation is below:
-        // ```
-        // float shadow_sigma = 4;
-        // float shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
-        // expanded_rect.xmin -= shadow_radius + max(0, -shadow_offset.x);
-        // expanded_rect.xmax += shadow_radius + max(0, shadow_offset.x);
-        // expanded_rect.ymin -= shadow_radius + max(0, -shadow_offset.y);
-        // expanded_rect.ymax += shadow_radius + max(0, shadow_offset.y);
-        // ```
+        //   ```
+        //   float shadow_sigma = 4;
+        //   float shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
+        //   expanded_rect.xmin -= shadow_radius + max(0, -shadow_offset.x);
+        //   expanded_rect.xmax += shadow_radius + max(0, shadow_offset.x);
+        //   expanded_rect.ymin -= shadow_radius + max(0, -shadow_offset.y);
+        //   expanded_rect.ymax += shadow_radius + max(0, shadow_offset.y);
+        //   ```
         expanded_rect.xmin -= 12;
         expanded_rect.xmax += 12;
         expanded_rect.ymin -= 12;
@@ -473,19 +473,19 @@ void renderer_draw_rect(const Rect rect, const Color color, const RectStyle styl
     renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
 }
 
-void renderer_draw_text(const char* text, const Pos pos, const Color color)
+void renderer_draw_text(const char* text, const Position position, const Color color)
 {
-    float next_pos_x = pos.x;
-    float pos_y = pos.y + (float)renderer_get_text_height(text);
+    float next_position_x = position.x;
+    float position_y = position.y + (float)renderer_get_text_height(text);
 
     for (const char* c = text; *c; c++)
     {
         Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
         Rect target_rect = {
-            .xmin = next_pos_x + (float)glyph->xoff,
-            .ymin = pos_y + (float)glyph->yoff,
-            .xmax = next_pos_x + (float)glyph->xoff + (float)glyph->w,
-            .ymax = pos_y + (float)glyph->yoff + (float)glyph->h,
+            .xmin = next_position_x + (float)glyph->xoff,
+            .ymin = position_y + (float)glyph->yoff,
+            .xmax = next_position_x + (float)glyph->xoff + (float)glyph->w,
+            .ymax = position_y + (float)glyph->yoff + (float)glyph->h,
         };
         Rect texture_rect = {
             .xmin = (float)glyph->atlas_x,
@@ -493,13 +493,10 @@ void renderer_draw_text(const char* text, const Pos pos, const Color color)
             .xmax = (float)(glyph->atlas_x + glyph->w),
             .ymax = (float)(glyph->atlas_y + glyph->h),
         };
-        RectStyle rect_style = {
-            { 0, 0, 0, 0 },
-            0, 0, 0
-        };
+        RectStyle rect_style = { { 0, 0, 0, 0 }, 0, 0, 0 };
         renderer_rect_push(target_rect, texture_rect, color, rect_style);
 
         // Update x position for next char
-        next_pos_x += (float)glyph->xadvance;
+        next_position_x += (float)glyph->xadvance;
     }
 }

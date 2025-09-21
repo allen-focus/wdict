@@ -1,7 +1,9 @@
 #pragma once
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
+
+///
 
 #define Assert(cond)                                                                                                   \
     do                                                                                                                 \
@@ -10,10 +12,20 @@
             __debugbreak();                                                                                            \
     } while (0)
 
+#define Pool(type, size) struct { type items[size]; size_t count; }
+#define Stack(type, size) struct { type items[size]; size_t depth; }
+
+///
+
 typedef struct
 {
     float x, y;
-} Pos;
+} Position;
+
+typedef struct
+{
+    float width, height;
+} Size;
 
 typedef struct
 {
@@ -31,3 +43,8 @@ typedef struct
     float corner_radius, border_thickness;
     bool enable_shadow;
 } RectStyle;
+
+typedef struct
+{
+    float top, right, bottom, left;
+} Padding;

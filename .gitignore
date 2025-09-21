@@ -1,6 +1,5 @@
+
 /build/
 /shaders/
 /.cache/
-/*.10x
-/*.raddbg_user
-/*.raddbg_project
+/compile_commands.json
