@@ -111,6 +111,7 @@ void ui_layout_config(UILayout* layout, UILayoutStyle* style);
 void ui_layout_end();
 
 void ui_layout_resolve(UIContext* ui_context, UILayout* layout);
+void ui_layout_generate_commands(UIContext* ui_context, UILayout* root);
 
 ///
 

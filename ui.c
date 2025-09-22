@@ -32,23 +32,31 @@ void ui_layout_resolve(UIContext* ui_context, UILayout* layout)
         }
     }
 
-    Rect rect = { layout->position.x, layout->position.y, layout->position.x + layout->style.size_style.size.width,
-                  layout->position.y + layout->style.size_style.size.height };
-
-    UICommandRect* cmd = (UICommandRect*)(ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++);
-    cmd->base.type = UI_COMMAND_RECT;
-    cmd->base.size = sizeof(UICommandRect);
-    cmd->rect = rect;
-    cmd->color = layout->style.color;
-    cmd->style = layout->style.rect_style;
-
     for (int i = 0; i < CHILDEN_SIZE; i++)
     {
         UILayout* child = layout->children[i];
-        if (child)
-        {
-            ui_layout_resolve(ui_context, child);
-        }
+        if (child == NULL)
+            break;
+        ui_layout_resolve(ui_context, child);
+    }
+}
+
+void ui_layout_generate_commands(UIContext* ui_context, UILayout* root)
+{
+    UICommandRect* cmd = (UICommandRect*)(ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++);
+    cmd->base.type = UI_COMMAND_RECT;
+    cmd->base.size = sizeof(UICommandRect);
+    cmd->rect = (Rect){ root->position.x, root->position.y, root->position.x + root->style.size_style.size.width,
+                        root->position.y + root->style.size_style.size.height };
+    cmd->color = root->style.color;
+    cmd->style = root->style.rect_style;
+
+    for (int i = 0; i < CHILDEN_SIZE; i++)
+    {
+        UILayout* child = root->children[i];
+        if (child == NULL)
+            break;
+        ui_layout_generate_commands(ui_context, child);
     }
 }
 

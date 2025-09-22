@@ -116,7 +116,9 @@ static void process_frame(UIContext* ui_context)
             {
             }
         }
-        ui_layout_resolve(ui_context, ui_layout_get_root());
+        UILayout* layout_root = ui_layout_get_root();
+        ui_layout_resolve(ui_context, layout_root);
+        ui_layout_generate_commands(ui_context, layout_root);
 
         // Draw
         for (int i = 0; i < ui_context->ui_command_queue.count; i++)
