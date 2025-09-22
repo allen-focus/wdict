@@ -23,17 +23,17 @@ void ui_layout_resolve(UIContext* ui_context, UILayout* layout)
         if (parent->style.direction == UI_LAYOUT_LEFT_TO_RIGHT)
         {
             layout->position.x += parent->next_child_offset_x;
-            parent->next_child_offset_x += layout->style.size.width + parent->style.child_gap;
+            parent->next_child_offset_x += layout->style.size_style.size.width + parent->style.child_gap;
         }
         else
         {
             layout->position.y += parent->next_child_offset_y;
-            parent->next_child_offset_y += layout->style.size.height + parent->style.child_gap;
+            parent->next_child_offset_y += layout->style.size_style.size.height + parent->style.child_gap;
         }
     }
 
-    Rect rect = { layout->position.x, layout->position.y, layout->position.x + layout->style.size.width,
-                  layout->position.y + layout->style.size.height };
+    Rect rect = { layout->position.x, layout->position.y, layout->position.x + layout->style.size_style.size.width,
+                  layout->position.y + layout->style.size_style.size.height };
 
     UICommandRect* cmd = (UICommandRect*)(ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++);
     cmd->base.type = UI_COMMAND_RECT;

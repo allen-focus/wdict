@@ -76,21 +76,21 @@ static void process_frame(UIContext* ui_context)
 
     {
         ui_reset(ui_context);
-        ui_layout({ .size = { 960, 540 },
+        ui_layout({ .size_style = { { 960, 540 }, SIZE_STYLE_FIXED },
                     .color = blue,
                     .rect_style = rect_style,
                     .padding = { 32, 32, 32, 32 },
                     .child_gap = 16,
                     .direction = UI_LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_layout({ .size = { 300, 300 },
+            ui_layout({ .size_style = { { 300, 300 }, SIZE_STYLE_FIXED },
                         .color = pink,
                         .rect_style = rect_style,
                         .padding = { 16, 16, 16, 16 },
                         .child_gap = 8,
                         .direction = UI_LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_layout({ .size = { 100, 100 },
+                ui_layout({ .size_style = { { 100, 100 }, SIZE_STYLE_FIXED },
                             .color = yellow,
                             .rect_style = rect_style,
                             .padding = { 8, 8, 8, 8 },
@@ -98,7 +98,7 @@ static void process_frame(UIContext* ui_context)
                             .direction = UI_LAYOUT_LEFT_TO_RIGHT })
                 {
                 }
-                ui_layout({ .size = { 100, 100 },
+                ui_layout({ .size_style = { { 100, 100 }, SIZE_STYLE_FIXED },
                             .color = yellow,
                             .rect_style = rect_style,
                             .padding = { 8, 8, 8, 8 },
@@ -107,7 +107,7 @@ static void process_frame(UIContext* ui_context)
                 {
                 }
             }
-            ui_layout({ .size = { 300, 300 },
+            ui_layout({ .size_style = { { 300, 300 }, SIZE_STYLE_FIXED },
                         .color = pink,
                         .rect_style = rect_style,
                         .padding = { 16, 16, 16, 16 },

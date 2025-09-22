@@ -59,9 +59,21 @@ typedef union
     UICommandText text;
 } UICommand;
 
+typedef enum
+{
+    SIZE_STYLE_FIXED,
+    SIZE_STYLE_FIT
+} SizeStyleType;
+
 typedef struct
 {
     Size size;
+    SizeStyleType type;
+} SizeStyle;
+
+typedef struct
+{
+    SizeStyle size_style;
     Color color;
     RectStyle rect_style;
     Padding padding;
