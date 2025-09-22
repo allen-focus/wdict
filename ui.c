@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "lib.h"
-#include "renderer.h"
+
+#include <string.h>
 
 #define POOL_SIZE  256
 #define STACK_SIZE 16
@@ -12,7 +13,7 @@ static Stack(UILayout*, STACK_SIZE) ui_layout_stack = { 0 };
 
 ///
 
-void ui_layout_draw(UILayout* layout)
+void ui_layout_resolve(UIContext* ui_context, UILayout* layout)
 {
     if (layout->parent)
     {
@@ -33,14 +34,20 @@ void ui_layout_draw(UILayout* layout)
 
     Rect rect = { layout->position.x, layout->position.y, layout->position.x + layout->style.size.width,
                   layout->position.y + layout->style.size.height };
-    renderer_draw_rect(rect, layout->style.color, layout->style.rect_style);
+
+    UICommandRect* cmd = (UICommandRect*)(ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++);
+    cmd->base.type = UI_COMMAND_RECT;
+    cmd->base.size = sizeof(UICommandRect);
+    cmd->rect = rect;
+    cmd->color = layout->style.color;
+    cmd->style = layout->style.rect_style;
 
     for (int i = 0; i < CHILDEN_SIZE; i++)
     {
         UILayout* child = layout->children[i];
         if (child)
         {
-            ui_layout_draw(child);
+            ui_layout_resolve(ui_context, child);
         }
     }
 }
@@ -94,8 +101,9 @@ void ui_layout_config(UILayout* layout, UILayoutStyle* style)
     memcpy(&layout->style, style, sizeof(*style));
 }
 
-void ui_init()
+void ui_reset(UIContext* ui_context)
 {
     Assert(ui_layout_stack.depth == 0);
     memset(&ui_layout_pool, 0, sizeof(ui_layout_pool));
+    memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
 }

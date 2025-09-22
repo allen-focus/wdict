@@ -27,14 +27,6 @@
 
 ///
 
-// TODO: Need to consider the necessity
-typedef struct
-{
-    uint16_t client_width;
-    uint16_t client_height;
-    void (*on_resize)(uint16_t, uint16_t);
-} UIContext;
-
 typedef struct
 {
     UIContext* ui_context;
@@ -48,7 +40,7 @@ static wchar_t s_window_title[MAX_WINDOW_TITLE_LENGTH] = L"windows title";
 
 ///
 
-static void process_frame()
+static void process_frame(UIContext* ui_context)
 {
     // clang-format off
     RectStyle rect_style = {
@@ -83,7 +75,7 @@ static void process_frame()
     }
 
     {
-        ui_init();
+        ui_reset(ui_context);
         ui_layout({ .size = { 960, 540 },
                     .color = blue,
                     .rect_style = rect_style,
@@ -124,7 +116,26 @@ static void process_frame()
             {
             }
         }
-        ui_layout_draw(ui_layout_get_root());
+        ui_layout_resolve(ui_context, ui_layout_get_root());
+
+        // Draw
+        for (int i = 0; i < ui_context->ui_command_queue.count; i++)
+        {
+            UICommand* cmd = &ui_context->ui_command_queue.items[i];
+            switch (cmd->type)
+            {
+                case UI_COMMAND_RECT:
+                {
+                    renderer_draw_rect(cmd->rect.rect, cmd->rect.color, cmd->rect.style);
+                    break;
+                }
+                case UI_COMMAND_TEXT:
+                {
+                    renderer_draw_text(cmd->text.text, cmd->text.position, cmd->text.color);
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -166,7 +177,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
                 QueryPerformanceCounter(&starting_time);
 #endif
                 {
-                    process_frame();
+                    process_frame(ui_context);
                     renderer_flush_and_present(ui_context->client_width, ui_context->client_height);
                 }
 #ifndef NDEBUG
@@ -256,6 +267,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
         ui_context->on_resize = swapchain_resize;
         ui_context->client_width = CLIENT_WIDTH;
         ui_context->client_height = CLIENT_HEIGHT;
+        memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
     }
     glyph_cache_init_and_fill(window, g_glyph_cache, L"Segoe UI Symbol");
     renderer_init(window);
