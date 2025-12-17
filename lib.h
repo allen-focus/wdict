@@ -13,7 +13,7 @@
     } while (0)
 
 // clang-format off
-#define Pool(type, size) struct { type items[size]; size_t count; }
+#define Queue(type, size) struct { type items[size]; size_t count; }
 #define Stack(type, size) struct { type items[size]; size_t depth; }
 // clang-format on
 

@@ -92,7 +92,7 @@ typedef struct
     uint16_t client_width;
     uint16_t client_height;
     void (*on_resize)(uint16_t, uint16_t);
-    Pool(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
+    Queue(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
 } UIContext;
 
 ///
