@@ -2,4 +2,5 @@
 /build/
 /shaders/
 /.cache/
+
 /compile_commands.json

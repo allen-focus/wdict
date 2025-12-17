@@ -41,7 +41,7 @@ void ui_layout_resolve(UIContext* ui_context, UILayout* layout)
     }
 }
 
-void ui_layout_generate_commands(UIContext* ui_context, UILayout* root)
+void ui_layout_generate_render_commands(UIContext* ui_context, UILayout* root)
 {
     UICommandRect* cmd = (UICommandRect*)(ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++);
     cmd->base.type = UI_COMMAND_RECT;
@@ -56,7 +56,7 @@ void ui_layout_generate_commands(UIContext* ui_context, UILayout* root)
         UILayout* child = root->children[i];
         if (child == NULL)
             break;
-        ui_layout_generate_commands(ui_context, child);
+        ui_layout_generate_render_commands(ui_context, child);
     }
 }
 
@@ -65,18 +65,12 @@ static UILayout* ui_layout_new()
     return &ui_layout_pool.items[ui_layout_pool.count++];
 }
 
-UILayout* ui_layout_get_root()
-{
-    Assert(ui_layout_pool.count > 0);
-    return &ui_layout_pool.items[0];
-}
-
 static UILayout* ui_layout_get_parent()
 {
     return (ui_layout_stack.depth > 0) ? ui_layout_stack.items[ui_layout_stack.depth - 1] : NULL;
 }
 
-UILayout* ui_layout_start()
+UILayout* ui_layout_start(UILayoutStyle* layout_style)
 {
     Assert(ui_layout_stack.depth <= STACK_SIZE);
     Assert(ui_layout_pool.count <= POOL_SIZE);
@@ -96,6 +90,7 @@ UILayout* ui_layout_start()
         }
     }
     ui_layout_stack.items[ui_layout_stack.depth++] = layout;
+    memcpy(&layout->style, layout_style, sizeof(*layout_style));
     return layout;
 }
 

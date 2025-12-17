@@ -5,17 +5,12 @@
 #define CHILDEN_SIZE       16
 #define COMMAND_QUEUE_SIZE 4096
 
-// NOTE: Suppress `warning C4068: unknown pragma 'clang'`
+// NOTE: Suppress compiler warning C4068: unknown pragma 'clang'
 #pragma warning(disable : 4068)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 static int ui_layout_macro_flag;
 #pragma clang diagnostic pop
-
-#define ui_layout(...)                                                                                                 \
-    for (ui_layout_macro_flag = (ui_layout_config(ui_layout_start(), &(UILayoutStyle)__VA_ARGS__), 0);                 \
-         ui_layout_macro_flag < 1; ui_layout_macro_flag = 1, ui_layout_end())
-
 ///
 
 typedef enum
@@ -104,14 +99,11 @@ typedef struct
 
 void ui_reset(UIContext* ui_context);
 
-UILayout* ui_layout_get_root();
-
-UILayout* ui_layout_start();
-void ui_layout_config(UILayout* layout, UILayoutStyle* style);
+UILayout* ui_layout_start(UILayoutStyle* layout_style);
 void ui_layout_end();
 
 void ui_layout_resolve(UIContext* ui_context, UILayout* layout);
-void ui_layout_generate_commands(UIContext* ui_context, UILayout* root);
+void ui_layout_generate_render_commands(UIContext* ui_context, UILayout* root);
 
 ///
 
