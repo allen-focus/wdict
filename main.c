@@ -55,99 +55,85 @@ static void process_frame(UIContext* ui_context)
     Color pink = (Color){ 252, 147, 144, 255 };
     Color yellow = (Color){ 254, 216, 77, 255 };
 
-    // Test text
+    ui_reset(ui_context);
+    LayoutConfig layout_style = { .sizing = { { 960, 540 }, SIZE_STYLE_FIXED },
+                            .color = blue,
+                            .rect_style = default_rect_style,
+                            .padding = { 32, 32, 32, 32 },
+                            .child_gap = 16,
+                            .direction = UI_LAYOUT_LEFT_TO_RIGHT };
+    UILayout* layout = ui_layout_start(&layout_style);
     {
-        // const char* text = "Hello glyph";
-        // Pos text_pos = (Pos){ 50, 50 };
-        // renderer_draw_text(text, text_pos, (Color){ 0, 255, 0, 255 });
-
-        // // Draw top/bottom bar to test text width and height
-        // uint32_t text_width = renderer_get_text_width(text);
-        // uint32_t text_height = renderer_get_text_height(text);
-
-        // Rect text_top_bar = (Rect){ text_pos.x, text_pos.y - 1, text_pos.x + text_width, text_pos.y };
-        // renderer_draw_rect(text_top_bar, (Color){ 255, 0, 0, 255 }, simple_rect_style);
-
-        // Rect text_bottom_bar =
-        //     (Rect){ text_pos.x, text_pos.y + text_height, text_pos.x + text_width, text_pos.y + text_height + 1
-        //     };
-        // renderer_draw_rect(text_bottom_bar, (Color){ 255, 0, 0, 255 }, simple_rect_style);
-    }
-
-    {
-        ui_reset(ui_context);
-        UILayoutStyle layout_style = { .size_style = { { 960, 540 }, SIZE_STYLE_FIXED },
-                                .color = blue,
+        LayoutConfig layout_style = { .sizing = { { 0, 0 }, SIZE_STYLE_FIT },
+                                .color = pink,
                                 .rect_style = default_rect_style,
-                                .padding = { 32, 32, 32, 32 },
-                                .child_gap = 16,
+                                .padding = { 16, 16, 16, 16 },
+                                .child_gap = 8,
                                 .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-        UILayout* layout = ui_layout_start(&layout_style);
+        ui_layout_start(&layout_style);
         {
-            {
-                UILayoutStyle layout_style = { .size_style = { { 300, 300 }, SIZE_STYLE_FIXED },
-                                        .color = pink,
-                                        .rect_style = default_rect_style,
-                                        .padding = { 16, 16, 16, 16 },
-                                        .child_gap = 8,
-                                        .direction = UI_LAYOUT_TOP_TO_BOTTOM };
-                ui_layout_start(&layout_style);
-                {
-                    UILayoutStyle layout_style = { .size_style = { { 100, 100 }, SIZE_STYLE_FIXED },
-                                            .color = yellow,
-                                            .rect_style = default_rect_style,
-                                            .padding = { 8, 8, 8, 8 },
-                                            .child_gap = 4,
-                                            .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-                    ui_layout_start(&layout_style);
-                    ui_layout_end();
-                }
-                {
-                    UILayoutStyle layout_style = { .size_style = { { 100, 100 }, SIZE_STYLE_FIXED },
-                                            .color = yellow,
-                                            .rect_style = default_rect_style,
-                                            .padding = { 8, 8, 8, 8 },
-                                            .child_gap = 4,
-                                            .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-                    ui_layout_start(&layout_style);
-                    ui_layout_end();
-                }
-                ui_layout_end();
-            }
-            {
-                UILayoutStyle layout_style = { .size_style = { { 300, 300 }, SIZE_STYLE_FIXED },
-                                        .color = pink,
-                                        .rect_style = default_rect_style,
-                                        .padding = { 16, 16, 16, 16 },
-                                        .child_gap = 8,
-                                        .direction = UI_LAYOUT_TOP_TO_BOTTOM };
-                ui_layout_start(&layout_style);
-                ui_layout_end();
-            }
+            LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZE_STYLE_FIXED },
+                                    .color = yellow,
+                                    .rect_style = default_rect_style,
+                                    .padding = { 8, 8, 8, 8 },
+                                    .child_gap = 4,
+                                    .direction = UI_LAYOUT_LEFT_TO_RIGHT };
+            ui_layout_start(&layout_style);
+            ui_layout_end();
+        }
+        {
+            LayoutConfig layout_style = { .sizing = { { 150, 200 }, SIZE_STYLE_FIXED },
+                                    .color = yellow,
+                                    .rect_style = default_rect_style,
+                                    .padding = { 8, 8, 8, 8 },
+                                    .child_gap = 4,
+                                    .direction = UI_LAYOUT_LEFT_TO_RIGHT };
+            ui_layout_start(&layout_style);
+            ui_layout_end();
+        }
+        {
+            LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZE_STYLE_FIXED },
+                                    .color = yellow,
+                                    .rect_style = default_rect_style,
+                                    .padding = { 8, 8, 8, 8 },
+                                    .child_gap = 4,
+                                    .direction = UI_LAYOUT_LEFT_TO_RIGHT };
+            ui_layout_start(&layout_style);
+            ui_layout_end();
         }
         ui_layout_end();
+    }
+    {
+        LayoutConfig layout_style = { .sizing = { { 300, 300 }, SIZE_STYLE_FIXED },
+                                .color = pink,
+                                .rect_style = default_rect_style,
+                                .padding = { 16, 16, 16, 16 },
+                                .child_gap = 8,
+                                .direction = UI_LAYOUT_TOP_TO_BOTTOM };
+        ui_layout_start(&layout_style);
+        ui_layout_end();
+    }
+    ui_layout_end();
 
-        //
-        ui_layout_resolve(ui_context, layout);
-        ui_layout_generate_render_commands(ui_context, layout);
+    //
+    ui_layout_resolve_size(ui_context, layout);
+    ui_layout_resolve_position(ui_context, layout);
+    ui_layout_generate_render_commands(ui_context, layout);
 
-        // Draw
-        for (int i = 0; i < ui_context->ui_command_queue.count; i++)
+    // Draw
+    for (int i = 0; i < ui_context->ui_command_queue.count; i++)
+    {
+        UICommand* cmd = &ui_context->ui_command_queue.items[i];
+        switch (cmd->type)
         {
-            UICommand* cmd = &ui_context->ui_command_queue.items[i];
-            switch (cmd->type)
-            {
-                case UI_COMMAND_RECT:
-                {
-                    renderer_draw_rect(cmd->rect.rect, cmd->rect.color, cmd->rect.style);
-                    break;
-                }
-                case UI_COMMAND_TEXT:
-                {
-                    renderer_draw_text(cmd->text.text, cmd->text.position, cmd->text.color);
-                    break;
-                }
-            }
+            case UI_COMMAND_RECT:
+                renderer_draw_rect(cmd->rect.rect, cmd->rect.color, cmd->rect.style);
+                break;
+            case UI_COMMAND_TEXT:
+                renderer_draw_text(cmd->text.text, cmd->text.position, cmd->text.color);
+                break;
+            default:
+                Assert(0);
         }
     }
 }

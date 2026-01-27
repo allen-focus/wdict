@@ -58,23 +58,23 @@ typedef enum
 {
     SIZE_STYLE_FIXED,
     SIZE_STYLE_FIT
-} SizeStyleType;
+} SizingMode;
 
 typedef struct
 {
-    Size size;
-    SizeStyleType type;
-} SizeStyle;
+    Size value;
+    SizingMode mode;
+} Sizing;
 
 typedef struct
 {
-    SizeStyle size_style;
+    Sizing sizing;
     Color color;
     RectStyle rect_style;
     Padding padding;
     float child_gap;
     Direction direction;
-} UILayoutStyle;
+} LayoutConfig;
 
 typedef struct UILayout UILayout;
 struct UILayout
@@ -82,7 +82,7 @@ struct UILayout
     Position position;
     float next_child_offset_x;
     float next_child_offset_y;
-    UILayoutStyle style;
+    LayoutConfig config;
     UILayout* parent;
     UILayout* children[CHILDEN_SIZE];
 };
@@ -99,10 +99,11 @@ typedef struct
 
 void ui_reset(UIContext* ui_context);
 
-UILayout* ui_layout_start(UILayoutStyle* layout_style);
+UILayout* ui_layout_start(LayoutConfig* layout_style);
 void ui_layout_end();
 
-void ui_layout_resolve(UIContext* ui_context, UILayout* layout);
+void ui_layout_resolve_size(UIContext* ui_context, UILayout* layout);
+void ui_layout_resolve_position(UIContext* ui_context, UILayout* layout);
 void ui_layout_generate_render_commands(UIContext* ui_context, UILayout* root);
 
 ///

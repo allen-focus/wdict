@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "lib.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define QUEUE_SIZE  256
@@ -13,22 +14,86 @@ static Stack(UILayout*, STACK_SIZE) ui_layout_stack = { 0 };
 
 ///
 
-void ui_layout_resolve(UIContext* ui_context, UILayout* layout)
+void ui_layout_resolve_size(UIContext* ui_context, UILayout* layout)
+{
+    int child_count = 0;
+    for (int i = 0; i < CHILDEN_SIZE; i++)
+    {
+        UILayout* child = layout->children[child_count];
+        if (child)
+        {
+            child_count++;
+            ui_layout_resolve_size(ui_context, child);
+        }
+    }
+
+    // If this layout has no children, it is a leaf node in the layout hierarchy.
+    // In this case, update the parent's size according to the parent's direction
+    // to accommodate this layout's dimensions.
+    if (!child_count)
+    {
+        UILayout* parent = layout->parent;
+        if (parent)
+            if (parent->config.sizing.mode == SIZE_STYLE_FIT)
+                switch (parent->config.direction)
+                {
+                    case UI_LAYOUT_LEFT_TO_RIGHT:
+                        parent->config.sizing.value.height = max(layout->config.sizing.value.height, parent->config.sizing.value.height);
+                        parent->config.sizing.value.width += layout->config.sizing.value.width;
+                        break;
+                    case UI_LAYOUT_TOP_TO_BOTTOM:
+                        parent->config.sizing.value.width = max(layout->config.sizing.value.width, parent->config.sizing.value.width);
+                        parent->config.sizing.value.height += layout->config.sizing.value.height;
+                        break;
+                    default:
+                        Assert(0);
+                }
+    }
+    // If this layout has children, apply padding and child gaps to compute the final size
+    else
+    {
+        if (layout->config.sizing.mode == SIZE_STYLE_FIT)
+        {
+            // padding
+            layout->config.sizing.value.width += layout->config.padding.left + layout->config.padding.right;
+            layout->config.sizing.value.height += layout->config.padding.top + layout->config.padding.bottom;
+
+            // child gap
+            int child_gap_count = child_count - 1;
+            switch (layout->config.direction)
+            {
+                case UI_LAYOUT_LEFT_TO_RIGHT:
+                    layout->config.sizing.value.width += layout->config.child_gap * child_gap_count;
+                    break;
+                case UI_LAYOUT_TOP_TO_BOTTOM:
+                    layout->config.sizing.value.height += layout->config.child_gap * child_gap_count;
+                    break;
+                default:
+                    Assert(0);
+            }
+        }
+    }
+}
+
+void ui_layout_resolve_position(UIContext* ui_context, UILayout* layout)
 {
     if (layout->parent)
     {
         UILayout* parent = layout->parent;
-        layout->position.x += parent->position.x + parent->style.padding.left;
-        layout->position.y += parent->position.y + parent->style.padding.top;
-        if (parent->style.direction == UI_LAYOUT_LEFT_TO_RIGHT)
+        layout->position.x += parent->position.x + parent->config.padding.left;
+        layout->position.y += parent->position.y + parent->config.padding.top;
+        switch (parent->config.direction)
         {
-            layout->position.x += parent->next_child_offset_x;
-            parent->next_child_offset_x += layout->style.size_style.size.width + parent->style.child_gap;
-        }
-        else
-        {
-            layout->position.y += parent->next_child_offset_y;
-            parent->next_child_offset_y += layout->style.size_style.size.height + parent->style.child_gap;
+            case UI_LAYOUT_LEFT_TO_RIGHT:
+                layout->position.x += parent->next_child_offset_x;
+                parent->next_child_offset_x += layout->config.sizing.value.width + parent->config.child_gap;
+                break;
+            case UI_LAYOUT_TOP_TO_BOTTOM:
+                layout->position.y += parent->next_child_offset_y;
+                parent->next_child_offset_y += layout->config.sizing.value.height + parent->config.child_gap;
+                break;
+            default:
+                Assert(0);
         }
     }
 
@@ -37,19 +102,20 @@ void ui_layout_resolve(UIContext* ui_context, UILayout* layout)
         UILayout* child = layout->children[i];
         if (child == NULL)
             break;
-        ui_layout_resolve(ui_context, child);
+        ui_layout_resolve_position(ui_context, child);
     }
 }
 
+// TODO: Currently we assume all render commands are Rect. Need to handle text etc in the future.
 void ui_layout_generate_render_commands(UIContext* ui_context, UILayout* root)
 {
     UICommandRect* cmd = (UICommandRect*)(ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++);
     cmd->base.type = UI_COMMAND_RECT;
     cmd->base.size = sizeof(UICommandRect);
-    cmd->rect = (Rect){ root->position.x, root->position.y, root->position.x + root->style.size_style.size.width,
-                        root->position.y + root->style.size_style.size.height };
-    cmd->color = root->style.color;
-    cmd->style = root->style.rect_style;
+    cmd->rect = (Rect){ root->position.x, root->position.y, root->position.x + root->config.sizing.value.width,
+                        root->position.y + root->config.sizing.value.height };
+    cmd->color = root->config.color;
+    cmd->style = root->config.rect_style;
 
     for (int i = 0; i < CHILDEN_SIZE; i++)
     {
@@ -70,7 +136,7 @@ static UILayout* ui_layout_get_parent()
     return (ui_layout_stack.depth > 0) ? ui_layout_stack.items[ui_layout_stack.depth - 1] : NULL;
 }
 
-UILayout* ui_layout_start(UILayoutStyle* layout_style)
+UILayout* ui_layout_start(LayoutConfig* layout_style)
 {
     Assert(ui_layout_stack.depth <= STACK_SIZE);
     Assert(ui_layout_queue.count <= QUEUE_SIZE);
@@ -90,7 +156,7 @@ UILayout* ui_layout_start(UILayoutStyle* layout_style)
         }
     }
     ui_layout_stack.items[ui_layout_stack.depth++] = layout;
-    memcpy(&layout->style, layout_style, sizeof(*layout_style));
+    memcpy(&layout->config, layout_style, sizeof(*layout_style));
     return layout;
 }
 
@@ -99,9 +165,9 @@ void ui_layout_end()
     ui_layout_stack.items[ui_layout_stack.depth--] = NULL;
 }
 
-void ui_layout_config(UILayout* layout, UILayoutStyle* style)
+void ui_layout_config(UILayout* layout, LayoutConfig* style)
 {
-    memcpy(&layout->style, style, sizeof(*style));
+    memcpy(&layout->config, style, sizeof(*style));
 }
 
 void ui_reset(UIContext* ui_context)
