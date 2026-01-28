@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <windows.h>
 
 #define QUEUE_SIZE  256
 #define STACK_SIZE 16
@@ -16,6 +17,7 @@ static Stack(UILayout*, STACK_SIZE) ui_layout_stack = { 0 };
 
 void ui_layout_resolve_size(UIContext* ui_context, UILayout* layout)
 {
+    // Recursively resolve layout size (process deepest children first)
     int child_count = 0;
     for (int i = 0; i < CHILDEN_SIZE; i++)
     {
@@ -27,52 +29,47 @@ void ui_layout_resolve_size(UIContext* ui_context, UILayout* layout)
         }
     }
 
-    // If this layout has no children, it is a leaf node in the layout hierarchy.
-    // In this case, update the parent's size according to the parent's direction
-    // to accommodate this layout's dimensions.
-    if (!child_count)
+    // When sizing mode is set to 'fit', adjust the layout size by adding padding and child gap
+    if (layout->config.sizing.mode == SIZE_STYLE_FIT)
     {
-        UILayout* parent = layout->parent;
-        if (parent)
-            if (parent->config.sizing.mode == SIZE_STYLE_FIT)
-                switch (parent->config.direction)
-                {
-                    case UI_LAYOUT_LEFT_TO_RIGHT:
-                        parent->config.sizing.value.height = max(layout->config.sizing.value.height, parent->config.sizing.value.height);
-                        parent->config.sizing.value.width += layout->config.sizing.value.width;
-                        break;
-                    case UI_LAYOUT_TOP_TO_BOTTOM:
-                        parent->config.sizing.value.width = max(layout->config.sizing.value.width, parent->config.sizing.value.width);
-                        parent->config.sizing.value.height += layout->config.sizing.value.height;
-                        break;
-                    default:
-                        Assert(0);
-                }
-    }
-    // If this layout has children, apply padding and child gaps to compute the final size
-    else
-    {
-        if (layout->config.sizing.mode == SIZE_STYLE_FIT)
-        {
-            // padding
-            layout->config.sizing.value.width += layout->config.padding.left + layout->config.padding.right;
-            layout->config.sizing.value.height += layout->config.padding.top + layout->config.padding.bottom;
+        // padding
+        layout->config.sizing.value.width += layout->config.padding.left + layout->config.padding.right;
+        layout->config.sizing.value.height += layout->config.padding.top + layout->config.padding.bottom;
 
-            // child gap
-            int child_gap_count = child_count - 1;
-            switch (layout->config.direction)
+        // child gap
+        int child_gap_count = child_count - 1;
+        switch (layout->config.direction)
+        {
+            case UI_LAYOUT_LEFT_TO_RIGHT:
+                layout->config.sizing.value.width += layout->config.child_gap * child_gap_count;
+                break;
+            case UI_LAYOUT_TOP_TO_BOTTOM:
+                layout->config.sizing.value.height += layout->config.child_gap * child_gap_count;
+                break;
+            default:
+                Assert(0);
+        }
+    }
+
+    // If the current layout is a child, adjust its parent's size based on layout direction.
+    // Note: Since recursion processes deepest children first, this layout’s size has already been fully calculated
+    // (including any children it may have), so no further size propagation is needed at this level.
+    UILayout* parent = layout->parent;
+    if (parent)
+        if (parent->config.sizing.mode == SIZE_STYLE_FIT)
+            switch (parent->config.direction)
             {
                 case UI_LAYOUT_LEFT_TO_RIGHT:
-                    layout->config.sizing.value.width += layout->config.child_gap * child_gap_count;
+                    parent->config.sizing.value.height = max(layout->config.sizing.value.height, parent->config.sizing.value.height);
+                    parent->config.sizing.value.width += layout->config.sizing.value.width;
                     break;
                 case UI_LAYOUT_TOP_TO_BOTTOM:
-                    layout->config.sizing.value.height += layout->config.child_gap * child_gap_count;
+                    parent->config.sizing.value.width = max(layout->config.sizing.value.width, parent->config.sizing.value.width);
+                    parent->config.sizing.value.height += layout->config.sizing.value.height;
                     break;
                 default:
                     Assert(0);
             }
-        }
-    }
 }
 
 void ui_layout_resolve_position(UIContext* ui_context, UILayout* layout)
@@ -140,6 +137,9 @@ UILayout* ui_layout_start(LayoutConfig* layout_style)
 {
     Assert(ui_layout_stack.depth <= STACK_SIZE);
     Assert(ui_layout_queue.count <= QUEUE_SIZE);
+
+    Assert(layout_style->sizing.mode != SIZE_STYLE_FIT ||
+           (layout_style->sizing.value.width == 0 && layout_style->sizing.value.height == 0));
 
     UILayout* layout = ui_layout_new();
     UILayout* parent = ui_layout_get_parent();
