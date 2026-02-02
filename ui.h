@@ -2,7 +2,7 @@
 #include "lib.h"
 
 // TODO: Don't hard-code
-#define CHILDEN_SIZE       16
+#define CHILDREN_SIZE       16
 #define COMMAND_QUEUE_SIZE 4096
 
 // NOTE: Suppress compiler warning C4068: unknown pragma 'clang'
@@ -11,13 +11,12 @@
 #pragma clang diagnostic ignored "-Weverything"
 static int ui_layout_macro_flag;
 #pragma clang diagnostic pop
-///
 
-typedef enum
-{
-    UI_LAYOUT_LEFT_TO_RIGHT,
-    UI_LAYOUT_TOP_TO_BOTTOM
-} Direction;
+// =========================================================
+// Enum & Struct
+// =========================================================
+
+// Command -----------------------------
 
 typedef enum
 {
@@ -54,17 +53,39 @@ typedef union
     UICommandText text;
 } UICommand;
 
+// Sizing ------------------------------
+
 typedef enum
 {
-    SIZE_STYLE_FIXED,
-    SIZE_STYLE_FIT
+    FIT = 0,
+    GROW = -1
+} SizeSpecialValue;
+
+typedef enum
+{
+    SIZING_MODE_FIXED,
+    SIZING_MODE_FIT,
+    SIZING_MODE_GROW
 } SizingMode;
+
+typedef struct
+{
+    float width, height;
+} Size;
 
 typedef struct
 {
     Size value;
     SizingMode mode;
 } Sizing;
+
+// Layout ------------------------------
+
+typedef enum
+{
+    UI_LAYOUT_LEFT_TO_RIGHT,
+    UI_LAYOUT_TOP_TO_BOTTOM
+} Direction;
 
 typedef struct
 {
@@ -79,13 +100,17 @@ typedef struct
 typedef struct UILayout UILayout;
 struct UILayout
 {
+    Size remaining_space;
     Position position;
     float next_child_offset_x;
     float next_child_offset_y;
     LayoutConfig config;
     UILayout* parent;
-    UILayout* children[CHILDEN_SIZE];
+    UILayout* children[CHILDREN_SIZE];
+    int children_count;
 };
+
+// Context -----------------------------
 
 typedef struct
 {
@@ -95,15 +120,18 @@ typedef struct
     Queue(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
 } UIContext;
 
-///
+// =========================================================
+// Function
+// =========================================================
 
 void ui_reset(UIContext* ui_context);
 
 UILayout* ui_layout_start(LayoutConfig* layout_style);
 void ui_layout_end();
 
-void ui_layout_resolve_size(UIContext* ui_context, UILayout* layout);
-void ui_layout_resolve_position(UIContext* ui_context, UILayout* layout);
+void ui_layout_resolve_size_reverse(UILayout* layout);
+void ui_layout_resolve_size(UILayout* layout);
+void ui_layout_resolve_position(UILayout* layout);
 void ui_layout_generate_render_commands(UIContext* ui_context, UILayout* root);
 
 ///

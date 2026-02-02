@@ -26,11 +26,6 @@ typedef struct
 
 typedef struct
 {
-    float width, height;
-} Size;
-
-typedef struct
-{
     float xmin, ymin, xmax, ymax;
 } Rect;
 
