@@ -371,11 +371,12 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
     Vertex* vertex = &s_vertex_stack.data[s_vertex_stack.count];
 
     // Update target rect
+    // Note: Add +0.5 to fix the integer to float conversion precision loss
     {
-        vertex->target_rect[0] = target_rect.xmin;
-        vertex->target_rect[1] = target_rect.ymin;
-        vertex->target_rect[2] = target_rect.xmax;
-        vertex->target_rect[3] = target_rect.ymax;
+        vertex->target_rect[0] = target_rect.xmin + 0.5f;
+        vertex->target_rect[1] = target_rect.ymin + 0.5f;
+        vertex->target_rect[2] = target_rect.xmax + 0.5f;
+        vertex->target_rect[3] = target_rect.ymax + 0.5f;
     }
 
     // Update texture rect
