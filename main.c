@@ -20,8 +20,8 @@
 
 ///
 
-#define CLIENT_WIDTH  1080
-#define CLIENT_HEIGHT 720
+#define CLIENT_WIDTH  800
+#define CLIENT_HEIGHT 600
 
 #define MAX_WINDOW_TITLE_LENGTH 64
 
@@ -38,96 +38,105 @@ GlyphCache* g_glyph_cache;
 
 static wchar_t s_window_title[MAX_WINDOW_TITLE_LENGTH] = L"windows title";
 
+/// Temp
+
+RectStyle background_rect_style = {
+    .border_color = { 0, 0, 0, 0 },
+    .corner_radius = 0,
+    .border_thickness = 0,
+    .enable_shadow = false
+};
+
+RectStyle normal_rect_style = {
+    .border_color = { 0, 0, 0, 0 },
+    .corner_radius = 12,
+    .border_thickness = 0,
+    .enable_shadow = false
+};
+
+Color purple = { 10,  110, 137, 255 };
+Color white  = { 255, 224, 224, 224 };
+Color red    = { 252, 147, 144, 255 };
+Color yellow = { 254, 216, 77,  255 };
+Color blue   = { 94,  203, 228, 255 };
+
+Padding padding_bigger  = { 40, 40, 40, 40 };
+Padding padding_big     = { 30, 30, 30, 30 };
+Padding padding_medium  = { 20, 20, 20, 20 };
+Padding padding_small   = { 10, 10, 10, 10 };
+
+float child_gap_bigger  = 30;
+float child_gap_big     = 20;
+float child_gap_medium  = 10;
+float child_gap_small   = 5;
+
 ///
 
 static void process_frame(UIContext* ui_context)
 {
-    // clang-format off
-    RectStyle default_rect_style = {
-        .border_color = { 0, 0, 0, 0 },
-        .corner_radius = 0,
-        .border_thickness = 0,
-        .enable_shadow = false
-    };
-    // clang-format on
-
-    Color blue = (Color){ 10, 110, 137, 255 };
-    Color pink = (Color){ 252, 147, 144, 255 };
-    Color yellow = (Color){ 254, 216, 77, 255 };
-
     ui_reset(ui_context);
     LayoutConfig layout_style = { .sizing = { { ui_context->client_width, ui_context->client_height },
                                               SIZING_MODE_FIXED },
-                                  .color = blue,
-                                  .rect_style = default_rect_style,
-                                  .padding = { 32, 32, 32, 32 },
-                                  .child_gap = 16,
+                                  .color = white,
+                                  .rect_style = background_rect_style,
+                                  .padding = padding_bigger,
+                                  .child_gap = child_gap_bigger,
                                   .direction = UI_LAYOUT_LEFT_TO_RIGHT };
     UILayout* layout = ui_layout_start(&layout_style);
     {
-        LayoutConfig layout_style = { .sizing = { { 500, 300 }, SIZING_MODE_FIXED },
-                                      .color = pink,
-                                      .rect_style = default_rect_style,
-                                      .padding = { 16, 16, 16, 16 },
-                                      .child_gap = 8,
-                                      .direction = UI_LAYOUT_TOP_TO_BOTTOM };
+        LayoutConfig layout_style = { .sizing = { { 600, 300 }, SIZING_MODE_FIXED },
+                                      .color = purple,
+                                      .rect_style = normal_rect_style,
+                                      .padding = padding_big,
+                                      .child_gap = child_gap_big,
+                                      .direction = UI_LAYOUT_LEFT_TO_RIGHT };
         ui_layout_start(&layout_style);
-        ui_layout_end();
-    }
-    {
-        LayoutConfig layout_style = { .sizing = { { GROW, GROW }, SIZING_MODE_GROW },
-                                      .color = pink,
-                                      .rect_style = default_rect_style,
-                                      .padding = { 16, 16, 16, 16 },
-                                      .child_gap = 8,
-                                      .direction = UI_LAYOUT_TOP_TO_BOTTOM };
-        ui_layout_start(&layout_style);
+        {
+            LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
+                                          .color = red,
+                                          .rect_style = normal_rect_style,
+                                          .padding = padding_medium,
+                                          .child_gap = child_gap_medium,
+                                          .direction = UI_LAYOUT_TOP_TO_BOTTOM };
+            ui_layout_start(&layout_style);
+            ui_layout_end();
+        }
         {
             LayoutConfig layout_style = { .sizing = { { GROW, GROW }, SIZING_MODE_GROW },
                                           .color = yellow,
-                                          .rect_style = default_rect_style,
-                                          .padding = { 8, 8, 8, 8 },
-                                          .child_gap = 4,
-                                          .direction = UI_LAYOUT_TOP_TO_BOTTOM };
+                                          .rect_style = normal_rect_style,
+                                          .padding = padding_medium,
+                                          .child_gap = child_gap_medium,
+                                          .direction = UI_LAYOUT_LEFT_TO_RIGHT };
             ui_layout_start(&layout_style);
             {
-                LayoutConfig layout_style = { .sizing = { { FIT, FIT }, SIZING_MODE_FIT },
-                                                .color = blue,
-                                                .rect_style = default_rect_style,
-                                                .padding = { 4, 4, 4, 4 },
-                                                .child_gap = 2,
+                LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
+                                                .color = purple,
+                                                .rect_style = normal_rect_style,
+                                                .padding = padding_small,
+                                                .child_gap = child_gap_small,
                                                 .direction = UI_LAYOUT_LEFT_TO_RIGHT };
                 ui_layout_start(&layout_style);
-                {
-                    LayoutConfig layout_style = { .sizing = { { 200, 100 }, SIZING_MODE_FIXED },
-                                                    .color = pink,
-                                                    .rect_style = default_rect_style,
-                                                    .padding = { 2, 2, 2, 2 },
-                                                    .child_gap = 1,
-                                                    .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-                    ui_layout_start(&layout_style);
-                    ui_layout_end();
-                }
-                {
-                    LayoutConfig layout_style = { .sizing = { { 100, 250 }, SIZING_MODE_FIXED },
-                                                    .color = pink,
-                                                    .rect_style = default_rect_style,
-                                                    .padding = { 2, 2, 2, 2 },
-                                                    .child_gap = 1,
-                                                    .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-                    ui_layout_start(&layout_style);
-                    ui_layout_end();
-                }
+                ui_layout_end();
+            }
+            {
+                LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
+                                                .color = purple,
+                                                .rect_style = normal_rect_style,
+                                                .padding = padding_small,
+                                                .child_gap = child_gap_small,
+                                                .direction = UI_LAYOUT_LEFT_TO_RIGHT };
+                ui_layout_start(&layout_style);
                 ui_layout_end();
             }
             ui_layout_end();
         }
         {
-            LayoutConfig layout_style = { .sizing = { { 200, 250 }, SIZING_MODE_FIXED },
-                                          .color = yellow,
-                                          .rect_style = default_rect_style,
-                                          .padding = { 8, 8, 8, 8 },
-                                          .child_gap = 4,
+            LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
+                                          .color = blue,
+                                          .rect_style = normal_rect_style,
+                                          .padding = padding_medium,
+                                          .child_gap = child_gap_medium,
                                           .direction = UI_LAYOUT_TOP_TO_BOTTOM };
             ui_layout_start(&layout_style);
             ui_layout_end();
