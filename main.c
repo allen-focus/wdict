@@ -15,13 +15,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
+#include <wchar.h>
 
 ///
 
 #define CLIENT_WIDTH  800
-#define CLIENT_HEIGHT 600
+#define CLIENT_HEIGHT 400
 
 #define MAX_WINDOW_TITLE_LENGTH 64
 
@@ -60,7 +60,7 @@ Color red    = { 252, 147, 144, 255 };
 Color yellow = { 254, 216, 77,  255 };
 Color blue   = { 94,  203, 228, 255 };
 
-Padding padding_bigger  = { 40, 40, 40, 40 };
+Padding padding_bigger  = { 50, 50, 50, 50 };
 Padding padding_big     = { 30, 30, 30, 30 };
 Padding padding_medium  = { 20, 20, 20, 20 };
 Padding padding_small   = { 10, 10, 10, 10 };
@@ -84,7 +84,7 @@ static void process_frame(UIContext* ui_context)
                                   .direction = UI_LAYOUT_LEFT_TO_RIGHT };
     UILayout* layout = ui_layout_start(&layout_style);
     {
-        LayoutConfig layout_style = { .sizing = { { 600, 300 }, SIZING_MODE_FIXED },
+        LayoutConfig layout_style = { .sizing = { { 0, 0 }, SIZING_MODE_FIT_GROW_BOTH },
                                       .color = purple,
                                       .rect_style = normal_rect_style,
                                       .padding = padding_big,
@@ -102,7 +102,7 @@ static void process_frame(UIContext* ui_context)
             ui_layout_end();
         }
         {
-            LayoutConfig layout_style = { .sizing = { { GROW, GROW }, SIZING_MODE_GROW },
+            LayoutConfig layout_style = { .sizing = { { 0, 0 }, SIZING_MODE_FIT_GROW_BOTH },
                                           .color = yellow,
                                           .rect_style = normal_rect_style,
                                           .padding = padding_medium,
@@ -132,7 +132,7 @@ static void process_frame(UIContext* ui_context)
             ui_layout_end();
         }
         {
-            LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
+            LayoutConfig layout_style = { .sizing = { { 0, 100 }, SIZING_MODE_FIT_GROW_WIDTH },
                                           .color = blue,
                                           .rect_style = normal_rect_style,
                                           .padding = padding_medium,
@@ -141,13 +141,33 @@ static void process_frame(UIContext* ui_context)
             ui_layout_start(&layout_style);
             ui_layout_end();
         }
+        {
+            LayoutConfig layout_style = { .sizing = { { 0, 100 }, SIZING_MODE_FIT_GROW_WIDTH },
+                                          .color = blue,
+                                          .rect_style = normal_rect_style,
+                                          .padding = padding_medium,
+                                          .child_gap = child_gap_medium,
+                                          .direction = UI_LAYOUT_TOP_TO_BOTTOM };
+            ui_layout_start(&layout_style);
+            {
+                LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
+                                                .color = purple,
+                                                .rect_style = normal_rect_style,
+                                                .padding = padding_small,
+                                                .child_gap = child_gap_small,
+                                                .direction = UI_LAYOUT_LEFT_TO_RIGHT };
+                ui_layout_start(&layout_style);
+                ui_layout_end();
+            }
+            ui_layout_end();
+        }
         ui_layout_end();
     }
     ui_layout_end();
 
     //
-    ui_layout_resolve_size_reverse(layout);
-    ui_layout_resolve_size(layout);
+    ui_layout_calculate_fit_size(layout);
+    ui_layout_grow_children(layout);
     ui_layout_resolve_position(layout);
     ui_layout_generate_render_commands(ui_context, layout);
 

@@ -2,7 +2,7 @@
 #include "lib.h"
 
 // TODO: Don't hard-code
-#define CHILDREN_SIZE       16
+#define CHILDREN_SIZE      16
 #define COMMAND_QUEUE_SIZE 4096
 
 // NOTE: Suppress compiler warning C4068: unknown pragma 'clang'
@@ -57,15 +57,11 @@ typedef union
 
 typedef enum
 {
-    FIT = 0,
-    GROW = -1
-} SizeSpecialValue;
-
-typedef enum
-{
     SIZING_MODE_FIXED,
     SIZING_MODE_FIT,
-    SIZING_MODE_GROW
+    SIZING_MODE_FIT_GROW_WIDTH,
+    SIZING_MODE_FIT_GROW_HEIGHT,
+    SIZING_MODE_FIT_GROW_BOTH
 } SizingMode;
 
 typedef struct
@@ -129,8 +125,8 @@ void ui_reset(UIContext* ui_context);
 UILayout* ui_layout_start(LayoutConfig* layout_style);
 void ui_layout_end();
 
-void ui_layout_resolve_size_reverse(UILayout* layout);
-void ui_layout_resolve_size(UILayout* layout);
+void ui_layout_calculate_fit_size(UILayout* layout);
+void ui_layout_grow_children(UILayout* layout);
 void ui_layout_resolve_position(UILayout* layout);
 void ui_layout_generate_render_commands(UIContext* ui_context, UILayout* root);
 
