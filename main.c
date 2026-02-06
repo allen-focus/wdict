@@ -106,7 +106,7 @@ static void process_frame(UIContext* ui_context)
                         .direction = LAYOUT_LEFT_TO_RIGHT })
             {
             }
-            ui_layout({ .sizing = { fit_grow(0), fixed(140) },
+            ui_layout({ .sizing = {  fixed(200), fit(0) },
                         .color = blue,
                         .rect_style = normal_rect_style,
                         .padding = padding_medium,

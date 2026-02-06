@@ -62,17 +62,15 @@ void ui_layout_calculate_fit_size(UILayout* layout)
         {
             case LAYOUT_LEFT_TO_RIGHT:
                 if (ui_layout_has_fit_attribute(parent->config.sizing.width))
-                {
-                    parent->config.sizing.height.value = max(layout->config.sizing.height.value, parent->config.sizing.height.value);
                     parent->config.sizing.width.value += layout->config.sizing.width.value;
-                }
+                if (ui_layout_has_fit_attribute(parent->config.sizing.height))
+                    parent->config.sizing.height.value = max(layout->config.sizing.height.value, parent->config.sizing.height.value);
                 break;
             case LAYOUT_TOP_TO_BOTTOM:
                 if (ui_layout_has_fit_attribute(parent->config.sizing.height))
-                {
-                    parent->config.sizing.width.value = max(layout->config.sizing.width.value, parent->config.sizing.width.value);
                     parent->config.sizing.height.value += layout->config.sizing.height.value;
-                }
+                if (ui_layout_has_fit_attribute(parent->config.sizing.width))
+                    parent->config.sizing.width.value = max(layout->config.sizing.width.value, parent->config.sizing.width.value);
                 break;
         }
 }
