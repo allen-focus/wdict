@@ -62,24 +62,28 @@ typedef union
 
 // Sizing ------------------------------
 
+typedef struct {
+    float width;
+    float height;
+} Size;
+
 typedef enum
 {
     SIZING_MODE_FIXED,
     SIZING_MODE_FIT,
-    SIZING_MODE_FIT_GROW_WIDTH,
-    SIZING_MODE_FIT_GROW_HEIGHT,
-    SIZING_MODE_FIT_GROW_BOTH
+    SIZING_MODE_FIT_GROW,
 } SizingMode;
 
 typedef struct
 {
-    float width, height;
-} Size;
+    float value;
+    SizingMode mode;
+} SizingAxis;
 
 typedef struct
 {
-    Size value;
-    SizingMode mode;
+    SizingAxis width;
+    SizingAxis height;
 } Sizing;
 
 // Layout ------------------------------

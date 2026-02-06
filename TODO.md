@@ -4,7 +4,7 @@ Use ~~x~~ to mark item as completed.
 2. ~~Fit (x axis only)~~
 3. ~~Fit~~
 4. ~~Simple grow~~
-5. Multiple grow
+5. ~~Multiple grow~~
 6. Shrink
 7. Text Wrap
 8. Text Wrap fit (adjust pipeline)
