@@ -1,17 +1,6 @@
 #pragma once
 #include "lib.h"
 
-// clang-format off
-#define ui_layout(...)                                                                                                 \
-    for (ui_layout_macro_flag = (ui_layout_start(&(LayoutConfig)__VA_ARGS__), 0);                                      \
-         ui_layout_macro_flag < 1;                                                                                     \
-         ui_layout_macro_flag = 1, ui_layout_end())
-// clang-format on
-
-// TODO: Don't hard-code
-#define CHILDREN_SIZE      16
-#define COMMAND_QUEUE_SIZE 4096
-
 // NOTE: Suppress compiler warning C4068: unknown pragma 'clang'
 #pragma warning(disable : 4068)
 #pragma clang diagnostic push
@@ -19,9 +8,22 @@
 static int ui_layout_macro_flag;
 #pragma clang diagnostic pop
 
-// =========================================================
-// Enum & Struct
-// =========================================================
+// clang-format off
+#define ui_layout(...)                                                                                                 \
+    for (ui_layout_macro_flag = (ui_layout_start(&(LayoutConfig)__VA_ARGS__), 0);                                      \
+         ui_layout_macro_flag < 1;                                                                                     \
+         ui_layout_macro_flag = 1, ui_layout_end())
+// clang-format on
+
+#define fixed(value) { value, SIZING_MODE_FIXED }
+#define fit(value) { value, SIZING_MODE_FIT }
+#define fit_grow(value) { value, SIZING_MODE_FIT_GROW }
+
+// TODO: Don't hard-code
+#define CHILDREN_SIZE      16
+#define COMMAND_QUEUE_SIZE 4096
+
+///
 
 // Command -----------------------------
 
@@ -127,9 +129,7 @@ typedef struct
     Queue(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
 } UIContext;
 
-// =========================================================
-// Function
-// =========================================================
+///
 
 void ui_reset(UIContext* ui_context);
 

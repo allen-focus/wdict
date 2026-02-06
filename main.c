@@ -76,30 +76,21 @@ static void process_frame(UIContext* ui_context)
 {
     ui_reset(ui_context);
 
-    ui_layout({ .sizing = {
-                    { ui_context->client_width, SIZING_MODE_FIXED },
-                    { ui_context->client_height, SIZING_MODE_FIXED }
-                },
+    ui_layout({ .sizing = { fixed(ui_context->client_width), fixed(ui_context->client_height) },
                 .color = white,
                 .rect_style = background_rect_style,
                 .padding = padding_bigger,
                 .child_gap = child_gap_bigger,
                 .direction = LAYOUT_LEFT_TO_RIGHT })
     {
-        ui_layout({ .sizing = {
-                        { 0, SIZING_MODE_FIT_GROW },
-                        { 0, SIZING_MODE_FIT_GROW }
-                    },
+        ui_layout({ .sizing = { fit_grow(0), fit_grow(0) },
                     .color = purple,
                     .rect_style = normal_rect_style,
                     .padding = padding_big,
                     .child_gap = child_gap_big,
                     .direction = LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_layout({ .sizing = {
-                        { 100, SIZING_MODE_FIXED },
-                        { 100, SIZING_MODE_FIXED }
-                    },
+            ui_layout({ .sizing = { fixed(100), fixed(100) },
                         .color = red,
                         .rect_style = normal_rect_style,
                         .padding = padding_medium,
@@ -107,10 +98,7 @@ static void process_frame(UIContext* ui_context)
                         .direction = LAYOUT_TOP_TO_BOTTOM })
             {
             }
-            ui_layout({ .sizing = {
-                        { 0, SIZING_MODE_FIT_GROW },
-                        { 0, SIZING_MODE_FIT_GROW }
-                    },
+            ui_layout({ .sizing = { fit_grow(0), fit_grow(0) },
                         .color = yellow,
                         .rect_style = normal_rect_style,
                         .padding = padding_medium,
@@ -118,20 +106,14 @@ static void process_frame(UIContext* ui_context)
                         .direction = LAYOUT_LEFT_TO_RIGHT })
             {
             }
-            ui_layout({ .sizing = {
-                        { 0, SIZING_MODE_FIT_GROW },
-                        { 140, SIZING_MODE_FIXED }
-                    },
+            ui_layout({ .sizing = { fit_grow(0), fixed(140) },
                         .color = blue,
                         .rect_style = normal_rect_style,
                         .padding = padding_medium,
                         .child_gap = child_gap_medium,
                         .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                ui_layout({ .sizing = {
-                                { 50, SIZING_MODE_FIXED },
-                                { 100, SIZING_MODE_FIXED }
-                            },
+                ui_layout({ .sizing = { fixed(50), fixed(100) },
                             .color = purple,
                             .rect_style = normal_rect_style,
                             .padding = padding_small,
@@ -139,10 +121,7 @@ static void process_frame(UIContext* ui_context)
                             .direction = LAYOUT_LEFT_TO_RIGHT })
                 {
                 }
-                ui_layout({ .sizing = {
-                                { 50, SIZING_MODE_FIXED },
-                                { 100, SIZING_MODE_FIXED }
-                            },
+                ui_layout({ .sizing = { fixed(50), fixed(100) },
                             .color = purple,
                             .rect_style = normal_rect_style,
                             .padding = padding_small,
