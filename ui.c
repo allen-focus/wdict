@@ -264,6 +264,12 @@ static UILayout* ui_layout_get_parent()
     return (ui_layout_stack.depth > 0) ? ui_layout_stack.items[ui_layout_stack.depth - 1] : NULL;
 }
 
+UILayout* ui_layout_get_root()
+{
+    Assert(ui_layout_queue.count > 0);
+    return &ui_layout_queue.items[0];
+}
+
 UILayout* ui_layout_start(LayoutConfig* layout_style)
 {
     Assert(ui_layout_stack.depth <= STACK_SIZE);
@@ -305,11 +311,6 @@ UILayout* ui_layout_start(LayoutConfig* layout_style)
 void ui_layout_end()
 {
     ui_layout_stack.items[ui_layout_stack.depth--] = NULL;
-}
-
-void ui_layout_config(UILayout* layout, LayoutConfig* style)
-{
-    memcpy(&layout->config, style, sizeof(*style));
 }
 
 void ui_reset(UIContext* ui_context)

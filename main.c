@@ -75,141 +75,70 @@ float child_gap_small   = 5;
 static void process_frame(UIContext* ui_context)
 {
     ui_reset(ui_context);
-    LayoutConfig layout_style = { .sizing = { { ui_context->client_width, ui_context->client_height },
-                                              SIZING_MODE_FIXED },
-                                  .color = white,
-                                  .rect_style = background_rect_style,
-                                  .padding = padding_bigger,
-                                  .child_gap = child_gap_bigger,
-                                  .direction = LAYOUT_LEFT_TO_RIGHT };
-    UILayout* layout = ui_layout_start(&layout_style);
+
+    ui_layout({ .sizing = { { ui_context->client_width, ui_context->client_height }, SIZING_MODE_FIXED },
+                .color = white,
+                .rect_style = background_rect_style,
+                .padding = padding_bigger,
+                .child_gap = child_gap_bigger,
+                .direction = LAYOUT_LEFT_TO_RIGHT })
     {
-        LayoutConfig layout_style = { .sizing = { { 0, 0 }, SIZING_MODE_FIT_GROW_BOTH },
-                                      .color = purple,
-                                      .rect_style = normal_rect_style,
-                                      .padding = padding_big,
-                                      .child_gap = child_gap_big,
-                                      .direction = LAYOUT_LEFT_TO_RIGHT };
-        ui_layout_start(&layout_style);
+        ui_layout({ .sizing = { { 0, 0 }, SIZING_MODE_FIT_GROW_BOTH },
+                    .color = purple,
+                    .rect_style = normal_rect_style,
+                    .padding = padding_big,
+                    .child_gap = child_gap_big,
+                    .direction = LAYOUT_LEFT_TO_RIGHT })
         {
-            LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
-                                          .color = red,
-                                          .rect_style = normal_rect_style,
-                                          .padding = padding_medium,
-                                          .child_gap = child_gap_medium,
-                                          .direction = LAYOUT_TOP_TO_BOTTOM };
-            ui_layout_start(&layout_style);
-            ui_layout_end();
-        }
-        {
-            LayoutConfig layout_style = { .sizing = { { 0, 0 }, SIZING_MODE_FIT_GROW_BOTH },
-                                          .color = yellow,
-                                          .rect_style = normal_rect_style,
-                                          .padding = padding_medium,
-                                          .child_gap = child_gap_medium,
-                                          .direction = LAYOUT_LEFT_TO_RIGHT };
-            ui_layout_start(&layout_style);
-            ui_layout_end();
-        }
-        {
-            LayoutConfig layout_style = { .sizing = { { 0, 140 }, SIZING_MODE_FIT_GROW_WIDTH },
-                                          .color = blue,
-                                          .rect_style = normal_rect_style,
-                                          .padding = padding_medium,
-                                          .child_gap = child_gap_medium,
-                                          .direction = LAYOUT_LEFT_TO_RIGHT };
-            ui_layout_start(&layout_style);
+            ui_layout({ .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
+                        .color = red,
+                        .rect_style = normal_rect_style,
+                        .padding = padding_medium,
+                        .child_gap = child_gap_medium,
+                        .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                LayoutConfig layout_style = { .sizing = { { 50, 100 }, SIZING_MODE_FIXED },
-                                                .color = purple,
-                                                .rect_style = normal_rect_style,
-                                                .padding = padding_small,
-                                                .child_gap = child_gap_small,
-                                                .direction = LAYOUT_LEFT_TO_RIGHT };
-                ui_layout_start(&layout_style);
-                ui_layout_end();
             }
+            ui_layout({ .sizing = { { 0, 0 }, SIZING_MODE_FIT_GROW_BOTH },
+                        .color = yellow,
+                        .rect_style = normal_rect_style,
+                        .padding = padding_medium,
+                        .child_gap = child_gap_medium,
+                        .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                LayoutConfig layout_style = { .sizing = { { 50, 100 }, SIZING_MODE_FIXED },
-                                                .color = purple,
-                                                .rect_style = normal_rect_style,
-                                                .padding = padding_small,
-                                                .child_gap = child_gap_small,
-                                                .direction = LAYOUT_LEFT_TO_RIGHT };
-                ui_layout_start(&layout_style);
-                ui_layout_end();
             }
-            ui_layout_end();
+            ui_layout({ .sizing = { { 0, 140 }, SIZING_MODE_FIT_GROW_WIDTH },
+                        .color = blue,
+                        .rect_style = normal_rect_style,
+                        .padding = padding_medium,
+                        .child_gap = child_gap_medium,
+                        .direction = LAYOUT_LEFT_TO_RIGHT })
+            {
+                ui_layout({ .sizing = { { 50, 100 }, SIZING_MODE_FIXED },
+                            .color = purple,
+                            .rect_style = normal_rect_style,
+                            .padding = padding_small,
+                            .child_gap = child_gap_small,
+                            .direction = LAYOUT_LEFT_TO_RIGHT })
+                {
+                }
+                ui_layout({ .sizing = { { 50, 100 }, SIZING_MODE_FIXED },
+                            .color = purple,
+                            .rect_style = normal_rect_style,
+                            .padding = padding_small,
+                            .child_gap = child_gap_small,
+                            .direction = LAYOUT_LEFT_TO_RIGHT })
+                {
+                }
+            }
         }
-        // {
-        //     LayoutConfig layout_style = { .sizing = { { 0, 0 }, SIZING_MODE_FIT_GROW_BOTH },
-        //                                   .color = yellow,
-        //                                   .rect_style = normal_rect_style,
-        //                                   .padding = padding_medium,
-        //                                   .child_gap = child_gap_medium,
-        //                                   .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-        //     ui_layout_start(&layout_style);
-        //     {
-        //         LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
-        //                                         .color = purple,
-        //                                         .rect_style = normal_rect_style,
-        //                                         .padding = padding_small,
-        //                                         .child_gap = child_gap_small,
-        //                                         .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-        //         ui_layout_start(&layout_style);
-        //         ui_layout_end();
-        //     }
-        //     {
-        //         LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
-        //                                         .color = purple,
-        //                                         .rect_style = normal_rect_style,
-        //                                         .padding = padding_small,
-        //                                         .child_gap = child_gap_small,
-        //                                         .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-        //         ui_layout_start(&layout_style);
-        //         ui_layout_end();
-        //     }
-        //     ui_layout_end();
-        // }
-        // {
-        //     LayoutConfig layout_style = { .sizing = { { 0, 100 }, SIZING_MODE_FIT_GROW_WIDTH },
-        //                                   .color = blue,
-        //                                   .rect_style = normal_rect_style,
-        //                                   .padding = padding_medium,
-        //                                   .child_gap = child_gap_medium,
-        //                                   .direction = UI_LAYOUT_TOP_TO_BOTTOM };
-        //     ui_layout_start(&layout_style);
-        //     ui_layout_end();
-        // }
-        // {
-        //     LayoutConfig layout_style = { .sizing = { { 0, 100 }, SIZING_MODE_FIT_GROW_WIDTH },
-        //                                   .color = blue,
-        //                                   .rect_style = normal_rect_style,
-        //                                   .padding = padding_medium,
-        //                                   .child_gap = child_gap_medium,
-        //                                   .direction = UI_LAYOUT_TOP_TO_BOTTOM };
-        //     ui_layout_start(&layout_style);
-        //     {
-        //         LayoutConfig layout_style = { .sizing = { { 100, 100 }, SIZING_MODE_FIXED },
-        //                                         .color = purple,
-        //                                         .rect_style = normal_rect_style,
-        //                                         .padding = padding_small,
-        //                                         .child_gap = child_gap_small,
-        //                                         .direction = UI_LAYOUT_LEFT_TO_RIGHT };
-        //         ui_layout_start(&layout_style);
-        //         ui_layout_end();
-        //     }
-        //     ui_layout_end();
-        // }
-        ui_layout_end();
     }
-    ui_layout_end();
 
     //
-    ui_layout_calculate_fit_size(layout);
-    ui_layout_grow_children(layout);
-    ui_layout_resolve_position(layout);
-    ui_layout_generate_render_commands(ui_context, layout);
+    UILayout* root = ui_layout_get_root();
+    ui_layout_calculate_fit_size(root);
+    ui_layout_grow_children(root);
+    ui_layout_resolve_position(root);
+    ui_layout_generate_render_commands(ui_context, root);
 
     // Draw
     for (int i = 0; i < ui_context->ui_command_queue.count; i++)

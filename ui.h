@@ -1,6 +1,13 @@
 #pragma once
 #include "lib.h"
 
+// clang-format off
+#define ui_layout(...)                                                                                                 \
+    for (ui_layout_macro_flag = (ui_layout_start(&(LayoutConfig)__VA_ARGS__), 0);                                      \
+         ui_layout_macro_flag < 1;                                                                                     \
+         ui_layout_macro_flag = 1, ui_layout_end())
+// clang-format on
+
 // TODO: Don't hard-code
 #define CHILDREN_SIZE      16
 #define COMMAND_QUEUE_SIZE 4096
@@ -122,6 +129,7 @@ typedef struct
 
 void ui_reset(UIContext* ui_context);
 
+UILayout* ui_layout_get_root();
 UILayout* ui_layout_start(LayoutConfig* layout_style);
 void ui_layout_end();
 
