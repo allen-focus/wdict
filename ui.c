@@ -1,12 +1,15 @@
-#include "ui.h"
 #include "lib.h"
+#include "ui.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include <winscard.h>
 #include <winuser.h>
 
-#define QUEUE_SIZE  256
+#define EPSILON 1e-4f
+#define QUEUE_SIZE 256
 #define STACK_SIZE 16
 
 ///
@@ -16,17 +19,16 @@ static Stack(UILayout*, STACK_SIZE) ui_layout_stack = { 0 };
 
 ///
 
-static bool ui_layout_with_fit_attribute(UILayout* layout)
+static bool ui_layout_has_fit_width(UILayout* layout)
 {
     SizingMode mode = layout->config.sizing.mode;
-    return (mode == SIZING_MODE_FIT || mode == SIZING_MODE_FIT_GROW_WIDTH || mode == SIZING_MODE_FIT_GROW_HEIGHT ||
-            mode == SIZING_MODE_FIT_GROW_BOTH);
+    return (mode == SIZING_MODE_FIT || mode == SIZING_MODE_FIT_GROW_WIDTH || mode == SIZING_MODE_FIT_GROW_BOTH);
 }
 
-static bool ui_layout_with_grow_attribute(UILayout* layout)
+static bool ui_layout_has_fit_height(UILayout* layout)
 {
     SizingMode mode = layout->config.sizing.mode;
-    return (mode == SIZING_MODE_FIT_GROW_WIDTH || mode == SIZING_MODE_FIT_GROW_HEIGHT || mode == SIZING_MODE_FIT_GROW_BOTH);
+    return (mode == SIZING_MODE_FIT || mode == SIZING_MODE_FIT_GROW_HEIGHT || mode == SIZING_MODE_FIT_GROW_BOTH);
 }
 
 // Recursively calculate sizes for layouts configured with 'fit' attribute (reverse pass)
@@ -39,130 +41,170 @@ void ui_layout_calculate_fit_size(UILayout* layout)
         ui_layout_calculate_fit_size(child);
     }
 
-    // When sizing mode has a 'fit' attribute, adjust the layout size by adding padding and child gap
-    if (ui_layout_with_fit_attribute(layout))
-    {
-        // padding
+    // When sizing mode has a 'fit' attribute on an axis, adjust the layout size by adding padding and child gap
+    if (ui_layout_has_fit_width(layout))
         layout->config.sizing.value.width += layout->config.padding.left + layout->config.padding.right;
+    if (ui_layout_has_fit_height(layout))
         layout->config.sizing.value.height += layout->config.padding.top + layout->config.padding.bottom;
-
-        // child gap
-        int child_gap_count = layout->children_count - 1;
-        if (child_gap_count > 0)
-            switch (layout->config.direction)
-            {
-                case UI_LAYOUT_LEFT_TO_RIGHT:
+    int child_gap_count = layout->children_count - 1;
+    if (child_gap_count > 0)
+        switch (layout->config.direction)
+        {
+            case LAYOUT_LEFT_TO_RIGHT:
+                if (ui_layout_has_fit_width(layout))
                     layout->config.sizing.value.width += layout->config.child_gap * child_gap_count;
-                    break;
-                case UI_LAYOUT_TOP_TO_BOTTOM:
+                break;
+            case LAYOUT_TOP_TO_BOTTOM:
+                if (ui_layout_has_fit_height(layout))
                     layout->config.sizing.value.height += layout->config.child_gap * child_gap_count;
-                    break;
-                default:
-                    Assert(0);
-            }
-    }
+                break;
+        }
 
-    // If the current layout is a child, adjust its parent's size based on layout direction.
+    // If the current layout is a child, adjust its parent's size (if has a 'fit' attribute) based on layout direction.
     // Note: Since recursion processes deepest children first, this layout’s size has already been fully calculated
     // (including any children it may have), so no further size propagation is needed at this level.
     UILayout* parent = layout->parent;
     if (parent)
-        if (ui_layout_with_fit_attribute(parent))
-            switch (parent->config.direction)
-            {
-                case UI_LAYOUT_LEFT_TO_RIGHT:
+        switch (parent->config.direction)
+        {
+            case LAYOUT_LEFT_TO_RIGHT:
+                if (ui_layout_has_fit_width(parent))
+                {
                     parent->config.sizing.value.height = max(layout->config.sizing.value.height, parent->config.sizing.value.height);
                     parent->config.sizing.value.width += layout->config.sizing.value.width;
-                    break;
-                case UI_LAYOUT_TOP_TO_BOTTOM:
+                }
+                break;
+            case LAYOUT_TOP_TO_BOTTOM:
+                if (ui_layout_has_fit_height(parent))
+                {
                     parent->config.sizing.value.width = max(layout->config.sizing.value.width, parent->config.sizing.value.width);
                     parent->config.sizing.value.height += layout->config.sizing.value.height;
-                    break;
-                default:
-                    Assert(0);
-            }
+                }
+                break;
+        }
 }
+
+static void grow_axis(float* remaining, float* growable_children[], int* growable_count)
+{
+    // Distribute remaining space proportionally among children that are configured to grow.
+    // This loop continues as long as there is remaining space and there are children to distribute to.
+    while (*remaining > EPSILON && *growable_count > 0)
+    {
+        // Find the smallest current size among the growable children.
+        float smallest = *growable_children[0];
+        float second_smallest = INFINITY;
+        float to_add = 0;
+
+        // First pass: find the smallest size and the next smallest size (to determine the increment).
+        for (int i = 0; i < *growable_count; i++)
+        {
+            float child = *growable_children[i];
+            if (child < smallest)
+            {
+                second_smallest = smallest;
+                smallest = child;
+            }
+            else if (child > smallest)
+            {
+                second_smallest = min(child, second_smallest);
+                // The amount to add to all children currently equal to 'smallest' before they reach 'second_smallest'.
+                to_add = second_smallest - smallest;
+            }
+        }
+
+        // If all growable children have the same size (second_smallest remains INFINITY),
+        // distribute the remaining space equally among all growable children.
+        if (second_smallest == INFINITY)
+            to_add = *remaining / *growable_count;
+
+        // Count how many children currently have the 'smallest' size.
+        int smallest_count = 0;
+        for (int i = 0; i < *growable_count; i++)
+            if (fabsf(*growable_children[i] - smallest) < EPSILON)
+                smallest_count++;
+
+        // If distributing 'to_add' to all 'smallest_count' children would exceed the remaining space,
+        // calculate the exact amount that can be distributed equally among them.
+        if (to_add * smallest_count > *remaining)
+            to_add = *remaining / smallest_count;
+
+        // Apply the calculated 'to_add' amount to all children currently equal to 'smallest', and update the remaining space.
+        for (int i = 0; i < *growable_count; i++)
+            if (fabsf(*growable_children[i] - smallest) < EPSILON)
+            {
+                *growable_children[i] += to_add;
+                *remaining -= to_add;
+            }
+    }
+}
+
 
 // Recursively calculate sizes for layouts configured with 'grow' attribute
 void ui_layout_grow_children(UILayout* layout)
 {
-    // Initialize remaining space with the layout's calculated size
+    float* remaining_width = &layout->remaining_space.width;
+    float* remaining_height = &layout->remaining_space.height;
+
+    // Initialize remaining space
     // (which might be fixed or determined by a parent's 'grow' attribute in a previous pass)
-    layout->remaining_space.width = layout->config.sizing.value.width;
-    layout->remaining_space.height = layout->config.sizing.value.height;
+    *remaining_width = layout->config.sizing.value.width;
+    *remaining_height = layout->config.sizing.value.height;
 
-    // Subtract padding from the available space
-    layout->remaining_space.width -= layout->config.padding.left + layout->config.padding.right;
-    layout->remaining_space.height -= layout->config.padding.top + layout->config.padding.bottom;
+    // Subtract padding
+    *remaining_width -= layout->config.padding.left + layout->config.padding.right;
+    *remaining_height -= layout->config.padding.top + layout->config.padding.bottom;
 
-    // Subtract child gap if there are multiple children
+    // Subtract child gap
     int child_gap_count = layout->children_count - 1;
     if (child_gap_count > 0)
-    {
-        if (layout->config.direction == UI_LAYOUT_LEFT_TO_RIGHT)
-            layout->remaining_space.width -= layout->config.child_gap * child_gap_count;
-        if (layout->config.direction == UI_LAYOUT_TOP_TO_BOTTOM)
-            layout->remaining_space.height -= layout->config.child_gap * child_gap_count;
-    }
+        switch (layout->config.direction)
+        {
+            case LAYOUT_LEFT_TO_RIGHT:
+                *remaining_width -= layout->config.child_gap * child_gap_count;
+                break;
+            case LAYOUT_TOP_TO_BOTTOM:
+                *remaining_height -= layout->config.child_gap * child_gap_count;
+                break;
+        }
+
+    float* growable_children_widths[CHILDREN_SIZE] = { NULL };
+    float* growable_children_heights[CHILDREN_SIZE] = { NULL };
+    int growable_count_width = 0;
+    int growable_count_height = 0;
 
     // Subtract the childrens' determined size from the parent's remaining space.
     for (int i = 0; i < layout->children_count; i++)
-        switch (layout->config.direction)
-        {
-            case UI_LAYOUT_LEFT_TO_RIGHT:
-                layout->remaining_space.width -= layout->children[i]->config.sizing.value.width;
-                break;
-            case UI_LAYOUT_TOP_TO_BOTTOM:
-                layout->remaining_space.height -= layout->children[i]->config.sizing.value.height;
-                break;
-            default:
-                Assert(0);
-        }
-
-    // Distribute remaining space to children configured with 'grow' attributes
-    for (int i = 0; i < layout->children_count; i++)
     {
         UILayout* child = layout->children[i];
-        SizingMode child_sizing_mode = child->config.sizing.mode;
-        if (ui_layout_with_grow_attribute(child))
+        SizingMode sizing_mode = child->config.sizing.mode;
+        if (sizing_mode == SIZING_MODE_FIT_GROW_WIDTH || sizing_mode == SIZING_MODE_FIT_GROW_BOTH)
+            growable_children_widths[growable_count_width++] = &child->config.sizing.value.width;
+        if (sizing_mode == SIZING_MODE_FIT_GROW_HEIGHT || sizing_mode == SIZING_MODE_FIT_GROW_BOTH)
+            growable_children_heights[growable_count_height++] = &child->config.sizing.value.height;
+        switch (layout->config.direction)
         {
-            if (child_sizing_mode == SIZING_MODE_FIT_GROW_WIDTH || child_sizing_mode == SIZING_MODE_FIT_GROW_BOTH)
-            {
-                if (layout->config.direction == UI_LAYOUT_LEFT_TO_RIGHT)
-                {
-                    if (layout->remaining_space.width > 0)
-                    {
-                        child->config.sizing.value.width += layout->remaining_space.width;
-                        child->remaining_space.width = layout->remaining_space.width;
-                    }
-                }
-                else
-                {
-                    float diff = layout->remaining_space.width - child->config.sizing.value.width;
-                    child->config.sizing.value.width += (diff > 0) ? diff : 0;
-                    child->remaining_space.width = (diff > 0) ? diff : 0;
-                }
-                layout->remaining_space.width = 0;
-            }
-            if (child_sizing_mode == SIZING_MODE_FIT_GROW_HEIGHT || child_sizing_mode == SIZING_MODE_FIT_GROW_BOTH)
-            {
-                if (layout->config.direction == UI_LAYOUT_TOP_TO_BOTTOM)
-                {
-                    if (layout->remaining_space.height > 0)
-                    {
-                        child->config.sizing.value.height += layout->remaining_space.height;
-                        child->remaining_space.height = layout->remaining_space.height;
-                    }
-                }
-                else
-                {
-                    float diff = layout->remaining_space.height - child->config.sizing.value.height;
-                    child->config.sizing.value.height += (diff > 0) ? diff : 0;
-                    child->remaining_space.height = (diff > 0) ? diff : 0;
-                }
-                layout->remaining_space.height = 0;
-            }
+            case LAYOUT_LEFT_TO_RIGHT:
+                *remaining_width -= child->config.sizing.value.width;
+                break;
+            case LAYOUT_TOP_TO_BOTTOM:
+                *remaining_height -= child->config.sizing.value.height;
+                break;
         }
+    }
+
+    // Distribute remaining space to children configured with 'grow' attributes
+    switch (layout->config.direction)
+    {
+        case LAYOUT_LEFT_TO_RIGHT:
+            grow_axis(remaining_width, growable_children_widths, &growable_count_width);
+            for (int i = 0; i < growable_count_height; i++)
+                *growable_children_heights[i] = max(*growable_children_heights[i], *remaining_height);
+            break;
+        case LAYOUT_TOP_TO_BOTTOM:
+            grow_axis(remaining_height, growable_children_heights, &growable_count_height);
+            for (int i = 0; i < growable_count_width; i++)
+                *growable_children_heights[i] = max(*growable_children_heights[i], *remaining_width);
+            break;
     }
 
     // Recursively resolve size (breadth first)
@@ -182,16 +224,14 @@ void ui_layout_resolve_position(UILayout* layout)
         layout->position.y += parent->position.y + parent->config.padding.top;
         switch (parent->config.direction)
         {
-            case UI_LAYOUT_LEFT_TO_RIGHT:
+            case LAYOUT_LEFT_TO_RIGHT:
                 layout->position.x += parent->next_child_offset_x;
                 parent->next_child_offset_x += layout->config.sizing.value.width + parent->config.child_gap;
                 break;
-            case UI_LAYOUT_TOP_TO_BOTTOM:
+            case LAYOUT_TOP_TO_BOTTOM:
                 layout->position.y += parent->next_child_offset_y;
                 parent->next_child_offset_y += layout->config.sizing.value.height + parent->config.child_gap;
                 break;
-            default:
-                Assert(0);
         }
     }
 

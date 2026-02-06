@@ -79,9 +79,9 @@ typedef struct
 
 typedef enum
 {
-    UI_LAYOUT_LEFT_TO_RIGHT,
-    UI_LAYOUT_TOP_TO_BOTTOM
-} Direction;
+    LAYOUT_LEFT_TO_RIGHT,
+    LAYOUT_TOP_TO_BOTTOM
+} LayoutDirection;
 
 typedef struct
 {
@@ -90,7 +90,7 @@ typedef struct
     RectStyle rect_style;
     Padding padding;
     float child_gap;
-    Direction direction;
+    LayoutDirection direction;
 } LayoutConfig;
 
 typedef struct UILayout UILayout;
