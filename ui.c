@@ -14,63 +14,63 @@
 
 ///
 
-static Queue(UILayout, QUEUE_SIZE) ui_layout_queue = { 0 };
-static Stack(UILayout*, STACK_SIZE) ui_layout_stack = { 0 };
+static Queue(UIBox, QUEUE_SIZE) ui_box_queue = { 0 };
+static Stack(UIBox*, STACK_SIZE) ui_box_stack = { 0 };
 
 ///
 
-static bool ui_layout_has_fit_attribute(SizingAxis axis)
+static bool ui_box_has_fit_attribute(SizingAxis axis)
 {
     return axis.mode == SIZING_MODE_FIT || axis.mode == SIZING_MODE_FIT_GROW;
 }
 
-// Recursively calculate sizes for layouts configured with 'fit' attribute (reverse pass)
-void ui_layout_calculate_fit_size(UILayout* layout)
+// Recursively calculate sizes for boxes configured with 'fit' attribute (reverse pass)
+void ui_box_calculate_fit_size(UIBox* box)
 {
-    // Recursively resolve child layout sizes (depth-first, reverse order)
-    for (int i = 0; i < layout->children_count; i++)
+    // Recursively resolve child box sizes (depth-first, reverse order)
+    for (int i = 0; i < box->children_count; i++)
     {
-        UILayout* child = layout->children[i];
-        ui_layout_calculate_fit_size(child);
+        UIBox* child = box->children[i];
+        ui_box_calculate_fit_size(child);
     }
 
-    // When sizing mode has a 'fit' attribute on an axis, adjust the layout size by adding padding and child gap
-    if (ui_layout_has_fit_attribute(layout->config.sizing.width))
-        layout->config.sizing.width.value += layout->config.padding.left + layout->config.padding.right;
-    if (ui_layout_has_fit_attribute(layout->config.sizing.height))
-        layout->config.sizing.height.value += layout->config.padding.top + layout->config.padding.bottom;
-    int child_gap_count = layout->children_count - 1;
+    // When sizing mode has a 'fit' attribute on an axis, adjust the box size by adding padding and child gap
+    if (ui_box_has_fit_attribute(box->config.sizing.width))
+        box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
+    if (ui_box_has_fit_attribute(box->config.sizing.height))
+        box->config.sizing.height.value += box->config.padding.top + box->config.padding.bottom;
+    int child_gap_count = box->children_count - 1;
     if (child_gap_count > 0)
-        switch (layout->config.direction)
+        switch (box->config.direction)
         {
             case LAYOUT_LEFT_TO_RIGHT:
-                if (ui_layout_has_fit_attribute(layout->config.sizing.width))
-                    layout->config.sizing.width.value += layout->config.child_gap * child_gap_count;
+                if (ui_box_has_fit_attribute(box->config.sizing.width))
+                    box->config.sizing.width.value += box->config.child_gap * child_gap_count;
                 break;
             case LAYOUT_TOP_TO_BOTTOM:
-                if (ui_layout_has_fit_attribute(layout->config.sizing.height))
-                    layout->config.sizing.height.value += layout->config.child_gap * child_gap_count;
+                if (ui_box_has_fit_attribute(box->config.sizing.height))
+                    box->config.sizing.height.value += box->config.child_gap * child_gap_count;
                 break;
         }
 
-    // If the current layout is a child, adjust its parent's size (if has a 'fit' attribute) based on layout direction.
-    // Note: Since recursion processes deepest children first, this layout’s size has already been fully calculated
+    // If the current box is a child, adjust its parent's size (if has a 'fit' attribute) based on box direction.
+    // Note: Since recursion processes deepest children first, this box’s size has already been fully calculated
     // (including any children it may have), so no further size propagation is needed at this level.
-    UILayout* parent = layout->parent;
+    UIBox* parent = box->parent;
     if (parent)
         switch (parent->config.direction)
         {
             case LAYOUT_LEFT_TO_RIGHT:
-                if (ui_layout_has_fit_attribute(parent->config.sizing.width))
-                    parent->config.sizing.width.value += layout->config.sizing.width.value;
-                if (ui_layout_has_fit_attribute(parent->config.sizing.height))
-                    parent->config.sizing.height.value = max(layout->config.sizing.height.value, parent->config.sizing.height.value);
+                if (ui_box_has_fit_attribute(parent->config.sizing.width))
+                    parent->config.sizing.width.value += box->config.sizing.width.value;
+                if (ui_box_has_fit_attribute(parent->config.sizing.height))
+                    parent->config.sizing.height.value = max(box->config.sizing.height.value, parent->config.sizing.height.value);
                 break;
             case LAYOUT_TOP_TO_BOTTOM:
-                if (ui_layout_has_fit_attribute(parent->config.sizing.height))
-                    parent->config.sizing.height.value += layout->config.sizing.height.value;
-                if (ui_layout_has_fit_attribute(parent->config.sizing.width))
-                    parent->config.sizing.width.value = max(layout->config.sizing.width.value, parent->config.sizing.width.value);
+                if (ui_box_has_fit_attribute(parent->config.sizing.height))
+                    parent->config.sizing.height.value += box->config.sizing.height.value;
+                if (ui_box_has_fit_attribute(parent->config.sizing.width))
+                    parent->config.sizing.width.value = max(box->config.sizing.width.value, parent->config.sizing.width.value);
                 break;
         }
 }
@@ -130,31 +130,31 @@ static void grow_axis(float* remaining, float* growable_children[], int* growabl
 }
 
 
-// Recursively calculate sizes for layouts configured with 'grow' attribute
-void ui_layout_grow_children(UILayout* layout)
+// Recursively calculate sizes for boxes configured with 'grow' attribute
+void ui_box_grow_children(UIBox* box)
 {
-    float* remaining_width = &layout->remaining_space.width;
-    float* remaining_height = &layout->remaining_space.height;
+    float* remaining_width = &box->remaining_space.width;
+    float* remaining_height = &box->remaining_space.height;
 
     // Initialize remaining space
     // (which might be fixed or determined by a parent's 'grow' attribute in a previous pass)
-    *remaining_width = layout->config.sizing.width.value;
-    *remaining_height = layout->config.sizing.height.value;
+    *remaining_width = box->config.sizing.width.value;
+    *remaining_height = box->config.sizing.height.value;
 
     // Subtract padding
-    *remaining_width -= layout->config.padding.left + layout->config.padding.right;
-    *remaining_height -= layout->config.padding.top + layout->config.padding.bottom;
+    *remaining_width -= box->config.padding.left + box->config.padding.right;
+    *remaining_height -= box->config.padding.top + box->config.padding.bottom;
 
     // Subtract child gap
-    int child_gap_count = layout->children_count - 1;
+    int child_gap_count = box->children_count - 1;
     if (child_gap_count > 0)
-        switch (layout->config.direction)
+        switch (box->config.direction)
         {
             case LAYOUT_LEFT_TO_RIGHT:
-                *remaining_width -= layout->config.child_gap * child_gap_count;
+                *remaining_width -= box->config.child_gap * child_gap_count;
                 break;
             case LAYOUT_TOP_TO_BOTTOM:
-                *remaining_height -= layout->config.child_gap * child_gap_count;
+                *remaining_height -= box->config.child_gap * child_gap_count;
                 break;
         }
 
@@ -164,14 +164,14 @@ void ui_layout_grow_children(UILayout* layout)
     int growable_count_height = 0;
 
     // Subtract the childrens' determined size from the parent's remaining space.
-    for (int i = 0; i < layout->children_count; i++)
+    for (int i = 0; i < box->children_count; i++)
     {
-        UILayout* child = layout->children[i];
+        UIBox* child = box->children[i];
         if (child->config.sizing.width.mode == SIZING_MODE_FIT_GROW)
             growable_children_widths[growable_count_width++] = &child->config.sizing.width.value;
         if (child->config.sizing.height.mode == SIZING_MODE_FIT_GROW)
             growable_children_heights[growable_count_height++] = &child->config.sizing.height.value;
-        switch (layout->config.direction)
+        switch (box->config.direction)
         {
             case LAYOUT_LEFT_TO_RIGHT:
                 *remaining_width -= child->config.sizing.width.value;
@@ -183,7 +183,7 @@ void ui_layout_grow_children(UILayout* layout)
     }
 
     // Distribute remaining space to children configured with 'grow' attributes
-    switch (layout->config.direction)
+    switch (box->config.direction)
     {
         case LAYOUT_LEFT_TO_RIGHT:
             grow_axis(remaining_width, growable_children_widths, &growable_count_width);
@@ -198,104 +198,104 @@ void ui_layout_grow_children(UILayout* layout)
     }
 
     // Recursively resolve size (breadth first)
-    for (int i = 0; i < layout->children_count; i++)
+    for (int i = 0; i < box->children_count; i++)
     {
-        UILayout* child = layout->children[i];
-        ui_layout_grow_children(child);
+        UIBox* child = box->children[i];
+        ui_box_grow_children(child);
     }
 }
 
-void ui_layout_resolve_position(UILayout* layout)
+void ui_box_resolve_position(UIBox* box)
 {
-    if (layout->parent)
+    if (box->parent)
     {
-        UILayout* parent = layout->parent;
-        layout->position.x += parent->position.x + parent->config.padding.left;
-        layout->position.y += parent->position.y + parent->config.padding.top;
+        UIBox* parent = box->parent;
+        box->position.x += parent->position.x + parent->config.padding.left;
+        box->position.y += parent->position.y + parent->config.padding.top;
         switch (parent->config.direction)
         {
             case LAYOUT_LEFT_TO_RIGHT:
-                layout->position.x += parent->next_child_offset_x;
-                parent->next_child_offset_x += layout->config.sizing.width.value + parent->config.child_gap;
+                box->position.x += parent->next_child_offset_x;
+                parent->next_child_offset_x += box->config.sizing.width.value + parent->config.child_gap;
                 break;
             case LAYOUT_TOP_TO_BOTTOM:
-                layout->position.y += parent->next_child_offset_y;
-                parent->next_child_offset_y += layout->config.sizing.height.value + parent->config.child_gap;
+                box->position.y += parent->next_child_offset_y;
+                parent->next_child_offset_y += box->config.sizing.height.value + parent->config.child_gap;
                 break;
         }
     }
 
-    for (int i = 0; i < layout->children_count; i++)
-        ui_layout_resolve_position(layout->children[i]);
+    for (int i = 0; i < box->children_count; i++)
+        ui_box_resolve_position(box->children[i]);
 }
 
 // TODO: Currently we assume all render commands are Rect. Need to handle text etc in the future.
-void ui_layout_generate_render_commands(UIContext* ui_context, UILayout* root)
+void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
 {
     UICommandRect* cmd = (UICommandRect*)(ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++);
     cmd->base.type = UI_COMMAND_RECT;
     cmd->base.size = sizeof(UICommandRect);
-    cmd->rect = (Rect){ root->position.x, root->position.y, root->position.x + root->config.sizing.width.value,
-                        root->position.y + root->config.sizing.height.value };
-    cmd->color = root->config.color;
-    cmd->style = root->config.rect_style;
+    cmd->rect = (Rect){ box->position.x, box->position.y, box->position.x + box->config.sizing.width.value,
+                        box->position.y + box->config.sizing.height.value };
+    cmd->color = box->config.color;
+    cmd->style = box->config.rect_style;
 
-    for (int i = 0; i < root->children_count; i++)
-        ui_layout_generate_render_commands(ui_context, root->children[i]);
+    for (int i = 0; i < box->children_count; i++)
+        ui_generate_render_commands(ui_context, box->children[i]);
 }
 
-static UILayout* ui_layout_new()
+static UIBox* ui_box_new()
 {
-    return &ui_layout_queue.items[ui_layout_queue.count++];
+    return &ui_box_queue.items[ui_box_queue.count++];
 }
 
-static UILayout* ui_layout_get_parent()
+static UIBox* ui_box_get_parent()
 {
-    return (ui_layout_stack.depth > 0) ? ui_layout_stack.items[ui_layout_stack.depth - 1] : NULL;
+    return (ui_box_stack.depth > 0) ? ui_box_stack.items[ui_box_stack.depth - 1] : NULL;
 }
 
-UILayout* ui_layout_get_root()
+UIBox* ui_box_get_root()
 {
-    Assert(ui_layout_queue.count > 0);
-    return &ui_layout_queue.items[0];
+    Assert(ui_box_queue.count > 0);
+    return &ui_box_queue.items[0];
 }
 
-UILayout* ui_layout_start(LayoutConfig* layout_style)
+UIBox* ui_box_start(BoxConfig* box_config)
 {
-    Assert(ui_layout_stack.depth <= STACK_SIZE);
-    Assert(ui_layout_queue.count <= QUEUE_SIZE);
+    Assert(ui_box_stack.depth <= STACK_SIZE);
+    Assert(ui_box_queue.count <= QUEUE_SIZE);
 
-    UILayout* layout = ui_layout_new();
-    UILayout* parent = ui_layout_get_parent();
+    UIBox* box = ui_box_new();
+    UIBox* parent = ui_box_get_parent();
 
-    // Set the parent of the current layout and add the current layout as a child of its parent
+    // Set the parent of the current box and add the current box as a child of its parent
     if (parent)
     {
-        layout->parent = parent;
+        box->parent = parent;
         for (int i = 0; i < CHILDREN_SIZE; i++)
         {
             if (parent->children[i] == NULL)
             {
-                parent->children[i] = layout;
+                parent->children[i] = box;
                 parent->children_count++;
                 break;
             }
         }
     }
 
-    ui_layout_stack.items[ui_layout_stack.depth++] = layout;
-    memcpy(&layout->config, layout_style, sizeof(*layout_style));
-    return layout;
+    ui_box_stack.items[ui_box_stack.depth++] = box;
+    memcpy(&box->config, box_config, sizeof(*box_config));
+    return box;
 }
 
-void ui_layout_end()
+void ui_box_end()
 {
-    ui_layout_stack.items[ui_layout_stack.depth--] = NULL;
+    ui_box_stack.items[ui_box_stack.depth--] = NULL;
 }
 
 void ui_reset(UIContext* ui_context)
 {
-    Assert(ui_layout_stack.depth == 0);
-    memset(&ui_layout_queue, 0, sizeof(ui_layout_queue));
+    Assert(ui_box_stack.depth == 0);
+    memset(&ui_box_queue, 0, sizeof(ui_box_queue));
     memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
 }

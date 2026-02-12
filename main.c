@@ -76,21 +76,21 @@ static void process_frame(UIContext* ui_context)
 {
     ui_reset(ui_context);
 
-    ui_layout({ .sizing = { fixed(ui_context->client_width), fixed(ui_context->client_height) },
+    ui_box({ .sizing = { fixed(ui_context->client_width), fixed(ui_context->client_height) },
                 .color = white,
                 .rect_style = background_rect_style,
                 .padding = padding_bigger,
                 .child_gap = child_gap_bigger,
                 .direction = LAYOUT_LEFT_TO_RIGHT })
     {
-        ui_layout({ .sizing = { fit_grow(0), fit_grow(0) },
+        ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
                     .color = purple,
                     .rect_style = normal_rect_style,
                     .padding = padding_big,
                     .child_gap = child_gap_big,
                     .direction = LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_layout({ .sizing = { fixed(100), fixed(100) },
+            ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
                         .color = red,
                         .rect_style = normal_rect_style,
                         .padding = padding_medium,
@@ -98,7 +98,7 @@ static void process_frame(UIContext* ui_context)
                         .direction = LAYOUT_TOP_TO_BOTTOM })
             {
             }
-            ui_layout({ .sizing = { fit_grow(0), fit_grow(0) },
+            ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
                         .color = yellow,
                         .rect_style = normal_rect_style,
                         .padding = padding_medium,
@@ -106,14 +106,14 @@ static void process_frame(UIContext* ui_context)
                         .direction = LAYOUT_LEFT_TO_RIGHT })
             {
             }
-            ui_layout({ .sizing = {  fixed(200), fit(0) },
+            ui_box({ .sizing = {  fit(0), fit(0) },
                         .color = blue,
                         .rect_style = normal_rect_style,
                         .padding = padding_medium,
                         .child_gap = child_gap_medium,
                         .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                ui_layout({ .sizing = { fixed(50), fixed(100) },
+                ui_box({ .sizing = { fixed(50), fixed(100) },
                             .color = purple,
                             .rect_style = normal_rect_style,
                             .padding = padding_small,
@@ -121,7 +121,7 @@ static void process_frame(UIContext* ui_context)
                             .direction = LAYOUT_LEFT_TO_RIGHT })
                 {
                 }
-                ui_layout({ .sizing = { fixed(50), fixed(100) },
+                ui_box({ .sizing = { fixed(50), fixed(100) },
                             .color = purple,
                             .rect_style = normal_rect_style,
                             .padding = padding_small,
@@ -134,11 +134,11 @@ static void process_frame(UIContext* ui_context)
     }
 
     //
-    UILayout* root = ui_layout_get_root();
-    ui_layout_calculate_fit_size(root);
-    ui_layout_grow_children(root);
-    ui_layout_resolve_position(root);
-    ui_layout_generate_render_commands(ui_context, root);
+    UIBox* root = ui_box_get_root();
+    ui_box_calculate_fit_size(root);
+    ui_box_grow_children(root);
+    ui_box_resolve_position(root);
+    ui_generate_render_commands(ui_context, root);
 
     // Draw
     for (int i = 0; i < ui_context->ui_command_queue.count; i++)

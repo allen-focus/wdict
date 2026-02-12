@@ -5,14 +5,14 @@
 #pragma warning(disable : 4068)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
-static int ui_layout_macro_flag;
+static int ui_box_macro_flag;
 #pragma clang diagnostic pop
 
 // clang-format off
-#define ui_layout(...)                                                                                                 \
-    for (ui_layout_macro_flag = (ui_layout_start(&(LayoutConfig)__VA_ARGS__), 0);                                      \
-         ui_layout_macro_flag < 1;                                                                                     \
-         ui_layout_macro_flag = 1, ui_layout_end())
+#define ui_box(...)                                                                                                 \
+    for (ui_box_macro_flag = (ui_box_start(&(BoxConfig)__VA_ARGS__), 0);                                      \
+         ui_box_macro_flag < 1;                                                                                     \
+         ui_box_macro_flag = 1, ui_box_end())
 // clang-format on
 
 #define fixed(value) { value, SIZING_MODE_FIXED }
@@ -88,7 +88,7 @@ typedef struct
     SizingAxis height;
 } Sizing;
 
-// Layout ------------------------------
+// Box ------------------------------
 
 typedef enum
 {
@@ -104,18 +104,18 @@ typedef struct
     Padding padding;
     float child_gap;
     LayoutDirection direction;
-} LayoutConfig;
+} BoxConfig;
 
-typedef struct UILayout UILayout;
-struct UILayout
+typedef struct UIBox UIBox;
+struct UIBox
 {
     Size remaining_space;
     Position position;
     float next_child_offset_x;
     float next_child_offset_y;
-    LayoutConfig config;
-    UILayout* parent;
-    UILayout* children[CHILDREN_SIZE];
+    BoxConfig config;
+    UIBox* parent;
+    UIBox* children[CHILDREN_SIZE];
     int children_count;
 };
 
@@ -133,14 +133,15 @@ typedef struct
 
 void ui_reset(UIContext* ui_context);
 
-UILayout* ui_layout_get_root();
-UILayout* ui_layout_start(LayoutConfig* layout_style);
-void ui_layout_end();
+UIBox* ui_box_get_root();
+UIBox* ui_box_start(BoxConfig* box_config);
+void ui_box_end();
 
-void ui_layout_calculate_fit_size(UILayout* layout);
-void ui_layout_grow_children(UILayout* layout);
-void ui_layout_resolve_position(UILayout* layout);
-void ui_layout_generate_render_commands(UIContext* ui_context, UILayout* root);
+void ui_box_calculate_fit_size(UIBox* box);
+void ui_box_grow_children(UIBox* box);
+void ui_box_resolve_position(UIBox* box);
+
+void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
 
 ///
 
