@@ -97,6 +97,10 @@ static void process_frame(UIContext* ui_context)
                         .child_gap = child_gap_medium,
                         .direction = LAYOUT_TOP_TO_BOTTOM })
             {
+                ui_text("Hello, World!", &(TextConfig){ .color = yellow });
+                ui_text("Hello, World!", &(TextConfig){ .color = yellow });
+                ui_text("Hello, World!", &(TextConfig){ .color = yellow });
+                ui_text("Hello, World!", &(TextConfig){ .color = yellow });
             }
             ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
                         .color = yellow,

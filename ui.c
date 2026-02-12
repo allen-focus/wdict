@@ -85,6 +85,8 @@ static void grow_axis(float* remaining, float* growable_children[], int* growabl
         // Find the smallest current size among the growable children.
         float smallest = *growable_children[0];
         float second_smallest = INFINITY;
+
+        // The amount to add to all children currently equal to 'smallest' before they reach 'second_smallest'.
         float to_add = 0;
 
         // First pass: find the smallest size and the next smallest size (to determine the increment).
@@ -95,11 +97,11 @@ static void grow_axis(float* remaining, float* growable_children[], int* growabl
             {
                 second_smallest = smallest;
                 smallest = child;
+                to_add = second_smallest - smallest;
             }
             else if (child > smallest)
             {
                 second_smallest = min(child, second_smallest);
-                // The amount to add to all children currently equal to 'smallest' before they reach 'second_smallest'.
                 to_add = second_smallest - smallest;
             }
         }
