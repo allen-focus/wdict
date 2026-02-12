@@ -199,7 +199,7 @@ void ui_box_grow_children(UIBox* box)
         case LAYOUT_TOP_TO_BOTTOM:
             grow_axis(remaining_height, growable_children_heights, &growable_count_height);
             for (int i = 0; i < growable_count_width; i++)
-                *growable_children_heights[i] = max(*growable_children_heights[i], *remaining_width);
+                *growable_children_widths[i] = max(*growable_children_widths[i], *remaining_width);
             break;
     }
 
