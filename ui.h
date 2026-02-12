@@ -29,7 +29,7 @@ static int ui_box_macro_flag;
 
 typedef enum
 {
-    UI_COMMAND_RECT = 1,
+    UI_COMMAND_RECT,
     UI_COMMAND_TEXT
 } Command;
 
@@ -50,14 +50,15 @@ typedef struct
 typedef struct
 {
     UICommandBase base;
-    char* text;
-    Position position;
+    const char* content;
     Color color;
+    Position position;
 } UICommandText;
 
 typedef union
 {
     Command type;
+    UICommandBase base;
     UICommandRect rect;
     UICommandText text;
 } UICommand;
@@ -106,17 +107,43 @@ typedef struct
     LayoutDirection direction;
 } BoxConfig;
 
+typedef struct
+{
+    Color color;
+} TextConfig;
+
+typedef enum
+{
+    BOX_TYPE_CONTAINER,
+    BOX_TYPE_TEXT
+} BoxType;
+
+typedef struct
+{
+    Size remaining_space;
+    float next_child_offset_x;
+    float next_child_offset_y;
+    int children_count;
+} ContainerData;
+
+typedef struct
+{
+    const char* content;
+    Color color;
+} TextData;
+
 typedef struct UIBox UIBox;
 struct UIBox
 {
-    Size remaining_space;
-    Position position;
-    float next_child_offset_x;
-    float next_child_offset_y;
+    union {
+        ContainerData container;
+        TextData text;
+    } data;
+    BoxType type;
     BoxConfig config;
+    Position position;
     UIBox* parent;
     UIBox* children[CHILDREN_SIZE];
-    int children_count;
 };
 
 // Context -----------------------------
@@ -134,7 +161,7 @@ typedef struct
 void ui_reset(UIContext* ui_context);
 
 UIBox* ui_box_get_root();
-UIBox* ui_box_start(BoxConfig* box_config);
+UIBox* ui_box_start(BoxConfig* config);
 void ui_box_end();
 
 void ui_box_calculate_fit_size(UIBox* box);
@@ -142,6 +169,8 @@ void ui_box_grow_children(UIBox* box);
 void ui_box_resolve_position(UIBox* box);
 
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
+
+void ui_text(const char* text, TextConfig* text_config);
 
 ///
 

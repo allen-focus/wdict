@@ -55,7 +55,7 @@ RectStyle normal_rect_style = {
 };
 
 Color purple = { 10,  110, 137, 255 };
-Color white  = { 255, 224, 224, 224 };
+Color white  = { 255, 224, 224, 255 };
 Color red    = { 252, 147, 144, 255 };
 Color yellow = { 254, 216, 77,  255 };
 Color blue   = { 94,  203, 228, 255 };
@@ -130,6 +130,7 @@ static void process_frame(UIContext* ui_context)
                 {
                 }
             }
+            ui_text("Hello, World!", &(TextConfig){ .color = yellow });
         }
     }
 
@@ -150,7 +151,7 @@ static void process_frame(UIContext* ui_context)
                 renderer_draw_rect(cmd->rect.rect, cmd->rect.color, cmd->rect.style);
                 break;
             case UI_COMMAND_TEXT:
-                renderer_draw_text(cmd->text.text, cmd->text.position, cmd->text.color);
+                renderer_draw_text(cmd->text.content, cmd->text.position, cmd->text.color);
                 break;
             default:
                 Assert(0);

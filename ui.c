@@ -1,4 +1,5 @@
 #include "lib.h"
+#include "renderer.h"
 #include "ui.h"
 
 #include <math.h>
@@ -28,7 +29,7 @@ static bool ui_box_has_fit_attribute(SizingAxis axis)
 void ui_box_calculate_fit_size(UIBox* box)
 {
     // Recursively resolve child box sizes (depth-first, reverse order)
-    for (int i = 0; i < box->children_count; i++)
+    for (int i = 0; i < box->data.container.children_count; i++)
     {
         UIBox* child = box->children[i];
         ui_box_calculate_fit_size(child);
@@ -39,7 +40,7 @@ void ui_box_calculate_fit_size(UIBox* box)
         box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
     if (ui_box_has_fit_attribute(box->config.sizing.height))
         box->config.sizing.height.value += box->config.padding.top + box->config.padding.bottom;
-    int child_gap_count = box->children_count - 1;
+    int child_gap_count = box->data.container.children_count - 1;
     if (child_gap_count > 0)
         switch (box->config.direction)
         {
@@ -133,8 +134,12 @@ static void grow_axis(float* remaining, float* growable_children[], int* growabl
 // Recursively calculate sizes for boxes configured with 'grow' attribute
 void ui_box_grow_children(UIBox* box)
 {
-    float* remaining_width = &box->remaining_space.width;
-    float* remaining_height = &box->remaining_space.height;
+    if (box->type != BOX_TYPE_CONTAINER)
+        return;
+
+    float* remaining_width = &box->data.container.remaining_space.width;
+    float* remaining_height = &box->data.container.remaining_space.height;
+    int children_count = box->data.container.children_count;
 
     // Initialize remaining space
     // (which might be fixed or determined by a parent's 'grow' attribute in a previous pass)
@@ -146,7 +151,7 @@ void ui_box_grow_children(UIBox* box)
     *remaining_height -= box->config.padding.top + box->config.padding.bottom;
 
     // Subtract child gap
-    int child_gap_count = box->children_count - 1;
+    int child_gap_count = children_count - 1;
     if (child_gap_count > 0)
         switch (box->config.direction)
         {
@@ -164,7 +169,7 @@ void ui_box_grow_children(UIBox* box)
     int growable_count_height = 0;
 
     // Subtract the childrens' determined size from the parent's remaining space.
-    for (int i = 0; i < box->children_count; i++)
+    for (int i = 0; i < children_count; i++)
     {
         UIBox* child = box->children[i];
         if (child->config.sizing.width.mode == SIZING_MODE_FIT_GROW)
@@ -198,7 +203,7 @@ void ui_box_grow_children(UIBox* box)
     }
 
     // Recursively resolve size (breadth first)
-    for (int i = 0; i < box->children_count; i++)
+    for (int i = 0; i < children_count; i++)
     {
         UIBox* child = box->children[i];
         ui_box_grow_children(child);
@@ -210,37 +215,50 @@ void ui_box_resolve_position(UIBox* box)
     if (box->parent)
     {
         UIBox* parent = box->parent;
+        ContainerData* parent_data = &parent->data.container;
         box->position.x += parent->position.x + parent->config.padding.left;
         box->position.y += parent->position.y + parent->config.padding.top;
         switch (parent->config.direction)
         {
             case LAYOUT_LEFT_TO_RIGHT:
-                box->position.x += parent->next_child_offset_x;
-                parent->next_child_offset_x += box->config.sizing.width.value + parent->config.child_gap;
+                box->position.x += parent_data->next_child_offset_x;
+                parent_data->next_child_offset_x += box->config.sizing.width.value + parent->config.child_gap;
                 break;
             case LAYOUT_TOP_TO_BOTTOM:
-                box->position.y += parent->next_child_offset_y;
-                parent->next_child_offset_y += box->config.sizing.height.value + parent->config.child_gap;
+                box->position.y += parent_data->next_child_offset_y;
+                parent_data->next_child_offset_y += box->config.sizing.height.value + parent->config.child_gap;
                 break;
         }
     }
 
-    for (int i = 0; i < box->children_count; i++)
+    for (int i = 0; i < box->data.container.children_count; i++)
         ui_box_resolve_position(box->children[i]);
 }
 
 // TODO: Currently we assume all render commands are Rect. Need to handle text etc in the future.
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
 {
-    UICommandRect* cmd = (UICommandRect*)(ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++);
-    cmd->base.type = UI_COMMAND_RECT;
-    cmd->base.size = sizeof(UICommandRect);
-    cmd->rect = (Rect){ box->position.x, box->position.y, box->position.x + box->config.sizing.width.value,
-                        box->position.y + box->config.sizing.height.value };
-    cmd->color = box->config.color;
-    cmd->style = box->config.rect_style;
+    UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
+    switch (box->type)
+    {
+        case BOX_TYPE_CONTAINER:
+            cmd->base.type = UI_COMMAND_RECT;
+            cmd->base.size = sizeof(UICommandRect);
+            cmd->rect.rect = (Rect){ box->position.x, box->position.y, box->position.x + box->config.sizing.width.value,
+                                box->position.y + box->config.sizing.height.value };
+            cmd->rect.color = box->config.color;
+            cmd->rect.style = box->config.rect_style;
+            break;
+        case BOX_TYPE_TEXT:
+            cmd->base.type = UI_COMMAND_TEXT;
+            cmd->base.size = sizeof(UICommandText);
+            cmd->text.content = box->data.text.content;
+            cmd->text.color = box->data.text.color;
+            cmd->text.position = box->position;
+            break;
+    }
 
-    for (int i = 0; i < box->children_count; i++)
+    for (int i = 0; i < box->data.container.children_count; i++)
         ui_generate_render_commands(ui_context, box->children[i]);
 }
 
@@ -260,7 +278,7 @@ UIBox* ui_box_get_root()
     return &ui_box_queue.items[0];
 }
 
-UIBox* ui_box_start(BoxConfig* box_config)
+UIBox* ui_box_start(BoxConfig* config)
 {
     Assert(ui_box_stack.depth <= STACK_SIZE);
     Assert(ui_box_queue.count <= QUEUE_SIZE);
@@ -277,14 +295,14 @@ UIBox* ui_box_start(BoxConfig* box_config)
             if (parent->children[i] == NULL)
             {
                 parent->children[i] = box;
-                parent->children_count++;
+                parent->data.container.children_count++;
                 break;
             }
         }
     }
 
     ui_box_stack.items[ui_box_stack.depth++] = box;
-    memcpy(&box->config, box_config, sizeof(*box_config));
+    memcpy(&box->config, config, sizeof(*config));
     return box;
 }
 
@@ -298,4 +316,19 @@ void ui_reset(UIContext* ui_context)
     Assert(ui_box_stack.depth == 0);
     memset(&ui_box_queue, 0, sizeof(ui_box_queue));
     memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
+}
+
+void ui_text(const char* text, TextConfig* text_config)
+{
+    BoxConfig box_config = {
+        .sizing = {
+            .width = { (float)renderer_get_text_width(text), SIZING_MODE_FIXED },
+            .height = { (float)renderer_get_text_height(text), SIZING_MODE_FIXED }
+        }
+    };
+    UIBox* ui_box = ui_box_start(&box_config);
+    ui_box->type = BOX_TYPE_TEXT;
+    ui_box->data.text.content = text;
+    ui_box->data.text.color = text_config->color;
+    ui_box_end();
 }
