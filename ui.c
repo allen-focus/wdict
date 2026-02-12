@@ -1,5 +1,4 @@
 #include "lib.h"
-#include "renderer.h"
 #include "ui.h"
 
 #include <math.h>
@@ -237,7 +236,6 @@ void ui_box_resolve_position(UIBox* box)
         ui_box_resolve_position(box->children[i]);
 }
 
-// TODO: Currently we assume all render commands are Rect. Need to handle text etc in the future.
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
 {
     UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
@@ -320,12 +318,12 @@ void ui_reset(UIContext* ui_context)
     memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
 }
 
-void ui_text(const char* text, TextConfig* text_config)
+void ui_text(UIContext* ui_context, const char* text, TextConfig* text_config)
 {
     BoxConfig box_config = {
         .sizing = {
-            .width = { (float)renderer_get_text_width(text), SIZING_MODE_FIXED },
-            .height = { (float)renderer_get_text_height(text), SIZING_MODE_FIXED }
+            .width = { (float)ui_context->get_text_width(text), SIZING_MODE_FIXED },
+            .height = { (float)ui_context->get_text_height(text), SIZING_MODE_FIXED }
         }
     };
     UIBox* ui_box = ui_box_start(&box_config);

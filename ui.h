@@ -152,7 +152,9 @@ typedef struct
 {
     uint16_t client_width;
     uint16_t client_height;
-    void (*on_resize)(uint16_t, uint16_t);
+    void (*on_resize)(const uint16_t client_width, const uint16_t client_height);
+    uint32_t (*get_text_width)(const char* text);
+    uint32_t (*get_text_height)(const char* text);
     Queue(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
 } UIContext;
 
@@ -170,7 +172,7 @@ void ui_box_resolve_position(UIBox* box);
 
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
 
-void ui_text(const char* text, TextConfig* text_config);
+void ui_text(UIContext* ui_context, const char* text, TextConfig* text_config);
 
 ///
 

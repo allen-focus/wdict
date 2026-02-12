@@ -97,10 +97,6 @@ static void process_frame(UIContext* ui_context)
                         .child_gap = child_gap_medium,
                         .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_text("Hello, World!", &(TextConfig){ .color = yellow });
-                ui_text("Hello, World!", &(TextConfig){ .color = yellow });
-                ui_text("Hello, World!", &(TextConfig){ .color = yellow });
-                ui_text("Hello, World!", &(TextConfig){ .color = yellow });
             }
             ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
                         .color = yellow,
@@ -134,7 +130,7 @@ static void process_frame(UIContext* ui_context)
                 {
                 }
             }
-            ui_text("Hello, World!", &(TextConfig){ .color = yellow });
+            ui_text(ui_context, "Hello, World!", &(TextConfig){ .color = yellow });
         }
     }
 
@@ -288,9 +284,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
     // Initialize ui context & glyph cache & renderer
     {
-        ui_context->on_resize = swapchain_resize;
         ui_context->client_width = CLIENT_WIDTH;
         ui_context->client_height = CLIENT_HEIGHT;
+        ui_context->on_resize = swapchain_resize;
+        ui_context->get_text_width = renderer_get_text_width;
+        ui_context->get_text_height = renderer_get_text_height;
         memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
     }
     glyph_cache_init_and_fill(window, g_glyph_cache, L"Segoe UI Symbol");
