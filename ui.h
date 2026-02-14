@@ -1,18 +1,11 @@
 #pragma once
 #include "lib.h"
 
-// NOTE: Suppress compiler warning C4068: unknown pragma 'clang'
-#pragma warning(disable : 4068)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Weverything"
-static int ui_box_macro_flag;
-#pragma clang diagnostic pop
-
 // clang-format off
 #define ui_box(...)                                                                                                 \
-    for (ui_box_macro_flag = (ui_box_start(&(BoxConfig)__VA_ARGS__), 0);                                      \
-         ui_box_macro_flag < 1;                                                                                     \
-         ui_box_macro_flag = 1, ui_box_end())
+    for (UIBox* box = ui_box_start(&(BoxConfig)__VA_ARGS__);                                      \
+         box != NULL;                                                                                     \
+         ui_box_end(box), box = NULL)
 // clang-format on
 
 #define fixed(value) { value, SIZING_MODE_FIXED }
@@ -142,6 +135,7 @@ struct UIBox
     BoxType type;
     BoxConfig config;
     Position position;
+    Size min_size;
     UIBox* parent;
     UIBox* children[CHILDREN_SIZE];
 };
@@ -164,9 +158,8 @@ void ui_reset(UIContext* ui_context);
 
 UIBox* ui_box_get_root();
 UIBox* ui_box_start(BoxConfig* config);
-void ui_box_end();
+void ui_box_end(UIBox* box);
 
-void ui_box_calculate_fit_size(UIBox* box);
 void ui_box_grow_children(UIBox* box);
 void ui_box_resolve_position(UIBox* box);
 

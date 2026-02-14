@@ -19,60 +19,9 @@ static Stack(UIBox*, STACK_SIZE) ui_box_stack = { 0 };
 
 ///
 
-static bool ui_box_has_fit_attribute(SizingAxis axis)
+static bool axis_has_fit_attribute(SizingAxis axis)
 {
     return axis.mode == SIZING_MODE_FIT || axis.mode == SIZING_MODE_FIT_GROW;
-}
-
-// Recursively calculate sizes for boxes configured with 'fit' attribute (reverse pass)
-void ui_box_calculate_fit_size(UIBox* box)
-{
-    // Recursively resolve child box sizes (depth-first, reverse order)
-    for (int i = 0; i < box->data.container.children_count; i++)
-    {
-        UIBox* child = box->children[i];
-        ui_box_calculate_fit_size(child);
-    }
-
-    // When sizing mode has a 'fit' attribute on an axis, adjust the box size by adding padding and child gap
-    if (ui_box_has_fit_attribute(box->config.sizing.width))
-        box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
-    if (ui_box_has_fit_attribute(box->config.sizing.height))
-        box->config.sizing.height.value += box->config.padding.top + box->config.padding.bottom;
-    int child_gap_count = box->data.container.children_count - 1;
-    if (child_gap_count > 0)
-        switch (box->config.direction)
-        {
-            case LAYOUT_LEFT_TO_RIGHT:
-                if (ui_box_has_fit_attribute(box->config.sizing.width))
-                    box->config.sizing.width.value += box->config.child_gap * child_gap_count;
-                break;
-            case LAYOUT_TOP_TO_BOTTOM:
-                if (ui_box_has_fit_attribute(box->config.sizing.height))
-                    box->config.sizing.height.value += box->config.child_gap * child_gap_count;
-                break;
-        }
-
-    // If the current box is a child, adjust its parent's size (if has a 'fit' attribute) based on box direction.
-    // Note: Since recursion processes deepest children first, this box’s size has already been fully calculated
-    // (including any children it may have), so no further size propagation is needed at this level.
-    UIBox* parent = box->parent;
-    if (parent)
-        switch (parent->config.direction)
-        {
-            case LAYOUT_LEFT_TO_RIGHT:
-                if (ui_box_has_fit_attribute(parent->config.sizing.width))
-                    parent->config.sizing.width.value += box->config.sizing.width.value;
-                if (ui_box_has_fit_attribute(parent->config.sizing.height))
-                    parent->config.sizing.height.value = max(box->config.sizing.height.value, parent->config.sizing.height.value);
-                break;
-            case LAYOUT_TOP_TO_BOTTOM:
-                if (ui_box_has_fit_attribute(parent->config.sizing.height))
-                    parent->config.sizing.height.value += box->config.sizing.height.value;
-                if (ui_box_has_fit_attribute(parent->config.sizing.width))
-                    parent->config.sizing.width.value = max(box->config.sizing.width.value, parent->config.sizing.width.value);
-                break;
-        }
 }
 
 static void grow_axis(float* remaining, float* growable_children[], int* growable_count)
@@ -153,16 +102,15 @@ void ui_box_grow_children(UIBox* box)
 
     // Subtract child gap
     int child_gap_count = children_count - 1;
-    if (child_gap_count > 0)
-        switch (box->config.direction)
-        {
-            case LAYOUT_LEFT_TO_RIGHT:
-                *remaining_width -= box->config.child_gap * child_gap_count;
-                break;
-            case LAYOUT_TOP_TO_BOTTOM:
-                *remaining_height -= box->config.child_gap * child_gap_count;
-                break;
-        }
+    switch (box->config.direction)
+    {
+        case LAYOUT_LEFT_TO_RIGHT:
+            *remaining_width -= box->config.child_gap * child_gap_count;
+            break;
+        case LAYOUT_TOP_TO_BOTTOM:
+            *remaining_height -= box->config.child_gap * child_gap_count;
+            break;
+    }
 
     float* growable_children_widths[CHILDREN_SIZE] = { NULL };
     float* growable_children_heights[CHILDREN_SIZE] = { NULL };
@@ -306,8 +254,67 @@ UIBox* ui_box_start(BoxConfig* config)
     return box;
 }
 
-void ui_box_end()
+void ui_box_end(UIBox* box)
 {
+    if (box->type == BOX_TYPE_CONTAINER)
+    {
+        // 'FIXED' sizing mode axis
+        if (box->config.sizing.width.mode == SIZING_MODE_FIXED)
+            box->min_size.width = box->config.sizing.width.value;
+        if (box->config.sizing.height.mode == SIZING_MODE_FIXED)
+            box->min_size.height = box->config.sizing.height.value;
+
+        // 'FIT/FIT_GROW' sizing mode axis
+        int child_gap_count = box->data.container.children_count - 1;
+        if (axis_has_fit_attribute(box->config.sizing.width))
+        {
+            box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
+            if (box->config.direction == LAYOUT_LEFT_TO_RIGHT)
+                box->config.sizing.width.value += box->config.child_gap * child_gap_count;
+        }
+        if (axis_has_fit_attribute(box->config.sizing.height))
+        {
+            box->config.sizing.height.value += box->config.padding.top + box->config.padding.bottom;
+            if (box->config.direction == LAYOUT_TOP_TO_BOTTOM)
+                box->config.sizing.height.value += box->config.child_gap * child_gap_count;
+        }
+    }
+
+    // If the current box is a child, adjust its parent's size based on box direction.
+    UIBox* parent = box->parent;
+    if (parent)
+    {
+        float* parent_width = &parent->config.sizing.width.value;
+        float* parent_height = &parent->config.sizing.height.value;
+        switch (parent->config.direction)
+        {
+            case LAYOUT_LEFT_TO_RIGHT:
+                if (axis_has_fit_attribute(parent->config.sizing.width))
+                {
+                    *parent_width += box->config.sizing.width.value;
+                    parent->min_size.width += box->min_size.width;
+                }
+                if (axis_has_fit_attribute(parent->config.sizing.height))
+                {
+                    *parent_height = max(box->config.sizing.height.value, *parent_height);
+                    parent->min_size.height = max(box->min_size.height, parent->min_size.height);
+                }
+                break;
+            case LAYOUT_TOP_TO_BOTTOM:
+                if (axis_has_fit_attribute(parent->config.sizing.height))
+                {
+                    *parent_height += box->config.sizing.height.value;
+                    parent->min_size.height += box->min_size.height;
+                }
+                if (axis_has_fit_attribute(parent->config.sizing.width))
+                {
+                    *parent_width = max(box->config.sizing.width.value, *parent_width);
+                    parent->min_size.width = max(box->min_size.width, parent->min_size.width);
+                }
+                break;
+        }
+    }
+
     ui_box_stack.items[ui_box_stack.depth--] = NULL;
 }
 
@@ -320,15 +327,32 @@ void ui_reset(UIContext* ui_context)
 
 void ui_text(UIContext* ui_context, const char* text, TextConfig* text_config)
 {
-    BoxConfig box_config = {
-        .sizing = {
-            .width = { (float)ui_context->get_text_width(text), SIZING_MODE_FIXED },
-            .height = { (float)ui_context->get_text_height(text), SIZING_MODE_FIXED }
+    float text_width = (float)ui_context->get_text_width(text);
+    float text_height = (float)ui_context->get_text_height(text);
+
+    BoxConfig box_config = { .sizing = { .width = { text_width, SIZING_MODE_FIXED },
+                                         .height = { text_height, SIZING_MODE_FIXED } } };
+    UIBox* box = ui_box_start(&box_config);
+    {
+        box->type = BOX_TYPE_TEXT;
+        box->data.text.content = text;
+        box->data.text.color = text_config->color;
+
+        // Calculate ui_box->min_size.width by finding the width of the shortest word in the text.
+        float min_width = INFINITY;
+        {
+            char* text_copy = strdup(text);
+            char* token = strtok(text_copy, " ");
+            while (token != NULL)
+            {
+                float word_width = (float)ui_context->get_text_width(token);
+                if (word_width < min_width)
+                    min_width = word_width;
+                token = strtok(NULL, " ");
+            }
+            free(text_copy);
         }
-    };
-    UIBox* ui_box = ui_box_start(&box_config);
-    ui_box->type = BOX_TYPE_TEXT;
-    ui_box->data.text.content = text;
-    ui_box->data.text.color = text_config->color;
-    ui_box_end();
+        box->min_size.width = min_width;
+    }
+    ui_box_end(box);
 }

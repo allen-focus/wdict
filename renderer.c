@@ -428,6 +428,8 @@ uint32_t renderer_get_text_height(const char* text)
         if (font == NULL)
         {
             font = glyph->font;
+            // TODO: Should we use max(prev, current)?
+            // It seems that the `english_capital_height` is constant unless the font has changed.
             font_english_capital_height = glyph->font->english_capital_height;
         }
         else
@@ -494,7 +496,7 @@ void renderer_draw_text(const char* text, const Position position, const Color c
             .xmax = (float)(glyph->atlas_x + glyph->w),
             .ymax = (float)(glyph->atlas_y + glyph->h),
         };
-        RectStyle rect_style = { { 0, 0, 0, 0 }, 0, 0, 0 };
+        RectStyle rect_style = { 0 };
         renderer_rect_push(target_rect, texture_rect, color, rect_style);
 
         // Update x position for next char

@@ -77,66 +77,47 @@ static void process_frame(UIContext* ui_context)
     ui_reset(ui_context);
 
     ui_box({ .sizing = { fixed(ui_context->client_width), fixed(ui_context->client_height) },
-                .color = white,
-                .rect_style = background_rect_style,
-                .padding = padding_bigger,
-                .child_gap = child_gap_bigger,
-                .direction = LAYOUT_LEFT_TO_RIGHT })
+             .color = white,
+             .rect_style = background_rect_style,
+             .padding = padding_bigger,
+             .child_gap = child_gap_bigger,
+             .direction = LAYOUT_LEFT_TO_RIGHT })
     {
-        ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
-                    .color = purple,
-                    .rect_style = normal_rect_style,
-                    .padding = padding_big,
-                    .child_gap = child_gap_big,
-                    .direction = LAYOUT_LEFT_TO_RIGHT })
+        ui_box({ .sizing = { fixed(700), fixed(300) },
+                 .color = purple,
+                 .rect_style = normal_rect_style,
+                 .padding = padding_big,
+                 .child_gap = child_gap_big,
+                 .direction = LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
-                        .color = red,
-                        .rect_style = normal_rect_style,
-                        .padding = padding_medium,
-                        .child_gap = child_gap_medium,
-                        .direction = LAYOUT_TOP_TO_BOTTOM })
+            ui_box({ .sizing = { fit_grow(0), fit_grow(0) }, .direction = LAYOUT_TOP_TO_BOTTOM })
+            {
+                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = yellow }) {}
+                ui_text(ui_context, "One Two Three Four", &(TextConfig){ .color = white });
+                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = yellow }) {}
+            }
+            ui_box({ .sizing = { fixed(200), fit_grow(0) },
+                     .color = yellow,
+                     .rect_style = normal_rect_style,
+                     .padding = padding_medium,
+                     .child_gap = child_gap_medium,
+                     .direction = LAYOUT_LEFT_TO_RIGHT })
             {
             }
-            ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
-                        .color = yellow,
-                        .rect_style = normal_rect_style,
-                        .padding = padding_medium,
-                        .child_gap = child_gap_medium,
-                        .direction = LAYOUT_LEFT_TO_RIGHT })
+            ui_box({ .sizing = { fit(0), fit(0) },
+                     .color = red,
+                     .rect_style = normal_rect_style,
+                     .padding = padding_medium,
+                     .child_gap = child_gap_medium,
+                     .direction = LAYOUT_LEFT_TO_RIGHT })
             {
+                ui_text(ui_context, "Five Six Seven Eight Nine Ten", &(TextConfig){ .color = white });
             }
-            ui_box({ .sizing = {  fit(0), fit(0) },
-                        .color = blue,
-                        .rect_style = normal_rect_style,
-                        .padding = padding_medium,
-                        .child_gap = child_gap_medium,
-                        .direction = LAYOUT_LEFT_TO_RIGHT })
-            {
-                ui_box({ .sizing = { fixed(50), fixed(100) },
-                            .color = purple,
-                            .rect_style = normal_rect_style,
-                            .padding = padding_small,
-                            .child_gap = child_gap_small,
-                            .direction = LAYOUT_LEFT_TO_RIGHT })
-                {
-                }
-                ui_box({ .sizing = { fixed(50), fixed(100) },
-                            .color = purple,
-                            .rect_style = normal_rect_style,
-                            .padding = padding_small,
-                            .child_gap = child_gap_small,
-                            .direction = LAYOUT_LEFT_TO_RIGHT })
-                {
-                }
-            }
-            ui_text(ui_context, "Hello, World!", &(TextConfig){ .color = yellow });
         }
     }
 
     //
     UIBox* root = ui_box_get_root();
-    ui_box_calculate_fit_size(root);
     ui_box_grow_children(root);
     ui_box_resolve_position(root);
     ui_generate_render_commands(ui_context, root);
