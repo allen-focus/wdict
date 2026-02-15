@@ -108,6 +108,15 @@ static void shrink_axis(float* remaining, float* shrinkable[], float* shrinkable
         if (second_largest == 0)
             to_add = *remaining / *shrinkable_count;
 
+        // If 'to_add' is less than the remaining space, calculate the exact amount
+        // that can be distributed equally among them.
+        int largest_count = 0;
+        for (int i = 0; i < *shrinkable_count; i++)
+            if (fabsf(*shrinkable[i] - largest) < EPSILON)
+                largest_count++;
+        if (to_add * largest_count < *remaining)
+            to_add = *remaining / largest_count;
+
         // Apply the calculated 'to_add' amount to all children currently equal to 'largest', and update the remaining space.
         for (int i = 0; i < *shrinkable_count; i++)
         {
