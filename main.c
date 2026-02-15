@@ -90,11 +90,23 @@ static void process_frame(UIContext* ui_context)
                  .child_gap = child_gap_big,
                  .direction = LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_box({ .sizing = { fit_grow(0), fit_grow(0) }, .direction = LAYOUT_TOP_TO_BOTTOM })
+            ui_box({ .sizing = { fit(0), fit(0) },
+                    .color = red,
+                    .rect_style = normal_rect_style,
+                    .padding = padding_medium,
+                    .child_gap = child_gap_medium,
+                    .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = yellow }) {}
-                ui_text(ui_context, "One Two Three Four", &(TextConfig){ .color = white });
-                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = yellow }) {}
+                ui_text(ui_context, "o Two o o o", &(TextConfig){ .color = white });
+            }
+            ui_box({ .sizing = { fit(0), fit(0) },
+                     .color = red,
+                     .rect_style = normal_rect_style,
+                     .padding = padding_medium,
+                     .child_gap = child_gap_medium,
+                     .direction = LAYOUT_LEFT_TO_RIGHT })
+            {
+                ui_text(ui_context, "Ahhhhhhhhh you", &(TextConfig){ .color = white });
             }
             ui_box({ .sizing = { fixed(200), fit_grow(0) },
                      .color = yellow,
@@ -105,20 +117,20 @@ static void process_frame(UIContext* ui_context)
             {
             }
             ui_box({ .sizing = { fit(0), fit(0) },
-                     .color = red,
+                     .color = blue,
                      .rect_style = normal_rect_style,
                      .padding = padding_medium,
                      .child_gap = child_gap_medium,
                      .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                ui_text(ui_context, "Five Six Seven Eight Nine Ten", &(TextConfig){ .color = white });
+                ui_text(ui_context, "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0", &(TextConfig){ .color = red });
             }
         }
     }
 
     //
     UIBox* root = ui_box_get_root();
-    ui_box_grow_children(root);
+    ui_box_grow_shrink_children(root);
     ui_box_resolve_position(root);
     ui_generate_render_commands(ui_context, root);
 

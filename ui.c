@@ -24,65 +24,111 @@ static bool axis_has_fit_attribute(SizingAxis axis)
     return axis.mode == SIZING_MODE_FIT || axis.mode == SIZING_MODE_FIT_GROW;
 }
 
-static void grow_axis(float* remaining, float* growable_children[], int* growable_count)
+// Distribute remaining space proportionally among children that are configured to grow.
+static void grow_axis(float* remaining, float* growable[], const int growable_count)
 {
-    // Distribute remaining space proportionally among children that are configured to grow.
-    // This loop continues as long as there is remaining space and there are children to distribute to.
-    while (*remaining > EPSILON && *growable_count > 0)
+    while (*remaining > EPSILON && growable_count > 0)
     {
-        // Find the smallest current size among the growable children.
-        float smallest = *growable_children[0];
+        float smallest = *growable[0];
         float second_smallest = INFINITY;
-
-        // The amount to add to all children currently equal to 'smallest' before they reach 'second_smallest'.
         float to_add = 0;
 
-        // First pass: find the smallest size and the next smallest size (to determine the increment).
-        for (int i = 0; i < *growable_count; i++)
-        {
-            float child = *growable_children[i];
-            if (child < smallest)
+        // Find the smallest size and the next smallest size (to determine the increment).
+        for (int i = 0; i < growable_count; i++)
+            if (*growable[i] < smallest)
             {
                 second_smallest = smallest;
-                smallest = child;
+                smallest = *growable[i];
                 to_add = second_smallest - smallest;
             }
-            else if (child > smallest)
+            else if (*growable[i] > smallest)
             {
-                second_smallest = min(child, second_smallest);
+                second_smallest = min(*growable[i], second_smallest);
                 to_add = second_smallest - smallest;
             }
-        }
 
         // If all growable children have the same size (second_smallest remains INFINITY),
         // distribute the remaining space equally among all growable children.
         if (second_smallest == INFINITY)
-            to_add = *remaining / *growable_count;
-
-        // Count how many children currently have the 'smallest' size.
-        int smallest_count = 0;
-        for (int i = 0; i < *growable_count; i++)
-            if (fabsf(*growable_children[i] - smallest) < EPSILON)
-                smallest_count++;
+            to_add = *remaining / growable_count;
 
         // If distributing 'to_add' to all 'smallest_count' children would exceed the remaining space,
         // calculate the exact amount that can be distributed equally among them.
+        int smallest_count = 0;
+        for (int i = 0; i < growable_count; i++)
+            if (fabsf(*growable[i] - smallest) < EPSILON)
+                smallest_count++;
         if (to_add * smallest_count > *remaining)
             to_add = *remaining / smallest_count;
 
         // Apply the calculated 'to_add' amount to all children currently equal to 'smallest', and update the remaining space.
-        for (int i = 0; i < *growable_count; i++)
-            if (fabsf(*growable_children[i] - smallest) < EPSILON)
+        for (int i = 0; i < growable_count; i++)
+            if (fabsf(*growable[i] - smallest) < EPSILON)
             {
-                *growable_children[i] += to_add;
+                *growable[i] += to_add;
                 *remaining -= to_add;
             }
     }
 }
 
+void remove_shrinkable(float* shrinkable[], float* shrinkable_mins[], int* shrinkable_count, int index)
+{
+    // Remove the shrinkable at the given index and update the count.
+    shrinkable[index] = shrinkable[*shrinkable_count - 1];
+    shrinkable_mins[index] = shrinkable_mins[*shrinkable_count - 1];
+    shrinkable[*shrinkable_count - 1] = NULL;
+    shrinkable_mins[*shrinkable_count - 1] = NULL;
+    --(*shrinkable_count);
+}
+
+static void shrink_axis(float* remaining, float* shrinkable[], float* shrinkable_mins[], int* shrinkable_count)
+{
+    while (*remaining < -EPSILON && *shrinkable_count > 0)
+    {
+        float largest = *shrinkable[0];
+        float second_largest = 0;
+        float to_add = 0;
+
+        // Find the largest size and the next largest size (to determine the decrement).
+        for (int i = 0; i < *shrinkable_count; i++)
+            if (*shrinkable[i] > largest)
+            {
+                second_largest = largest;
+                largest = *shrinkable[i];
+                to_add = second_largest - largest;
+            }
+            else if (*shrinkable[i] < largest)
+            {
+                second_largest = max(*shrinkable[i], second_largest);
+                to_add = second_largest - largest;
+            }
+
+        // If all shrinkable children have the same size (second_largest remains 0),
+        // distribute the remaining space equally among all shrinkable children.
+        if (second_largest == 0)
+            to_add = *remaining / *shrinkable_count;
+
+        // Apply the calculated 'to_add' amount to all children currently equal to 'largest', and update the remaining space.
+        for (int i = 0; i < *shrinkable_count; i++)
+        {
+            float width_backup = *shrinkable[i];
+            float* child = shrinkable[i];
+            if (fabsf(*child - largest) < EPSILON)
+            {
+                *child += to_add;
+                if (*child <= *shrinkable_mins[i])
+                {
+                    *child = *shrinkable_mins[i];
+                    remove_shrinkable(shrinkable, shrinkable_mins, shrinkable_count, i);
+                }
+                *remaining -= (*child - width_backup);
+            }
+        }
+    }
+}
 
 // Recursively calculate sizes for boxes configured with 'grow' attribute
-void ui_box_grow_children(UIBox* box)
+void ui_box_grow_shrink_children(UIBox* box)
 {
     if (box->type != BOX_TYPE_CONTAINER)
         return;
@@ -91,16 +137,26 @@ void ui_box_grow_children(UIBox* box)
     float* remaining_height = &box->data.container.remaining_space.height;
     int children_count = box->data.container.children_count;
 
-    // Initialize remaining space
-    // (which might be fixed or determined by a parent's 'grow' attribute in a previous pass)
+    float* growable_widths[CHILDREN_SIZE] = { 0 };
+    float* growable_heights[CHILDREN_SIZE] = { 0 };
+    int growable_width_count = 0;
+    int growable_height_count = 0;
+
+    float* shrinkable_widths[CHILDREN_SIZE] = { 0 };
+    float* shrinkable_heights[CHILDREN_SIZE] = { 0 };
+    float* shrinkable_width_mins[CHILDREN_SIZE] = { 0 };
+    float* shrinkable_height_mins[CHILDREN_SIZE] = { 0 };
+    int shrinkable_width_count = 0;
+    int shrinkable_height_count = 0;
+
+    // Initialize remaining space (which might be fixed or determined by a
+    // parent's 'grow' attribute in a previous pass)
     *remaining_width = box->config.sizing.width.value;
     *remaining_height = box->config.sizing.height.value;
 
-    // Subtract padding
+    // Subtract padding and child gap
     *remaining_width -= box->config.padding.left + box->config.padding.right;
     *remaining_height -= box->config.padding.top + box->config.padding.bottom;
-
-    // Subtract child gap
     int child_gap_count = children_count - 1;
     switch (box->config.direction)
     {
@@ -112,19 +168,27 @@ void ui_box_grow_children(UIBox* box)
             break;
     }
 
-    float* growable_children_widths[CHILDREN_SIZE] = { NULL };
-    float* growable_children_heights[CHILDREN_SIZE] = { NULL };
-    int growable_count_width = 0;
-    int growable_count_height = 0;
-
     // Subtract the childrens' determined size from the parent's remaining space.
     for (int i = 0; i < children_count; i++)
     {
         UIBox* child = box->children[i];
+
         if (child->config.sizing.width.mode == SIZING_MODE_FIT_GROW)
-            growable_children_widths[growable_count_width++] = &child->config.sizing.width.value;
+            growable_widths[growable_width_count++] = &child->config.sizing.width.value;
         if (child->config.sizing.height.mode == SIZING_MODE_FIT_GROW)
-            growable_children_heights[growable_count_height++] = &child->config.sizing.height.value;
+            growable_heights[growable_height_count++] = &child->config.sizing.height.value;
+
+        if (child->config.sizing.width.value > child->min_size.width)
+        {
+            shrinkable_width_mins[shrinkable_width_count] = &child->min_size.width;
+            shrinkable_widths[shrinkable_width_count++] = &child->config.sizing.width.value;
+        }
+        if (child->config.sizing.height.value > child->min_size.height)
+        {
+            shrinkable_height_mins[shrinkable_height_count] = &child->min_size.height;
+            shrinkable_heights[shrinkable_height_count++] = &child->config.sizing.height.value;
+        }
+
         switch (box->config.direction)
         {
             case LAYOUT_LEFT_TO_RIGHT:
@@ -140,14 +204,34 @@ void ui_box_grow_children(UIBox* box)
     switch (box->config.direction)
     {
         case LAYOUT_LEFT_TO_RIGHT:
-            grow_axis(remaining_width, growable_children_widths, &growable_count_width);
-            for (int i = 0; i < growable_count_height; i++)
-                *growable_children_heights[i] = max(*growable_children_heights[i], *remaining_height);
+            // Main axis (width)
+            if (*remaining_width > 0)
+                grow_axis(remaining_width, growable_widths, growable_width_count);
+            else if (*remaining_width < 0)
+                shrink_axis(remaining_width, shrinkable_widths, shrinkable_width_mins, &shrinkable_width_count);
+
+            // Cross axis (height)
+            if (*remaining_height > 0)
+                for (int i = 0; i < growable_height_count; i++)
+                    *growable_heights[i] = max(*growable_heights[i], *remaining_height);
+            else if (*remaining_height < 0)
+                for (int i = 0; i < shrinkable_height_count; i++)
+                    *shrinkable_heights[i] = max(*shrinkable_height_mins[i], *shrinkable_heights[i] + *remaining_height);
             break;
         case LAYOUT_TOP_TO_BOTTOM:
-            grow_axis(remaining_height, growable_children_heights, &growable_count_height);
-            for (int i = 0; i < growable_count_width; i++)
-                *growable_children_widths[i] = max(*growable_children_widths[i], *remaining_width);
+            // Main axis (height)
+            if (*remaining_height > 0)
+                grow_axis(remaining_height, growable_heights, growable_height_count);
+            else if (*remaining_height < 0)
+                shrink_axis(remaining_height, shrinkable_heights, shrinkable_height_mins, &shrinkable_height_count);
+
+            // Cross axis (width)
+            if (*remaining_width > 0)
+                for (int i = 0; i < growable_width_count; i++)
+                    *growable_widths[i] = max(*growable_widths[i], *remaining_width);
+            else if (*remaining_width < 0)
+                for (int i = 0; i < shrinkable_width_count; i++)
+                    *shrinkable_widths[i] = max(*shrinkable_width_mins[i], *shrinkable_widths[i] + *remaining_width);
             break;
     }
 
@@ -155,7 +239,7 @@ void ui_box_grow_children(UIBox* box)
     for (int i = 0; i < children_count; i++)
     {
         UIBox* child = box->children[i];
-        ui_box_grow_children(child);
+        ui_box_grow_shrink_children(child);
     }
 }
 
@@ -269,14 +353,22 @@ void ui_box_end(UIBox* box)
         if (axis_has_fit_attribute(box->config.sizing.width))
         {
             box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
+            box->min_size.width += box->config.padding.left + box->config.padding.right;
             if (box->config.direction == LAYOUT_LEFT_TO_RIGHT)
+            {
                 box->config.sizing.width.value += box->config.child_gap * child_gap_count;
+                box->min_size.width += box->config.child_gap * child_gap_count;
+            }
         }
         if (axis_has_fit_attribute(box->config.sizing.height))
         {
             box->config.sizing.height.value += box->config.padding.top + box->config.padding.bottom;
+            box->min_size.height += box->config.padding.top + box->config.padding.bottom;
             if (box->config.direction == LAYOUT_TOP_TO_BOTTOM)
+            {
                 box->config.sizing.height.value += box->config.child_gap * child_gap_count;
+                box->min_size.height += box->config.child_gap * child_gap_count;
+            }
         }
     }
 
@@ -339,20 +431,21 @@ void ui_text(UIContext* ui_context, const char* text, TextConfig* text_config)
         box->data.text.color = text_config->color;
 
         // Calculate ui_box->min_size.width by finding the width of the shortest word in the text.
-        float min_width = INFINITY;
+        float min_width = 0;
         {
             char* text_copy = strdup(text);
             char* token = strtok(text_copy, " ");
             while (token != NULL)
             {
                 float word_width = (float)ui_context->get_text_width(token);
-                if (word_width < min_width)
+                if (word_width > min_width)
                     min_width = word_width;
                 token = strtok(NULL, " ");
             }
             free(text_copy);
         }
         box->min_size.width = min_width;
+        box->min_size.height = text_height;
     }
     ui_box_end(box);
 }

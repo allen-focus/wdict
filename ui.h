@@ -160,7 +160,7 @@ UIBox* ui_box_get_root();
 UIBox* ui_box_start(BoxConfig* config);
 void ui_box_end(UIBox* box);
 
-void ui_box_grow_children(UIBox* box);
+void ui_box_grow_shrink_children(UIBox* box);
 void ui_box_resolve_position(UIBox* box);
 
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
