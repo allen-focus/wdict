@@ -116,12 +116,12 @@ typedef struct
     Size remaining_space;
     float next_child_offset_x;
     float next_child_offset_y;
-    int children_count;
+    int child_count;
 } ContainerData;
 
 typedef struct
 {
-    const char* content;
+    char* content;
     Color color;
 } TextData;
 
@@ -165,7 +165,10 @@ void ui_box_resolve_position(UIBox* box);
 
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
 
-void ui_text(UIContext* ui_context, const char* text, TextConfig* text_config);
+UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config);
+void ui_box_wrap_text(UIContext* ui_context, UIBox* text_box_array[], int text_box_count);
+
+void ui_box_free_text_content(UIBox* text_box_array[], int text_box_count);
 
 ///
 
