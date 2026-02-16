@@ -58,6 +58,12 @@ typedef union
 
 // Sizing ------------------------------
 
+typedef enum
+{
+    WIDTH,
+    HEIGHT
+} Axis;
+
 typedef struct {
     float width;
     float height;
@@ -160,7 +166,8 @@ UIBox* ui_box_get_root();
 UIBox* ui_box_start(BoxConfig* config);
 void ui_box_end(UIBox* box);
 
-void ui_box_grow_shrink_children(UIBox* box);
+void ui_box_calculate_fit_axis(UIBox* box, Axis axis);
+void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis);
 void ui_box_resolve_position(UIBox* box);
 
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box);

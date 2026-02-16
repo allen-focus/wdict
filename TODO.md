@@ -7,7 +7,7 @@ Use ~~x~~ to mark item as completed.
 5. ~~Multiple grow~~
 6. ~~Shrink~~
 7. ~~Text Wrap~~
-8. Text Wrap fit (adjust pipeline)
+8. ~~Text Wrap fit (adjust pipeline)~~
 9. Minimum/maximum size
 10. Alignment
 

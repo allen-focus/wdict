@@ -125,9 +125,12 @@ static void process_frame(UIContext* ui_context)
 
     //
     UIBox* root = ui_box_get_root();
-    ui_box_grow_shrink_children(root);
-    ui_box_resolve_position(root);
+    ui_box_calculate_fit_axis(root, WIDTH);
+    ui_box_grow_shrink_children_axis(root, WIDTH);
     ui_box_wrap_text(ui_context, text_box_array, text_box_count);
+    ui_box_calculate_fit_axis(root, HEIGHT);
+    ui_box_grow_shrink_children_axis(root, HEIGHT);
+    ui_box_resolve_position(root);
     ui_generate_render_commands(ui_context, root);
 
     // Draw
