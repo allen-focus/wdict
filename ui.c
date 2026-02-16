@@ -28,8 +28,9 @@ static bool axis_has_fit_attribute(SizingAxis axis)
 void ui_box_calculate_fit_axis(UIBox* box, Axis axis)
 {
     // Recursively resolve child box sizes (depth-first, reverse order)
-    for (int i = 0; i < box->data.container.child_count; i++)
-        ui_box_calculate_fit_axis(box->children[i], axis);
+    if (box->type == BOX_TYPE_CONTAINER)
+        for (int i = 0; i < box->data.container.child_count; i++)
+                ui_box_calculate_fit_axis(box->children[i], axis);
 
     // If the current box is a child, adjust its parent's size based on box direction.
     UIBox* parent = box->parent;
@@ -217,6 +218,8 @@ void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
 
             if (child->config.sizing.width.value > child->min_size.width)
             {
+                if (child->type == BOX_TYPE_TEXT)
+                    child->data.text.needs_wrapping = true;
                 shrinkable_width_mins[shrinkable_width_count] = &child->min_size.width;
                 shrinkable_widths[shrinkable_width_count++] = &child->config.sizing.width.value;
             }
@@ -305,11 +308,9 @@ void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
     }
 
     // Recursively resolve size (breadth first)
-    for (int i = 0; i < children_count; i++)
-    {
-        UIBox* child = box->children[i];
-        ui_box_grow_shrink_children_axis(child, axis);
-    }
+    if (box->type == BOX_TYPE_CONTAINER)
+        for (int i = 0; i < children_count; i++)
+                ui_box_grow_shrink_children_axis(box->children[i], axis);
 }
 
 void ui_box_resolve_position(UIBox* box)
@@ -332,34 +333,58 @@ void ui_box_resolve_position(UIBox* box)
         }
     }
 
-    for (int i = 0; i < box->data.container.child_count; i++)
-        ui_box_resolve_position(box->children[i]);
+    if (box->type == BOX_TYPE_CONTAINER)
+        for (int i = 0; i < box->data.container.child_count; i++)
+            ui_box_resolve_position(box->children[i]);
 }
 
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
 {
-    UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
     switch (box->type)
     {
         case BOX_TYPE_CONTAINER:
-            cmd->base.type = UI_COMMAND_RECT;
-            cmd->base.size = sizeof(UICommandRect);
+        {
+            UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
+            cmd->rect.base.type = UI_COMMAND_RECT,
+            cmd->rect.base.size = sizeof(UICommandRect),
             cmd->rect.rect = (Rect){ box->position.x, box->position.y, box->position.x + box->config.sizing.width.value,
-                                box->position.y + box->config.sizing.height.value };
+                                     box->position.y + box->config.sizing.height.value };
             cmd->rect.color = box->config.color;
             cmd->rect.style = box->config.rect_style;
-            break;
+        }
+        break;
         case BOX_TYPE_TEXT:
-            cmd->base.type = UI_COMMAND_TEXT;
-            cmd->base.size = sizeof(UICommandText);
-            cmd->text.content = box->data.text.content;
-            cmd->text.color = box->data.text.color;
-            cmd->text.position = box->position;
-            break;
+        {
+            if (!box->data.text.wrapped_lines)
+            {
+                UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
+                cmd->text.base.type = UI_COMMAND_TEXT;
+                cmd->text.base.size = sizeof(UICommandText);
+                cmd->text.content = box->data.text.content;
+                cmd->text.color = box->data.text.color;
+                cmd->text.position = box->position;
+            }
+            else
+            {
+                uint32_t line_height = ui_context->get_text_height("A");
+                for (int i = 0; i < box->data.text.line_count; i++)
+                {
+                    UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
+                    cmd->text.base.type = UI_COMMAND_TEXT;
+                    cmd->text.base.size = sizeof(UICommandText);
+                    cmd->text.content = box->data.text.wrapped_lines[i];
+                    cmd->text.color = box->data.text.color;
+                    cmd->text.position.x = box->position.x;
+                    cmd->text.position.y = box->position.y + i * line_height;
+                }
+            }
+        }
+        break;
     }
 
-    for (int i = 0; i < box->data.container.child_count; i++)
-        ui_generate_render_commands(ui_context, box->children[i]);
+    if (box->type == BOX_TYPE_CONTAINER)
+        for (int i = 0; i < box->data.container.child_count; i++)
+            ui_generate_render_commands(ui_context, box->children[i]);
 }
 
 static UIBox* ui_box_new()
@@ -440,6 +465,23 @@ void ui_box_end(UIBox* box)
             }
         }
     }
+    else if (box->type == BOX_TYPE_TEXT)
+    {
+        // Calculate box->min_size.width by finding the width of the shortest word in the text.
+        float min_width = 0;
+        char* text_copy = _strdup(box->data.text.content);
+        char* token = strtok(text_copy, " ");
+        while (token != NULL)
+        {
+            float word_width = (float)box->data.text.get_text_width(token);
+            if (word_width > min_width)
+                min_width = word_width;
+            token = strtok(NULL, " ");
+        }
+        free(text_copy);
+        box->min_size.width = min_width;
+        box->min_size.height = (float)box->data.text.get_text_height(box->data.text.content);
+    }
 
     ui_box_stack.items[ui_box_stack.depth--] = NULL;
 }
@@ -453,119 +495,89 @@ void ui_reset(UIContext* ui_context)
 
 UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config)
 {
-    float text_width = (float)ui_context->get_text_width(text);
-    float text_height = (float)ui_context->get_text_height(text);
-
-    BoxConfig box_config = { .sizing = { .width = { text_width, SIZING_MODE_FIXED },
-                                         .height = { text_height, SIZING_MODE_FIXED } } };
+    BoxConfig box_config = { .sizing = { .width = { (float)ui_context->get_text_width(text), SIZING_MODE_FIXED },
+                                         .height = { (float)ui_context->get_text_height(text), SIZING_MODE_FIXED } } };
     UIBox* text_box = ui_box_start(&box_config);
-    {
-        text_box->type = BOX_TYPE_TEXT;
-        text_box->data.text.content = _strdup(text);
-        text_box->data.text.color = text_config->color;
-
-        // Calculate ui_box->min_size.width by finding the width of the shortest word in the text.
-        float min_width = 0;
-        {
-            char* text_copy = _strdup(text);
-            char* token = strtok(text_copy, " ");
-            while (token != NULL)
-            {
-                float word_width = (float)ui_context->get_text_width(token);
-                if (word_width > min_width)
-                    min_width = word_width;
-                token = strtok(NULL, " ");
-            }
-            free(text_copy);
-        }
-        text_box->min_size.width = min_width;
-        text_box->min_size.height = text_height;
-    }
+    text_box->type = BOX_TYPE_TEXT;
+    text_box->data.text.content = _strdup(text);
+    text_box->data.text.color = text_config->color;
+    text_box->data.text.get_text_width = ui_context->get_text_width;
+    text_box->data.text.get_text_height = ui_context->get_text_height;
     ui_box_end(text_box);
     return text_box;
 }
 
-static void wrap_text(UIContext* ui_context, UIBox* text_box)
+static void perform_text_wrapping(UIContext* ui_context, UIBox* text_box)
 {
-    uint32_t text_width = ui_context->get_text_width(text_box->data.text.content);
-    if (text_width <= text_box->config.sizing.width.value)
+    if (!text_box->data.text.needs_wrapping)
         return;
 
-    int text_len = (int)strlen(text_box->data.text.content);
-    bool wrapped = false;
-    for (int i = text_len - 1; i >= 0; i--)
+    float max_width = text_box->config.sizing.width.value;
+    char* text = text_box->data.text.content;
+    size_t text_len = strlen(text);
+
+    // Allocate space for wrapped lines (worst case: each word is a line)
+    size_t max_lines = text_len / 2 + 1;
+    text_box->data.text.wrapped_lines = malloc(max_lines * sizeof(char*));
+    text_box->data.text.line_count = 0;
+
+    char* line_start = text;
+    char* current = text;
+    char* last_space = NULL;
+
+    while (*current != '\0')
     {
-        if (text_box->data.text.content[i] == ' ')
+        if (*current == ' ')
+            last_space = current;
+
+        // Check if current segment exceeds max_width
+        char saved_char = *(current + 1);
+        *(current + 1) = '\0';
+        uint32_t width = ui_context->get_text_width(line_start);
+        *(current + 1) = saved_char;
+
+        if (width > max_width)
         {
-            text_box->data.text.content[i] = '\0';
-            uint32_t left_text_width = ui_context->get_text_width(text_box->data.text.content);
-            if (left_text_width <= text_box->config.sizing.width.value)
-            {
-                char* left_text = text_box->data.text.content;
-                int left_text_len = (int)strlen(left_text);
+            // Break at last space, or force break if no space
+            char* break_point = last_space ? last_space : current;
 
-                char* right_text = left_text + left_text_len + 1;
-                for (int j = 0; j < text_len - left_text_len - 1; j++)
-                    if (right_text[j] == '\0')
-                        right_text[j] = ' ';
+            // Store this line
+            size_t line_len = break_point - line_start;
+            text_box->data.text.wrapped_lines[text_box->data.text.line_count] = malloc(line_len + 1);
+            strncpy(text_box->data.text.wrapped_lines[text_box->data.text.line_count], line_start, line_len);
+            text_box->data.text.wrapped_lines[text_box->data.text.line_count][line_len] = '\0';
+            text_box->data.text.line_count++;
 
-                UIBox* right_text_box = ui_box_new();
-                memcpy(right_text_box, text_box, sizeof(*text_box));
-                right_text_box->data.text.content = right_text;
-                right_text_box->position.x -= text_box->config.sizing.width.value + text_box->parent->config.child_gap;
-                right_text_box->position.y += text_box->config.sizing.height.value;
-
-                int* parent_child_count = &text_box->parent->data.container.child_count;
-                Assert(*parent_child_count < CHILDREN_SIZE);
-                text_box->parent->children[(*parent_child_count)++] = right_text_box;
-
-                wrap_text(ui_context, right_text_box);
-                text_box->config.sizing.height.value += right_text_box->config.sizing.height.value;
-                wrapped = true;
-                break;
-            }
+            // Move to next line
+            line_start = break_point + (last_space ? 1 : 0); // Skip space
+            current = line_start;
+            last_space = NULL;
+        }
+        else
+        {
+            current++;
         }
     }
 
-    // If no suitable wrapping point (space) was found, the current text segment is treated as a single unbroken unit.
-    // It will not be broken further and may overflow the box's specified width.
-    if (!wrapped && text_len != 0)
+    // Store final line
+    if (*line_start != '\0')
     {
-        for (int i = 0; i < text_len; i++)
-            if (text_box->data.text.content[i] == '\0')
-                text_box->data.text.content[i] = ' ';
-        for (int i = 0; i < text_len; i++)
-            if (text_box->data.text.content[i] == ' ')
-            {
-                text_box->data.text.content[i] = '\0';
-
-                char* right_text = text_box->data.text.content + i + 1;
-                UIBox* right_text_box = ui_box_new();
-                memcpy(right_text_box, text_box, sizeof(*text_box));
-                right_text_box->data.text.content = right_text;
-                right_text_box->position.x -= text_box->config.sizing.width.value + text_box->parent->config.child_gap;
-                right_text_box->position.y += text_box->config.sizing.height.value;
-
-                int* parent_child_count = &text_box->parent->data.container.child_count;
-                Assert(*parent_child_count < CHILDREN_SIZE);
-                text_box->parent->children[(*parent_child_count)++] = right_text_box;
-
-                wrap_text(ui_context, right_text_box);
-                text_box->config.sizing.height.value += right_text_box->config.sizing.height.value;
-                wrapped = true;
-                break;
-            }
+        text_box->data.text.wrapped_lines[text_box->data.text.line_count] = _strdup(line_start);
+        text_box->data.text.line_count++;
     }
+
+    // Update box dimensions
+    float line_height = (float)ui_context->get_text_height("A");
+    text_box->config.sizing.height.value = line_height * text_box->data.text.line_count;
+    text_box->min_size.height = text_box->config.sizing.height.value;
+    text_box->min_size.width = max_width;
 }
 
-void ui_box_wrap_text(UIContext* ui_context, UIBox* text_box_array[], int text_box_count)
+void ui_box_apply_text_wrapping(UIContext* ui_context, UIBox* box)
 {
-    for (int i = 0; i < text_box_count; i++)
-        wrap_text(ui_context, text_box_array[i]);
-}
-
-void ui_box_free_text_content(UIBox* text_box_array[], int text_box_count)
-{
-    for (int i = 0; i < text_box_count; i++)
-        free(text_box_array[i]->data.text.content);
+    if (box->type == BOX_TYPE_TEXT)
+        perform_text_wrapping(ui_context, box);
+    else if (box->type == BOX_TYPE_CONTAINER)
+        for (int i = 0; i < box->data.container.child_count; i++)
+            ui_box_apply_text_wrapping(ui_context, box->children[i]);
 }

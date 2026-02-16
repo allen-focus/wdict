@@ -129,6 +129,11 @@ typedef struct
 {
     char* content;
     Color color;
+    bool needs_wrapping;
+    char** wrapped_lines;
+    int line_count;
+    uint32_t (*get_text_width)(const char* text);
+    uint32_t (*get_text_height)(const char* text);
 } TextData;
 
 typedef struct UIBox UIBox;
@@ -168,14 +173,12 @@ void ui_box_end(UIBox* box);
 
 void ui_box_calculate_fit_axis(UIBox* box, Axis axis);
 void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis);
+void ui_box_apply_text_wrapping(UIContext* ui_context, UIBox* box);
 void ui_box_resolve_position(UIBox* box);
 
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
 
 UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config);
-void ui_box_wrap_text(UIContext* ui_context, UIBox* text_box_array[], int text_box_count);
-
-void ui_box_free_text_content(UIBox* text_box_array[], int text_box_count);
 
 ///
 
