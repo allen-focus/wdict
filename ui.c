@@ -463,6 +463,10 @@ UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config)
 
 static void wrap_text(UIContext* ui_context, UIBox* text_box)
 {
+    uint32_t text_width = ui_context->get_text_width(text_box->data.text.content);
+    if (text_width <= text_box->config.sizing.width.value)
+        return;
+
     int text_len = (int)strlen(text_box->data.text.content);
     bool wrapped = false;
     for (int i = text_len - 1; i >= 0; i--)
@@ -473,8 +477,6 @@ static void wrap_text(UIContext* ui_context, UIBox* text_box)
             uint32_t left_text_width = ui_context->get_text_width(text_box->data.text.content);
             if (left_text_width <= text_box->config.sizing.width.value)
             {
-                text_box->config.sizing.width.value = (float)left_text_width;
-
                 char* left_text = text_box->data.text.content;
                 int left_text_len = (int)strlen(left_text);
 
@@ -530,11 +532,7 @@ static void wrap_text(UIContext* ui_context, UIBox* text_box)
 void ui_box_wrap_text(UIContext* ui_context, UIBox* text_box_array[], int text_box_count)
 {
     for (int i = 0; i < text_box_count; i++)
-    {
-        UIBox* text_box = text_box_array[i];
-        if (ui_context->get_text_width(text_box->data.text.content) > text_box->config.sizing.width.value)
-            wrap_text(ui_context, text_box_array[i]);
-    }
+        wrap_text(ui_context, text_box_array[i]);
 }
 
 void ui_box_free_text_content(UIBox* text_box_array[], int text_box_count)
