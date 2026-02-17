@@ -246,9 +246,18 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float is_inner = 1.0 - smoothstep(-0.5, 0.5, sdf_inner);
 
     // Color space conversion and blending
-    float3 border_linear = sRGBToLinear(input.border_color.rgb);
     float3 texture_linear = sRGBToLinear(texture_based_color.rgb);
-    float3 base_linear = lerp(border_linear, texture_linear, is_inner);
+    float3 base_linear;
+    if (input.border_thickness > 0.0)
+    {
+        float3 border_linear = sRGBToLinear(input.border_color.rgb);
+        base_linear = lerp(border_linear, texture_linear, is_inner);
+    }
+    else
+    {
+        // No border - use only texture color
+        base_linear = texture_linear;
+    }
     float base_alpha = texture_based_color.a * is_outer;
 
     // Calculate shadow
@@ -271,7 +280,7 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float3 composed_rgb_linear = base_alpha * base_linear + shadow_alpha * shadow_color * (1.0 - base_alpha);
     float composed_alpha = base_alpha + shadow_alpha * (1.0 - base_alpha);
 
-    // Convert back to sRGB and handle premultiplied alpha (1e-6 to avoid division by zero when alpha is 0)
-    float3 shadowed_srgb = linearToSRGB(composed_rgb_linear / max(composed_alpha, 1e-6));
-    return float4(shadowed_srgb, composed_alpha);
+    // Convert back to sRGB and handle premultiplied alpha
+    float3 final_srgb = linearToSRGB(composed_rgb_linear / max(composed_alpha, 1e-6));
+    return float4(final_srgb, composed_alpha);
 }

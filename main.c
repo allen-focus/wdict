@@ -54,6 +54,13 @@ RectStyle normal_rect_style = {
     .enable_shadow = false
 };
 
+RectStyle full_rect_style = {
+    .border_color = { 39, 166, 87, 255 },
+    .corner_radius = 12,
+    .border_thickness = 4,
+    .enable_shadow = true
+};
+
 Color purple = { 10,  110, 137, 255 };
 Color white  = { 255, 224, 224, 255 };
 Color red    = { 252, 147, 144, 255 };
@@ -101,7 +108,7 @@ static void process_frame(UIContext* ui_context)
             }
             ui_box({ .sizing = { fixed(200), fit_grow(0) },
                      .color = yellow,
-                     .rect_style = normal_rect_style,
+                     .rect_style = full_rect_style,
                      .padding = padding_medium,
                      .child_gap = child_gap_medium,
                      .direction = LAYOUT_LEFT_TO_RIGHT })
