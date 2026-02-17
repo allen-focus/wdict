@@ -77,14 +77,14 @@ static void process_frame(UIContext* ui_context)
     ui_reset(ui_context);
 
     ui_box({ .sizing = { fixed(ui_context->client_width), fixed(ui_context->client_height) },
-             .color = white,
+             .color = purple,
              .rect_style = background_rect_style,
              .padding = padding_bigger,
              .child_gap = child_gap_bigger,
              .direction = LAYOUT_LEFT_TO_RIGHT })
     {
         ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
-                 .color = purple,
+                 .color = blue,
                  .rect_style = normal_rect_style,
                  .padding = padding_big,
                  .child_gap = child_gap_big,
@@ -108,7 +108,7 @@ static void process_frame(UIContext* ui_context)
             {
             }
             ui_box({ .sizing = { fit(0), fit(0) },
-                     .color = blue,
+                     .color = white,
                      .rect_style = normal_rect_style,
                      .padding = padding_medium,
                      .child_gap = child_gap_medium,

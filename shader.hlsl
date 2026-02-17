@@ -71,7 +71,7 @@ PS_INPUT vs(VS_Input input)
         shadow_sigma = 4;
         shadow_offset = float2(0, 2);
 
-        // NOTE: As we hard-coded shadow sigma and offset, we could just use the 
+        // NOTE: As we hard-coded shadow sigma and offset, we could just use the
         // pre-calculated original rect. The detail of that calculation is below:
         // ```
         // float shadow_radius = 3.0 * shadow_sigma;
@@ -241,8 +241,9 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float sdf_inner = sdf_outer + input.border_thickness;
 
     // Anti-aliased alpha mask generation
-    float is_outer = 1.0 - smoothstep(0.0, 1.0, sdf_outer);
-    float is_inner = 1.0 - smoothstep(0.0, 1.0, sdf_inner);
+    // Use sub-pixel smoothing range for sharper edges without visible gray borders
+    float is_outer = 1.0 - smoothstep(-0.5, 0.5, sdf_outer);
+    float is_inner = 1.0 - smoothstep(-0.5, 0.5, sdf_inner);
 
     // Color space conversion and blending
     float3 border_linear = sRGBToLinear(input.border_color.rgb);
