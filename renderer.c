@@ -395,6 +395,7 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
     vertex->style_params[0] = style.corner_radius;
     vertex->style_params[1] = style.border_thickness;
     vertex->style_params[2] = (float)style.enable_shadow;
+    vertex->style_params[3] = 0.0f; // is_text flag (0 = rect, 1 = text)
 
     s_vertex_stack.count++;
 }
@@ -498,6 +499,10 @@ void renderer_draw_text(const char* text, const Position position, const Color c
         };
         RectStyle rect_style = { 0 };
         renderer_rect_push(target_rect, texture_rect, color, rect_style);
+
+        // Mark this as text rendering by setting style_params[3]
+        Vertex* vertex = &s_vertex_stack.data[s_vertex_stack.count - 1];
+        vertex->style_params[3] = 1.0f; // is_text flag
 
         // Update x position for next char
         next_position_x += (float)glyph->xadvance;

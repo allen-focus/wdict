@@ -16,7 +16,7 @@ struct VS_Input
     float4 texture_rect : TEXTURE_RECT;
     float4 color : COLOR;
     float4 border_color : BORDER_COLOR;
-    float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: enable_shadow, w: unused
+    float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: enable_shadow, w: is_text
     uint vertex_id : SV_VertexID;
 };
 
@@ -34,6 +34,7 @@ struct PS_INPUT
     float border_thickness : BORDER_THICKNESS;
     float shadow_sigma : SHADOW_SIGMA;
     float2 shadow_offset : SHADOW_OFFSET;
+    float is_text : IS_TEXT;
 };
 
 //
@@ -110,6 +111,7 @@ PS_INPUT vs(VS_Input input)
     output.border_thickness = input.style_params.y;
     output.shadow_sigma = shadow_sigma;
     output.shadow_offset = shadow_offset;
+    output.is_text = input.style_params.w;
     return output;
 }
 
@@ -224,7 +226,13 @@ float roundedBoxShadow(float2 lower, float2 upper, float2 pixel, float sigma, fl
 float4 ps(PS_INPUT input) : SV_TARGET
 {
     float glyph_texture_grayscale_ratio = glyph_atlas_texture.Sample(mysampler, input.uv).r;
-    float4 texture_based_color = float4(input.color.rgb, input.color.a * glyph_texture_grayscale_ratio);
+
+    // Text rendering: texture already contains shape, just apply color
+    if (input.is_text == 1.0)
+    {
+        float text_alpha = input.color.a * glyph_texture_grayscale_ratio;
+        return float4(input.color.rgb, text_alpha);
+    }
 
     // SDF-based rounded rectangle generation
     float2 distance_to_shrunk_corner = calculate_distance_to_shrunk_corner(
@@ -246,7 +254,7 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float is_inner = 1.0 - smoothstep(-0.5, 0.5, sdf_inner);
 
     // Color space conversion and blending
-    float3 texture_linear = sRGBToLinear(texture_based_color.rgb);
+    float3 texture_linear = sRGBToLinear(input.color.rgb);
     float3 base_linear;
     if (input.border_thickness > 0.0)
     {
@@ -258,7 +266,7 @@ float4 ps(PS_INPUT input) : SV_TARGET
         // No border - use only texture color
         base_linear = texture_linear;
     }
-    float base_alpha = texture_based_color.a * is_outer;
+    float base_alpha = input.color.a * is_outer;
 
     // Calculate shadow
     float shadow_alpha = 0;
