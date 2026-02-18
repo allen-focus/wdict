@@ -250,8 +250,8 @@ float4 ps(PS_INPUT input) : SV_TARGET
 
     // Anti-aliased alpha mask generation
     // Use sub-pixel smoothing range for sharper edges without visible gray borders
-    float is_outer = 1.0 - smoothstep(-0.5, 0.5, sdf_outer);
-    float is_inner = 1.0 - smoothstep(-0.5, 0.5, sdf_inner);
+    float is_outer = 1.0 - smoothstep(0, 1, sdf_outer);
+    float is_inner = 1.0 - smoothstep(0, 1, sdf_inner);
 
     // Color space conversion and blending
     float3 texture_linear = sRGBToLinear(input.color.rgb);
