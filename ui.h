@@ -109,6 +109,7 @@ typedef struct
 typedef struct
 {
     Color color;
+    float line_height;
 } TextConfig;
 
 typedef enum
@@ -132,6 +133,8 @@ typedef struct
     bool needs_wrapping;
     char** wrapped_lines;
     int line_count;
+    float line_height;
+    float half_leading;
     uint32_t (*get_text_width)(const char* text);
     uint32_t (*get_text_height)(const char* text);
 } TextData;

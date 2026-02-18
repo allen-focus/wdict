@@ -116,12 +116,12 @@ static void process_frame(UIContext* ui_context)
             }
             ui_box({ .sizing = { fit(0), fit(0) },
                      .color = white,
-                     .rect_style = normal_rect_style,
-                     .padding = padding_medium,
+                     .rect_style = { 0 },
+                     .padding = { 0 },
                      .child_gap = child_gap_medium,
                      .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                ui_text(ui_context, "Here's to you, Nicola and Bart", &(TextConfig){ .color = red });
+                ui_text(ui_context, "Here's to you, Nicola and Bart", &(TextConfig){ .color = red, .line_height = 24.f });
             }
         }
     }

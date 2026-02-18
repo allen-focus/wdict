@@ -331,11 +331,11 @@ void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
                 cmd->text.base.size = sizeof(UICommandText);
                 cmd->text.content = box->data.text.content;
                 cmd->text.color = box->data.text.color;
-                cmd->text.position = box->position;
+                cmd->text.position.x = box->position.x;
+                cmd->text.position.y = box->position.y + box->data.text.half_leading;
             }
             else
             {
-                uint32_t line_height = ui_context->get_text_height("A");
                 for (int i = 0; i < box->data.text.line_count; i++)
                 {
                     UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
@@ -344,7 +344,7 @@ void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
                     cmd->text.content = box->data.text.wrapped_lines[i];
                     cmd->text.color = box->data.text.color;
                     cmd->text.position.x = box->position.x;
-                    cmd->text.position.y = box->position.y + i * line_height;
+                    cmd->text.position.y = box->position.y + box->data.text.half_leading + i * box->data.text.line_height;
                 }
             }
         }
@@ -449,7 +449,7 @@ void ui_box_end(UIBox* box)
         }
         free(text_copy);
         box->min_size.width = min_width;
-        box->min_size.height = (float)box->data.text.get_text_height(box->data.text.content);
+        box->min_size.height = (float)box->data.text.line_height;
     }
 
     ui_box_stack.items[ui_box_stack.depth--] = NULL;
@@ -464,14 +464,21 @@ void ui_reset(UIContext* ui_context)
 
 UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config)
 {
+    float base_line_height = (float)ui_context->get_text_height(text);
+    float effective_line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
     BoxConfig box_config = { .sizing = { .width = { (float)ui_context->get_text_width(text), SIZING_MODE_FIXED },
-                                         .height = { (float)ui_context->get_text_height(text), SIZING_MODE_FIXED } } };
+                                         .height = { effective_line_height, SIZING_MODE_FIXED } } };
+
     UIBox* text_box = ui_box_start(&box_config);
-    text_box->type = BOX_TYPE_TEXT;
-    text_box->data.text.content = _strdup(text);
-    text_box->data.text.color = text_config->color;
-    text_box->data.text.get_text_width = ui_context->get_text_width;
-    text_box->data.text.get_text_height = ui_context->get_text_height;
+    {
+        text_box->type = BOX_TYPE_TEXT;
+        text_box->data.text.content = _strdup(text);
+        text_box->data.text.color = text_config->color;
+        text_box->data.text.line_height = effective_line_height;
+        text_box->data.text.half_leading = (effective_line_height - base_line_height) / 2.0f;
+        text_box->data.text.get_text_width = ui_context->get_text_width;
+        text_box->data.text.get_text_height = ui_context->get_text_height;
+    }
     ui_box_end(text_box);
     return text_box;
 }
@@ -536,8 +543,7 @@ static void perform_text_wrapping(UIContext* ui_context, UIBox* text_box)
     }
 
     // Update box dimensions
-    float line_height = (float)ui_context->get_text_height("A");
-    text_box->config.sizing.height.value = line_height * text_box->data.text.line_count;
+    text_box->config.sizing.height.value = text_box->data.text.line_height * text_box->data.text.line_count;
     text_box->min_size.height = text_box->config.sizing.height.value;
     text_box->min_size.width = max_width;
 }
