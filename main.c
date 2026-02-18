@@ -4,9 +4,6 @@
 #pragma comment(lib, "dxgi")
 #pragma comment(lib, "d3dcompiler")
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include "glyph_cache.h"
 #include "lib.h"
 #include "renderer.h"

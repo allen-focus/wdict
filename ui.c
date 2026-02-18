@@ -4,9 +4,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
-#include <winscard.h>
-#include <winuser.h>
 
 #define EPSILON 1e-4f
 #define QUEUE_SIZE 256

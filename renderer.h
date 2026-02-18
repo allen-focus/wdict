@@ -1,10 +1,11 @@
 #pragma once
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include "lib.h"
 #include <stdint.h>
+
+#ifndef HWND
+typedef struct HWND__* HWND;
+#endif
 
 ///
 
