@@ -1,5 +1,6 @@
 #pragma once
 #include "lib.h"
+#include "string.h"
 
 // clang-format off
 #define ui_box(...)                                                                                                 \
@@ -43,7 +44,7 @@ typedef struct
 typedef struct
 {
     UICommandBase base;
-    const char* content;
+    String content;
     Color color;
     Position position;
 } UICommandText;
@@ -128,15 +129,14 @@ typedef struct
 
 typedef struct
 {
-    char* content;
+    String content;
     Color color;
-    bool needs_wrapping;
-    char** wrapped_lines;
+    String* wrapped_lines;
     i32 line_count;
     f32 line_height;
     f32 half_leading;
-    u32 (*get_text_width)(const char* text);
-    u32 (*get_text_height)(const char* text);
+    u32 (*get_text_width)(String text);
+    u32 (*get_text_height)(String text);
 } TextData;
 
 typedef struct UIBox UIBox;
@@ -161,8 +161,8 @@ typedef struct
     u16 client_width;
     u16 client_height;
     void (*on_resize)(const u16 client_width, const u16 client_height);
-    u32 (*get_text_width)(const char* text);
-    u32 (*get_text_height)(const char* text);
+    u32 (*get_text_width)(String text);
+    u32 (*get_text_height)(String text);
     Queue(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
 } UIContext;
 
@@ -181,7 +181,7 @@ void ui_box_resolve_position(UIBox* box);
 
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
 
-UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config);
+UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config);
 
 ///
 

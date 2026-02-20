@@ -1,5 +1,6 @@
 #include "pch.h"  // IWYU pragma: keep
 #include "lib.h"
+#include "string.h"
 #include "ui.h"
 
 #include <math.h>
@@ -56,7 +57,7 @@ static AxisContext get_axis_context(UIBox* box, Axis axis)
 
 ///
 
-static bool axis_has_fit_attribute(SizingAxis axis)
+static b32 axis_has_fit_attribute(SizingAxis axis)
 {
     return axis.mode == SIZING_MODE_FIT || axis.mode == SIZING_MODE_FIT_GROW;
 }
@@ -244,8 +245,6 @@ void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
 
         if (*child_ctx.size > *child_ctx.min_size)
         {
-            if (axis == WIDTH && child->type == BOX_TYPE_TEXT)
-                child->data.text.needs_wrapping = true;
             shrinkable_mins[shrinkable_count] = child_ctx.min_size;
             shrinkable[shrinkable_count++] = child_ctx.size;
         }
@@ -322,28 +321,15 @@ void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
         break;
         case BOX_TYPE_TEXT:
         {
-            if (!box->data.text.wrapped_lines)
+            for (i32 i = 0; i < box->data.text.line_count; i++)
             {
                 UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
+                cmd->text.content = (box->data.text.line_count == 1) ? box->data.text.content : box->data.text.wrapped_lines[i];
                 cmd->text.base.type = UI_COMMAND_TEXT;
                 cmd->text.base.size = sizeof(UICommandText);
-                cmd->text.content = box->data.text.content;
                 cmd->text.color = box->data.text.color;
                 cmd->text.position.x = box->position.x;
-                cmd->text.position.y = box->position.y + box->data.text.half_leading;
-            }
-            else
-            {
-                for (i32 i = 0; i < box->data.text.line_count; i++)
-                {
-                    UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
-                    cmd->text.base.type = UI_COMMAND_TEXT;
-                    cmd->text.base.size = sizeof(UICommandText);
-                    cmd->text.content = box->data.text.wrapped_lines[i];
-                    cmd->text.color = box->data.text.color;
-                    cmd->text.position.x = box->position.x;
-                    cmd->text.position.y = box->position.y + box->data.text.half_leading + i * box->data.text.line_height;
-                }
+                cmd->text.position.y = box->position.y + box->data.text.half_leading + i * box->data.text.line_height;
             }
         }
         break;
@@ -435,18 +421,20 @@ void ui_box_end(UIBox* box)
     else if (box->type == BOX_TYPE_TEXT)
     {
         // Calculate box->min_size.width by finding the width of the shortest word in the text.
-        f32 min_width = 0;
-        char* text_copy = _strdup(box->data.text.content);
-        char* token = strtok(text_copy, " ");
-        while (token != NULL)
+        f32 min_width = INFINITY;
         {
-            f32 word_width = (f32)box->data.text.get_text_width(token);
-            if (word_width > min_width)
-                min_width = word_width;
-            token = strtok(NULL, " ");
+            String s = box->data.text.content;
+            isize start = 0;
+            for (isize i = 0; i < s.len; i++)
+                if (s.data[i] == ' ')
+                {
+                    String word = str_slice(s, start, i);
+                    min_width = min(min_width, box->data.text.get_text_width(word));
+                    start = i + 1;
+                }
         }
-        free(text_copy);
-        box->min_size.width = min_width;
+        f32 whole_text_width = (f32)box->data.text.get_text_width(box->data.text.content);
+        box->min_size.width = (min_width != INFINITY) ? min_width : whole_text_width;
         box->min_size.height = (f32)box->data.text.line_height;
     }
 
@@ -460,7 +448,7 @@ void ui_reset(UIContext* ui_context)
     memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
 }
 
-UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config)
+UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config)
 {
     f32 base_line_height = (f32)ui_context->get_text_height(text);
     f32 effective_line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
@@ -470,8 +458,9 @@ UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config)
     UIBox* text_box = ui_box_start(&box_config);
     {
         text_box->type = BOX_TYPE_TEXT;
-        text_box->data.text.content = _strdup(text);
+        text_box->data.text.content = text;
         text_box->data.text.color = text_config->color;
+        text_box->data.text.line_count = 1;
         text_box->data.text.line_height = effective_line_height;
         text_box->data.text.half_leading = (effective_line_height - base_line_height) / 2.0f;
         text_box->data.text.get_text_width = ui_context->get_text_width;
@@ -481,64 +470,46 @@ UIBox* ui_text(UIContext* ui_context, char* text, TextConfig* text_config)
     return text_box;
 }
 
-static void perform_text_wrapping(UIContext* ui_context, UIBox* text_box)
+static void perform_text_wrapping(UIBox* text_box)
 {
-    if (!text_box->data.text.needs_wrapping)
+    String text = text_box->data.text.content;
+    u32 text_width = text_box->data.text.get_text_width(text);
+    f32 max_width = text_box->config.sizing.width.value;
+    if ((f32)text_width <= max_width)
         return;
 
-    f32 max_width = text_box->config.sizing.width.value;
-    char* text = text_box->data.text.content;
-    size_t text_len = strlen(text);
+    // TODO: 1. Don't hard code 64;
+    //       2. Have to free it.
+    text_box->data.text.wrapped_lines = calloc(64, sizeof(text));
 
-    // Allocate space for wrapped lines (worst case: each word is a line)
-    size_t max_lines = text_len / 2 + 1;
-    text_box->data.text.wrapped_lines = malloc(max_lines * sizeof(char*));
-    text_box->data.text.line_count = 0;
-
-    char* line_start = text;
-    char* current = text;
-    char* last_space = NULL;
-
-    while (*current != '\0')
+    isize new_line_idx = 0;
+    isize distance_between_line_start_and_newest_space = 0;
+    // TODO: don't calculate whole text width in every loop [performance]
+    for (isize i = 0; i <= text.len; i++)
     {
-        if (*current == ' ')
-            last_space = current;
-
-        // Check if current segment exceeds max_width
-        char saved_char = *(current + 1);
-        *(current + 1) = '\0';
-        u32 width = ui_context->get_text_width(line_start);
-        *(current + 1) = saved_char;
-
-        if (width > max_width)
+        u32 current_line_width = text_box->data.text.get_text_width(str_slice(text, new_line_idx, i));
+        if (current_line_width > max_width)
         {
-            // Break at last space, or force break if no space
-            char* break_point = last_space ? last_space : current;
-
-            // Store this line
-            size_t line_len = break_point - line_start;
-            text_box->data.text.wrapped_lines[text_box->data.text.line_count] = malloc(line_len + 1);
-            strncpy(text_box->data.text.wrapped_lines[text_box->data.text.line_count], line_start, line_len);
-            text_box->data.text.wrapped_lines[text_box->data.text.line_count][line_len] = '\0';
-            text_box->data.text.line_count++;
-
-            // Move to next line
-            line_start = break_point + (last_space ? 1 : 0); // Skip space
-            current = line_start;
-            last_space = NULL;
+            i32* line_count = &text_box->data.text.line_count;
+            if (!distance_between_line_start_and_newest_space)
+            {
+                // The width of first word of current line has exceeded the maximum width, force a line break
+                text_box->data.text.wrapped_lines[(*line_count)++ - 1] = str_slice(text, new_line_idx, --i);
+                new_line_idx = i;
+            }
+            else
+            {
+                isize end = new_line_idx + distance_between_line_start_and_newest_space;
+                text_box->data.text.wrapped_lines[(*line_count)++ - 1] = str_slice(text, new_line_idx, end);
+                new_line_idx = end + 1;
+            }
+            distance_between_line_start_and_newest_space = 0;
         }
-        else
-        {
-            current++;
-        }
+        if (text.data[i] == ' ')
+            distance_between_line_start_and_newest_space = i - new_line_idx;
     }
-
-    // Store final line
-    if (*line_start != '\0')
-    {
-        text_box->data.text.wrapped_lines[text_box->data.text.line_count] = _strdup(line_start);
-        text_box->data.text.line_count++;
-    }
+    // Handle last line
+    text_box->data.text.wrapped_lines[text_box->data.text.line_count - 1] = str_slice(text, new_line_idx, text.len);
 
     // Update box dimensions
     text_box->config.sizing.height.value = text_box->data.text.line_height * text_box->data.text.line_count;
@@ -549,7 +520,7 @@ static void perform_text_wrapping(UIContext* ui_context, UIBox* text_box)
 void ui_box_apply_text_wrapping(UIContext* ui_context, UIBox* box)
 {
     if (box->type == BOX_TYPE_TEXT)
-        perform_text_wrapping(ui_context, box);
+        perform_text_wrapping(box);
     else if (box->type == BOX_TYPE_CONTAINER)
         for (i32 i = 0; i < box->data.container.child_count; i++)
             ui_box_apply_text_wrapping(ui_context, box->children[i]);

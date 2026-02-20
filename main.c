@@ -2,6 +2,7 @@
 #include "glyph_cache.h"
 #include "lib.h"
 #include "renderer.h"
+#include "string.h"
 #include "ui.h"
 
 #include <stdbool.h>
@@ -96,7 +97,7 @@ static void process_frame(UIContext* ui_context)
                     .child_gap = child_gap_medium,
                     .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                ui_text(ui_context, "hey you", &(TextConfig){ .color = white });
+                ui_text(ui_context, str("hey"), &(TextConfig){ .color = white });
             }
             ui_box({ .sizing = { fixed(200), fit_grow(0) },
                      .color = yellow,
@@ -113,7 +114,7 @@ static void process_frame(UIContext* ui_context)
                      .child_gap = child_gap_medium,
                      .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                ui_text(ui_context, "Here's to you, Nicola and Bart", &(TextConfig){ .color = red, .line_height = 24.f });
+                ui_text(ui_context, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = red, .line_height = 24.f });
             }
             ui_box({ .sizing = { fit(0), fit(0) },
                      .color = white,
@@ -122,7 +123,7 @@ static void process_frame(UIContext* ui_context)
                      .child_gap = child_gap_medium,
                      .direction = LAYOUT_LEFT_TO_RIGHT })
             {
-                ui_text(ui_context, "Here's to you, Nicola and Bart", &(TextConfig){ .color = red, .line_height = 24.f });
+                ui_text(ui_context, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = red, .line_height = 24.f });
             }
         }
     }

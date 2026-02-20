@@ -1,12 +1,12 @@
 #include "pch.h"  // IWYU pragma: keep
-
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "glyph_cache.h"
 #include "lib.h"
 #include "shaders/d3d11_pshader.h"
 #include "shaders/d3d11_vshader.h"
+#include "string.h"
+
+#include <stdbool.h>
+#include <stdint.h>
 
 ///
 
@@ -326,7 +326,7 @@ void renderer_flush_and_present(const u16 client_width, const u16 client_height)
     // https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains
     // (1000 is the timeout fallback; should never trigger under normal rendering)
     WaitForSingleObjectEx(s_renderer_state.frame_latency_waitable_object, 1000, true);
-    bool vsync = true;
+    b32 vsync = true;
     u32 flags = 0;
 #ifndef NDEBUG
     vsync = false;
@@ -399,12 +399,12 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 // text width & height
 //
 
-u32 renderer_get_text_width(const char* text)
+u32 renderer_get_text_width(String text)
 {
     u32 text_width = 0;
-    for (const char* c = text; *c; c++)
+    for (isize i = 0; i < text.len; i++)
     {
-        Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
+        Glyph* glyph = &g_glyph_cache->glyphs[text.data[i] - ASCII_START];
         text_width += glyph->xadvance;
     }
     return text_width;
@@ -412,13 +412,13 @@ u32 renderer_get_text_width(const char* text)
 
 // TODO: Future support for multiple fonts per line is planned. This will require calculating text height
 // based on varying font line spaces rather than relying on a single font's line space.
-u32 renderer_get_text_height(const char* text)
+u32 renderer_get_text_height(String text)
 {
     u16 font_english_capital_height = 0;
     Font* font = NULL;
-    for (const char* c = text; *c; c++)
+    for (isize i = 0; i < text.len; i++)
     {
-        Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
+        Glyph* glyph = &g_glyph_cache->glyphs[text.data[i] - ASCII_START];
 
         // Check if the glyph is from the same font as the previous glyph.
         if (font == NULL)
@@ -472,14 +472,14 @@ void renderer_draw_rect(const Rect rect, const Color color, const RectStyle styl
     renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
 }
 
-void renderer_draw_text(const char* text, const Position position, const Color color)
+void renderer_draw_text(String text, const Position position, const Color color)
 {
     f32 next_position_x = position.x;
     f32 position_y = position.y + (f32)renderer_get_text_height(text);
 
-    for (const char* c = text; *c; c++)
+    for (isize i = 0; i < text.len; i++)
     {
-        Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
+        Glyph* glyph = &g_glyph_cache->glyphs[text.data[i] - ASCII_START];
         Rect target_rect = {
             .xmin = next_position_x + (f32)glyph->xoff,
             .ymin = position_y + (f32)glyph->yoff,
