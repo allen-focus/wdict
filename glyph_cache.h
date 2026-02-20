@@ -1,6 +1,6 @@
 #pragma once
 
-#include "thirdparty/cdwrite.h"
+#include "cdwrite.h"
 #include <stdint.h>
 
 #define GLYPH_ATLAS_WIDTH  1024

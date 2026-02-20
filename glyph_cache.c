@@ -1,6 +1,6 @@
+#include "cdwrite.h"
 #include "glyph_cache.h"
 #include "lib.h"
-#include "thirdparty/cdwrite.h"
 
 #include <stdint.h>
 #include <stdlib.h>
