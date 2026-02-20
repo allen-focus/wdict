@@ -64,10 +64,10 @@ Padding padding_big     = { 30, 30, 30, 30 };
 Padding padding_medium  = { 20, 20, 20, 20 };
 Padding padding_small   = { 10, 10, 10, 10 };
 
-float child_gap_bigger  = 30;
-float child_gap_big     = 20;
-float child_gap_medium  = 10;
-float child_gap_small   = 5;
+f32 child_gap_bigger  = 30;
+f32 child_gap_big     = 20;
+f32 child_gap_medium  = 10;
+f32 child_gap_small   = 5;
 
 ///
 
@@ -138,7 +138,7 @@ static void process_frame(UIContext* ui_context)
     ui_generate_render_commands(ui_context, root);
 
     // Draw
-    for (int i = 0; i < ui_context->ui_command_queue.count; i++)
+    for (i32 i = 0; i < ui_context->ui_command_queue.count; i++)
     {
         UICommand* cmd = &ui_context->ui_command_queue.items[i];
         switch (cmd->type)
@@ -155,7 +155,7 @@ static void process_frame(UIContext* ui_context)
     }
 }
 
-static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM wparam,
+static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam,
                                          const LPARAM lparam)
 {
     UIContext* ui_context = NULL;
@@ -213,8 +213,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
         }
         case WM_SIZE:
         {
-            ui_context->client_width = (uint16_t)LOWORD(lparam);
-            ui_context->client_height = (uint16_t)HIWORD(lparam);
+            ui_context->client_width = (u16)LOWORD(lparam);
+            ui_context->client_height = (u16)HIWORD(lparam);
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
             {
                 ui_context->on_resize(ui_context->client_width, ui_context->client_height);
@@ -241,7 +241,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const UINT message, 
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, int nShowCmd)
+i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, i32 nShowCmd)
 {
     // Set DPI awareness for better scaling on high DPI displays (Windows 10, v1607)
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -254,10 +254,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
     HWND window;
     {
         // Set the client position to screen center
-        int screen_width = GetSystemMetrics(SM_CXSCREEN);
-        int screen_height = GetSystemMetrics(SM_CYSCREEN);
-        int x = (screen_width - CLIENT_WIDTH) / 2;
-        int y = (screen_height - CLIENT_HEIGHT) / 2;
+        i32 screen_width = GetSystemMetrics(SM_CXSCREEN);
+        i32 screen_height = GetSystemMetrics(SM_CYSCREEN);
+        i32 x = (screen_width - CLIENT_WIDTH) / 2;
+        i32 y = (screen_height - CLIENT_HEIGHT) / 2;
 
         // Give the client area rectangle, get back the entire window rectangle
         RECT rect = { x, y, x + CLIENT_WIDTH, y + CLIENT_HEIGHT };

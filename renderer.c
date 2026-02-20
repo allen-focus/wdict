@@ -14,22 +14,22 @@
 
 ///
 
-// NOTE: color uses uint8_t to save memory; scaled to 0.0-1.0 in the shader via R8G8B8A8_UNORM.
-// And we don't want rect to be scaled, so let them be float.
+// NOTE: color uses u8 to save memory; scaled to 0.0-1.0 in the shader via R8G8B8A8_UNORM.
+// And we don't want rect to be scaled, so let them be f32.
 typedef struct
 {
-    float target_rect[4];
-    float original_rect[4];
-    float texture_rect[4];
-    uint8_t color[4];
-    uint8_t border_color[4];
-    float style_params[4];
+    f32 target_rect[4];
+    f32 original_rect[4];
+    f32 texture_rect[4];
+    u8 color[4];
+    u8 border_color[4];
+    f32 style_params[4];
 } Vertex;
 
 typedef struct
 {
     Vertex data[VERTEX_SIZE];
-    uint16_t count;
+    u16 count;
 } VertexStack;
 
 typedef struct
@@ -61,14 +61,14 @@ static VertexStack s_vertex_stack = { 0 };
 // swapchain resize
 //
 
-void swapchain_resize(const uint16_t client_width, const uint16_t client_height)
+void swapchain_resize(const u16 client_width, const u16 client_height)
 {
     // Release old swapchain buffers
     ID3D11DeviceContext_ClearState(s_renderer_state.context);
     ID3D11RenderTargetView_Release(s_renderer_state.render_target_view);
 
     // Resize swapchain
-    UINT flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    u32 flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 #ifndef NDEBUG
     flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 #endif
@@ -91,7 +91,7 @@ void renderer_init(const HWND window)
 {
     // Create device and context
     {
-        UINT flags = 0;
+        u32 flags = 0;
 #ifndef NDEBUG
         flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
@@ -228,7 +228,7 @@ void renderer_init(const HWND window)
     // Create constant buffer for delivering MVP (Model View Projection)
     {
         D3D11_BUFFER_DESC desc = {
-            .ByteWidth = sizeof(float) * 4 * 4, // float mvp[4][4]
+            .ByteWidth = sizeof(f32) * 4 * 4, // f32 mvp[4][4]
             .Usage = D3D11_USAGE_DYNAMIC,
             .BindFlags = D3D11_BIND_CONSTANT_BUFFER,
             .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
@@ -257,7 +257,7 @@ void renderer_init(const HWND window)
     }
 }
 
-void renderer_flush_and_present(const uint16_t client_width, const uint16_t client_height)
+void renderer_flush_and_present(const u16 client_width, const u16 client_height)
 {
     // Map vertex buffer
     {
@@ -270,12 +270,12 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
 
     // Map orthographic projection matrix to cbuffer
     {
-        float L = 0.f;
-        float R = (float)client_width;
-        float T = 0.f;
-        float B = (float)client_height;
+        f32 L = 0.f;
+        f32 R = (f32)client_width;
+        f32 T = 0.f;
+        f32 B = (f32)client_height;
         // clang-format off
-        float mvp[4][4] = {
+        f32 mvp[4][4] = {
             { 2.0f / (R - L),    0.0f,              0.0f, 0.0f },
             { 0.0f,              2.0f / (T - B),    0.0f, 0.0f },
             { 0.0f,              0.0f,              0.5f, 0.0f },
@@ -305,8 +305,8 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
 
     // IA-VS-RS-PS-OM, Draw
     // clang-format off
-    UINT stride = sizeof(Vertex);
-    UINT offset = 0;
+    u32 stride = sizeof(Vertex);
+    u32 offset = 0;
     ID3D11DeviceContext_IASetInputLayout(s_renderer_state.context, s_renderer_state.layout);
     ID3D11DeviceContext_IASetPrimitiveTopology(s_renderer_state.context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     ID3D11DeviceContext_IASetVertexBuffers(s_renderer_state.context, 0, 1, &s_renderer_state.vertex_buffer, &stride, &offset);
@@ -327,7 +327,7 @@ void renderer_flush_and_present(const uint16_t client_width, const uint16_t clie
     // (1000 is the timeout fallback; should never trigger under normal rendering)
     WaitForSingleObjectEx(s_renderer_state.frame_latency_waitable_object, 1000, true);
     bool vsync = true;
-    UINT flags = 0;
+    u32 flags = 0;
 #ifndef NDEBUG
     vsync = false;
     flags |= DXGI_PRESENT_ALLOW_TEARING;
@@ -376,10 +376,10 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 
     // Update texture rect
     {
-        vertex->texture_rect[0] = texture_rect.xmin / (float)GLYPH_ATLAS_WIDTH;
-        vertex->texture_rect[1] = texture_rect.ymin / (float)GLYPH_ATLAS_HEIGHT;
-        vertex->texture_rect[2] = texture_rect.xmax / (float)GLYPH_ATLAS_WIDTH;
-        vertex->texture_rect[3] = texture_rect.ymax / (float)GLYPH_ATLAS_HEIGHT;
+        vertex->texture_rect[0] = texture_rect.xmin / (f32)GLYPH_ATLAS_WIDTH;
+        vertex->texture_rect[1] = texture_rect.ymin / (f32)GLYPH_ATLAS_HEIGHT;
+        vertex->texture_rect[2] = texture_rect.xmax / (f32)GLYPH_ATLAS_WIDTH;
+        vertex->texture_rect[3] = texture_rect.ymax / (f32)GLYPH_ATLAS_HEIGHT;
     }
 
     // Update color & border color
@@ -389,7 +389,7 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
     // Update style parameters
     vertex->style_params[0] = style.corner_radius;
     vertex->style_params[1] = style.border_thickness;
-    vertex->style_params[2] = (float)style.enable_shadow;
+    vertex->style_params[2] = (f32)style.enable_shadow;
     vertex->style_params[3] = 0.0f; // is_text flag (0 = rect, 1 = text)
 
     s_vertex_stack.count++;
@@ -399,9 +399,9 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 // text width & height
 //
 
-uint32_t renderer_get_text_width(const char* text)
+u32 renderer_get_text_width(const char* text)
 {
-    uint32_t text_width = 0;
+    u32 text_width = 0;
     for (const char* c = text; *c; c++)
     {
         Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
@@ -412,9 +412,9 @@ uint32_t renderer_get_text_width(const char* text)
 
 // TODO: Future support for multiple fonts per line is planned. This will require calculating text height
 // based on varying font line spaces rather than relying on a single font's line space.
-uint32_t renderer_get_text_height(const char* text)
+u32 renderer_get_text_height(const char* text)
 {
-    uint16_t font_english_capital_height = 0;
+    u16 font_english_capital_height = 0;
     Font* font = NULL;
     for (const char* c = text; *c; c++)
     {
@@ -433,7 +433,7 @@ uint32_t renderer_get_text_height(const char* text)
             Assert(font == glyph->font);
         }
     }
-    return (uint32_t)font_english_capital_height;
+    return (u32)font_english_capital_height;
 }
 
 //
@@ -449,8 +449,8 @@ void renderer_draw_rect(const Rect rect, const Color color, const RectStyle styl
         // NOTE: As we hard-coded shadow sigma and offset, we could just use the
         // pre-calculated original rect. The detail of that calculation is below:
         //   ```
-        //   float shadow_sigma = 4;
-        //   float shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
+        //   f32 shadow_sigma = 4;
+        //   f32 shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
         //   expanded_rect.xmin -= shadow_radius + max(0, -shadow_offset.x);
         //   expanded_rect.xmax += shadow_radius + max(0, shadow_offset.x);
         //   expanded_rect.ymin -= shadow_radius + max(0, -shadow_offset.y);
@@ -464,33 +464,33 @@ void renderer_draw_rect(const Rect rect, const Color color, const RectStyle styl
 
     Glyph* glyph_white = &g_glyph_cache->glyphs[GLYPHS_LENGTH - 1];
     Rect glyph_white_rect = {
-        .xmin = (float)glyph_white->atlas_x,
-        .ymin = (float)glyph_white->atlas_y,
-        .xmax = (float)(glyph_white->atlas_x + glyph_white->w),
-        .ymax = (float)(glyph_white->atlas_y + glyph_white->h),
+        .xmin = (f32)glyph_white->atlas_x,
+        .ymin = (f32)glyph_white->atlas_y,
+        .xmax = (f32)(glyph_white->atlas_x + glyph_white->w),
+        .ymax = (f32)(glyph_white->atlas_y + glyph_white->h),
     };
     renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
 }
 
 void renderer_draw_text(const char* text, const Position position, const Color color)
 {
-    float next_position_x = position.x;
-    float position_y = position.y + (float)renderer_get_text_height(text);
+    f32 next_position_x = position.x;
+    f32 position_y = position.y + (f32)renderer_get_text_height(text);
 
     for (const char* c = text; *c; c++)
     {
         Glyph* glyph = &g_glyph_cache->glyphs[*c - ASCII_START];
         Rect target_rect = {
-            .xmin = next_position_x + (float)glyph->xoff,
-            .ymin = position_y + (float)glyph->yoff,
-            .xmax = next_position_x + (float)glyph->xoff + (float)glyph->w,
-            .ymax = position_y + (float)glyph->yoff + (float)glyph->h,
+            .xmin = next_position_x + (f32)glyph->xoff,
+            .ymin = position_y + (f32)glyph->yoff,
+            .xmax = next_position_x + (f32)glyph->xoff + (f32)glyph->w,
+            .ymax = position_y + (f32)glyph->yoff + (f32)glyph->h,
         };
         Rect texture_rect = {
-            .xmin = (float)glyph->atlas_x,
-            .ymin = (float)glyph->atlas_y,
-            .xmax = (float)(glyph->atlas_x + glyph->w),
-            .ymax = (float)(glyph->atlas_y + glyph->h),
+            .xmin = (f32)glyph->atlas_x,
+            .ymin = (f32)glyph->atlas_y,
+            .xmax = (f32)(glyph->atlas_x + glyph->w),
+            .ymax = (f32)(glyph->atlas_y + glyph->h),
         };
         RectStyle rect_style = { 0 };
         renderer_rect_push(target_rect, texture_rect, color, rect_style);
@@ -500,6 +500,6 @@ void renderer_draw_text(const char* text, const Position position, const Color c
         vertex->style_params[3] = 1.0f; // is_text flag
 
         // Update x position for next char
-        next_position_x += (float)glyph->xadvance;
+        next_position_x += (f32)glyph->xadvance;
     }
 }

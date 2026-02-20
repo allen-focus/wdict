@@ -65,8 +65,8 @@ typedef enum
 } Axis;
 
 typedef struct {
-    float width;
-    float height;
+    f32 width;
+    f32 height;
 } Size;
 
 typedef enum
@@ -78,7 +78,7 @@ typedef enum
 
 typedef struct
 {
-    float value;
+    f32 value;
     SizingMode mode;
 } SizingAxis;
 
@@ -102,14 +102,14 @@ typedef struct
     Color color;
     RectStyle rect_style;
     Padding padding;
-    float child_gap;
+    f32 child_gap;
     LayoutDirection direction;
 } BoxConfig;
 
 typedef struct
 {
     Color color;
-    float line_height;
+    f32 line_height;
 } TextConfig;
 
 typedef enum
@@ -121,9 +121,9 @@ typedef enum
 typedef struct
 {
     Size remaining_space;
-    float next_child_offset_x;
-    float next_child_offset_y;
-    int child_count;
+    f32 next_child_offset_x;
+    f32 next_child_offset_y;
+    i32 child_count;
 } ContainerData;
 
 typedef struct
@@ -132,11 +132,11 @@ typedef struct
     Color color;
     bool needs_wrapping;
     char** wrapped_lines;
-    int line_count;
-    float line_height;
-    float half_leading;
-    uint32_t (*get_text_width)(const char* text);
-    uint32_t (*get_text_height)(const char* text);
+    i32 line_count;
+    f32 line_height;
+    f32 half_leading;
+    u32 (*get_text_width)(const char* text);
+    u32 (*get_text_height)(const char* text);
 } TextData;
 
 typedef struct UIBox UIBox;
@@ -158,11 +158,11 @@ struct UIBox
 
 typedef struct
 {
-    uint16_t client_width;
-    uint16_t client_height;
-    void (*on_resize)(const uint16_t client_width, const uint16_t client_height);
-    uint32_t (*get_text_width)(const char* text);
-    uint32_t (*get_text_height)(const char* text);
+    u16 client_width;
+    u16 client_height;
+    void (*on_resize)(const u16 client_width, const u16 client_height);
+    u32 (*get_text_width)(const char* text);
+    u32 (*get_text_height)(const char* text);
     Queue(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
 } UIContext;
 
