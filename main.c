@@ -1,9 +1,4 @@
-#pragma comment(lib, "user32")
-#pragma comment(lib, "d3d11")
-#pragma comment(lib, "dxguid")
-#pragma comment(lib, "dxgi")
-#pragma comment(lib, "d3dcompiler")
-
+#include "pch.h"  // IWYU pragma: keep
 #include "glyph_cache.h"
 #include "lib.h"
 #include "renderer.h"

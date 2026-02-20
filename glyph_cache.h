@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cdwrite.h"
+#include "pch.h"  // IWYU pragma: keep
 #include <stdint.h>
 
 #define GLYPH_ATLAS_WIDTH  1024

@@ -1,11 +1,9 @@
 #pragma once
 
+#include "pch.h"  // IWYU pragma: keep
 #include "lib.h"
 #include <stdint.h>
 
-#ifndef HWND
-typedef struct HWND__* HWND;
-#endif
 
 ///
 

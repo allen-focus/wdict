@@ -1,8 +1,4 @@
-#define COBJMACROS
-#include <d3d11.h>
-#include <d3dcompiler.h>
-#include <dxgi1_3.h>
-#include <dxgidebug.h>
+#include "pch.h"  // IWYU pragma: keep
 
 #include <stdbool.h>
 #include <stdint.h>
