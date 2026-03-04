@@ -251,9 +251,12 @@ void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
 
         if (box->config.direction == ctx.main_direction)
             *ctx.remaining -= *child_ctx.size;
+        else
+            if (*ctx.remaining < *child_ctx.size && cross_axis_remainings_min > (*ctx.remaining - *child_ctx.size))
+                cross_axis_remainings_min -= *child_ctx.size;
     }
 
-    // Distribute remaining space to children configured with 'grow' attributes
+    // Distribute remaining space to children
     if (box->config.direction == ctx.main_direction)
     {
         // Main axis
@@ -271,6 +274,10 @@ void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
         else if (*ctx.remaining < 0)
             for (i32 i = 0; i < shrinkable_count; i++)
                 *shrinkable[i] = max(*shrinkable_mins[i], *shrinkable[i] + *ctx.remaining);
+
+        if (cross_axis_remainings_min < 0)
+            for (i32 i = 0; i < shrinkable_count; i++)
+                *shrinkable[i] = max(*shrinkable_mins[i], *shrinkable[i] + cross_axis_remainings_min);
     }
 
     // Recursively resolve size (breadth first)
