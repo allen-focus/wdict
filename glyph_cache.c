@@ -74,8 +74,16 @@ static u8* glyph_get(IDWriteFactory3* dwrite_factory, Font* font, const u16 code
 {
     glyph->font = font;
 
-    // https://learn.microsoft.com/en-us/windows/win32/learnwin32/dpi-and-device-independent-pixels
-    f32 font_em_size = font->size / (font->dpi / 96.0f);
+    // Get pixel size & scale, see: https://learn.microsoft.com/en-us/windows/win32/learnwin32/dpi-and-device-independent-pixels
+    DWRITE_FONT_METRICS font_metrics = { 0 };
+    IDWriteFontFace_GetMetrics(font->face, &font_metrics);
+    f32 pixel_size = font->size * (font->dpi / USER_DEFAULT_SCREEN_DPI);
+    f32 scale = pixel_size / (f32)font_metrics.capHeight;
+
+    glyph->font->ascent = (u16)((f32)font_metrics.ascent * scale);
+    glyph->font->descent = (u16)((f32)font_metrics.descent * scale);
+    glyph->font->line_gap = (i16)((f32)font_metrics.lineGap * scale);
+    glyph->font->capital_letter_height = (u16)((f32)font_metrics.capHeight * scale);
 
     // Get glyph indices
     glyph->codepoint = codepoint;
@@ -83,20 +91,9 @@ static u8* glyph_get(IDWriteFactory3* dwrite_factory, Font* font, const u16 code
     u16 glyph_indices[1] = { 0 };
     IDWriteFontFace_GetGlyphIndices(font->face, codepoints, 1, glyph_indices);
 
-    // Get font metrics & scale & design metrics
-    DWRITE_FONT_METRICS font_metrics = { 0 };
-    IDWriteFontFace_GetMetrics(font->face, &font_metrics);
-    f32 scale = font_em_size / (f32)font_metrics.designUnitsPerEm;
-    {
-        glyph->font->ascent = (u16)((f32)font_metrics.ascent * scale);
-        glyph->font->descent = (u16)((f32)font_metrics.descent * scale);
-        glyph->font->line_gap = (i16)((f32)font_metrics.lineGap * scale);
-        glyph->font->english_capital_height = (u16)((f32)font_metrics.capHeight * scale);
-    }
+    // Get glyph advances & glyph offsets
     DWRITE_GLYPH_METRICS design_metrics[1] = { 0 };
     IDWriteFontFace3_GetDesignGlyphMetrics(font->face3, glyph_indices, 1, design_metrics, FALSE);
-
-    // Get glyph advances & glyph offsets
     f32 glyph_advances[1] = { design_metrics[0].advanceWidth * scale };
     DWRITE_GLYPH_OFFSET glyph_offsets[1] = { 0 };
     glyph->xadvance = (u16)glyph_advances[0];
@@ -104,7 +101,7 @@ static u8* glyph_get(IDWriteFactory3* dwrite_factory, Font* font, const u16 code
     // Glyph run analysis
     DWRITE_GLYPH_RUN run = {
         .fontFace = font->face,
-        .fontEmSize = font_em_size, // The logical size of the font in DIPs (equals 1/96 inch), not points.
+        .fontEmSize = (f32)font_metrics.designUnitsPerEm * scale,
         .glyphCount = 1,
         .glyphIndices = glyph_indices,
         .glyphAdvances = glyph_advances,

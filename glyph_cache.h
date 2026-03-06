@@ -7,7 +7,7 @@
 #define GLYPH_ATLAS_WIDTH  1024
 #define GLYPH_ATLAS_HEIGHT 1024
 
-#define FONT_SIZE 30
+#define FONT_SIZE 16
 
 #define ASCII_START   32
 #define GLYPHS_LENGTH (127 - ASCII_START + 1 + 1) // ascii glyphs ([32, 126]) plus a close icon glyph and a white region
@@ -19,13 +19,13 @@ typedef struct
     IDWriteFontFace* face;
     IDWriteFontFace3* face3;
 
-    f32 size; // in pixel
+    f32 size; // Controls capital letter height in pixels
     f32 dpi;
 
     u16 ascent;
     u16 descent;
     i16 line_gap;
-    u16 english_capital_height;
+    u16 capital_letter_height;
 } Font;
 
 typedef struct

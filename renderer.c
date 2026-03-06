@@ -414,7 +414,7 @@ u32 renderer_get_text_width(String text)
 // based on varying font line spaces rather than relying on a single font's line space.
 u32 renderer_get_text_height(String text)
 {
-    u16 font_english_capital_height = 0;
+    u16 font_capital_letter_height = 0;
     Font* font = NULL;
     for (isize i = 0; i < text.len; i++)
     {
@@ -425,15 +425,15 @@ u32 renderer_get_text_height(String text)
         {
             font = glyph->font;
             // TODO: Should we use max(prev, current)?
-            // It seems that the `english_capital_height` is constant unless the font has changed.
-            font_english_capital_height = glyph->font->english_capital_height;
+            // It seems that the `capital_letter_height` is constant unless the font has changed.
+            font_capital_letter_height = glyph->font->capital_letter_height;
         }
         else
         {
             Assert(font == glyph->font);
         }
     }
-    return (u32)font_english_capital_height;
+    return (u32)font_capital_letter_height;
 }
 
 //
