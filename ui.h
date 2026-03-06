@@ -136,8 +136,6 @@ typedef struct
     i32 line_count;
     f32 line_height;
     f32 half_leading;
-    u32 (*get_text_width)(String text);
-    u32 (*get_text_height)(String text);
 } TextData;
 
 typedef struct UIBox UIBox;
@@ -160,27 +158,23 @@ struct UIBox
 
 typedef struct
 {
-    u16 client_width;
-    u16 client_height;
-    void (*on_resize)(const u16 client_width, const u16 client_height);
-    u32 (*get_text_width)(String text);
-    u32 (*get_text_height)(String text);
+    u32 dpi;
+    u32 client_width; // logic client width
+    u32 client_height; // logic client height
+    void (*on_resize)(const u32 client_width, const u32 client_height);
+    f32 (*get_text_width)(String text, const u32 dpi);
+    f32 (*get_text_height)(String text, const u32 dpi);
     Queue(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
 } UIContext;
 
 ///
 
 void ui_reset(UIContext* ui_context);
-
-UIBox* ui_box_get_root();
 UIBox* ui_box_start(BoxConfig* config);
 void ui_box_end(UIBox* box);
+UIBox* ui_box_get_root();
 
-void ui_box_calculate_fit_axis(UIBox* box, Axis axis);
-void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis);
-void ui_box_apply_text_wrapping(UIContext* ui_context, UIBox* box);
-void ui_box_resolve_position(UIBox* box);
-
+void ui_calculate_layout(UIContext* ui_context, UIBox* box);
 void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
 
 UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config);

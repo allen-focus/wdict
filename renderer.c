@@ -61,7 +61,7 @@ static VertexStack s_vertex_stack = { 0 };
 // swapchain resize
 //
 
-void swapchain_resize(const u16 client_width, const u16 client_height)
+void swapchain_resize(const u32 client_width, const u32 client_height)
 {
     // Release old swapchain buffers
     ID3D11DeviceContext_ClearState(s_renderer_state.context);
@@ -257,7 +257,36 @@ void renderer_init(const HWND window)
     }
 }
 
-void renderer_flush_and_present(const u16 client_width, const u16 client_height)
+void renderer_recreate_glyph_atlas_texture()
+{
+    Assert(s_renderer_state.glyph_atlas_texture); // Should we check others?
+    ID3D11Texture2D_Release(s_renderer_state.glyph_atlas_texture);
+    ID3D11ShaderResourceView_Release(s_renderer_state.glyph_atlas_shader_resource_view);
+
+    GlyphAtlas* glyph_atlas = g_glyph_cache->atlas;
+    D3D11_TEXTURE2D_DESC desc = {
+        .Width = glyph_atlas->w,
+        .Height = glyph_atlas->h,
+        .MipLevels = 1,
+        .ArraySize = 1,
+        .Format = DXGI_FORMAT_R8_UNORM,
+        .SampleDesc.Count = 1,
+        .Usage = D3D11_USAGE_IMMUTABLE,
+        .BindFlags = D3D11_BIND_SHADER_RESOURCE,
+    };
+    D3D11_SUBRESOURCE_DATA data = {
+        .pSysMem = glyph_atlas->bitmap,
+        .SysMemPitch = glyph_atlas->w,
+    };
+    ID3D11Device_CreateTexture2D(s_renderer_state.device, &desc, &data, &s_renderer_state.glyph_atlas_texture);
+
+    // Create texture view (glyph atlas)
+    ID3D11Device_CreateShaderResourceView(s_renderer_state.device,
+                                          (ID3D11Resource*)s_renderer_state.glyph_atlas_texture, 0,
+                                          &s_renderer_state.glyph_atlas_shader_resource_view);
+}
+
+void renderer_flush_and_present(const u32 client_width, const u32 client_height)
 {
     // Map vertex buffer
     {
@@ -399,41 +428,25 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 // text width & height
 //
 
-u32 renderer_get_text_width(String text)
+f32 renderer_get_text_width_for_dpi(const String text, const u32 dpi)
 {
-    u32 text_width = 0;
+    f32 text_width = 0;
     for (isize i = 0; i < text.len; i++)
     {
         Glyph* glyph = &g_glyph_cache->glyphs[text.data[i] - ASCII_START];
         text_width += glyph->xadvance;
     }
-    return text_width;
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    return text_width / dpi_scale;
 }
 
 // TODO: Future support for multiple fonts per line is planned. This will require calculating text height
 // based on varying font line spaces rather than relying on a single font's line space.
-u32 renderer_get_text_height(String text)
+f32 renderer_get_text_height_for_dpi(const String text, const u32 dpi)
 {
-    u16 font_capital_letter_height = 0;
-    Font* font = NULL;
-    for (isize i = 0; i < text.len; i++)
-    {
-        Glyph* glyph = &g_glyph_cache->glyphs[text.data[i] - ASCII_START];
-
-        // Check if the glyph is from the same font as the previous glyph.
-        if (font == NULL)
-        {
-            font = glyph->font;
-            // TODO: Should we use max(prev, current)?
-            // It seems that the `capital_letter_height` is constant unless the font has changed.
-            font_capital_letter_height = glyph->font->capital_letter_height;
-        }
-        else
-        {
-            Assert(font == glyph->font);
-        }
-    }
-    return (u32)font_capital_letter_height;
+    Assert(text.len);
+    Glyph* glyph = &g_glyph_cache->glyphs[text.data[0] - ASCII_START];
+    return glyph->font->size;
 }
 
 //
@@ -472,10 +485,13 @@ void renderer_draw_rect(const Rect rect, const Color color, const RectStyle styl
     renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
 }
 
-void renderer_draw_text(String text, const Position position, const Color color)
+void renderer_draw_text(String text, const Position position, const Color color, const u32 dpi)
 {
     f32 next_position_x = position.x;
-    f32 position_y = position.y + (f32)renderer_get_text_height(text);
+
+    // Get physical pixel position of y
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    f32 position_y = position.y + renderer_get_text_height_for_dpi(text, dpi) * dpi_scale;
 
     for (isize i = 0; i < text.len; i++)
     {

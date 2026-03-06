@@ -18,29 +18,20 @@ typedef struct
 {
     IDWriteFontFace* face;
     IDWriteFontFace3* face3;
-
     f32 size; // Controls capital letter height in pixels
-    f32 dpi;
-
-    u16 ascent;
-    u16 descent;
-    i16 line_gap;
-    u16 capital_letter_height;
 } Font;
 
+// physical pixels, not logic
 typedef struct
 {
     Font* font;
-
-    // glyph metrics
     u32 codepoint;
-    u16 w, h, xadvance;
-    i16 xoff, yoff;
-
-    // to locate this glyph in the atlas
+    u32 w, h, xadvance;
+    i32 xoff, yoff;
     u16 atlas_x, atlas_y;
 } Glyph;
 
+// physical pixels, not logic
 typedef struct
 {
     u8* bitmap;
@@ -61,15 +52,15 @@ typedef struct
 
 ///
 
-Font* font_create(IDWriteFactory3* dwrite_factory, const wchar_t* font_name, const f32 font_size, const f32 dpi);
+Font* font_create(IDWriteFactory3* dwrite_factory, const wchar_t* font_name, const f32 font_size);
 void font_destroy(Font* font);
 
-void glyph_cache_init(GlyphCache* glyph_cache, const u16 glyphs_length);
+void glyph_cache_init(GlyphCache* glyph_cache, const u32 glyphs_length);
 void glyph_cache_pack_codepoints(IDWriteFactory3* dwrite_factory, GlyphCache* glyph_cache, Font* font,
-                                 const u32* codepoints, const u16 codepoints_length);
+                                 const u32* codepoints, const i32 codepoints_length, const u32 dpi);
 void glyph_cache_deinit(GlyphCache* glyph_cache);
 
-void glyph_cache_init_and_fill(const HWND window, GlyphCache* glyph_cache, const wchar_t* font_family);
+void glyph_cache_init_and_fill(const HWND window, GlyphCache* glyph_cache, const wchar_t* font_family, const u32 dpi);
 
 ///
 

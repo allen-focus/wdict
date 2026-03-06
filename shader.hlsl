@@ -2,7 +2,7 @@ Texture2D glyph_atlas_texture : register(t0);
 SamplerState mysampler : register(s0);
 
 cbuffer cbuffer0 : register(b0)
-
+{
     float4x4 projection_matrix;
 };
 

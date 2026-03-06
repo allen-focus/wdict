@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <winuser.h>
 
 #define STACK_SIZE 16
 #define EPSILON 1e-4f
@@ -18,6 +19,197 @@ static Queue(UIBox, QUEUE_SIZE) ui_box_queue = { 0 };
 static Stack(UIBox*, STACK_SIZE) ui_box_stack = { 0 };
 
 ///
+
+// -----------------------------------------------------------------------------
+// Helper
+// -----------------------------------------------------------------------------
+
+static b32 axis_has_fit_attribute(SizingAxis axis)
+{
+    return axis.mode == SIZING_MODE_FIT || axis.mode == SIZING_MODE_FIT_GROW;
+}
+
+// -----------------------------------------------------------------------------
+// Basic
+// -----------------------------------------------------------------------------
+
+static UIBox* ui_box_new()
+{
+    Assert(ui_box_queue.count < QUEUE_SIZE);
+    return &ui_box_queue.items[ui_box_queue.count++];
+}
+
+static UIBox* ui_box_get_parent()
+{
+    return (ui_box_stack.depth > 0) ? ui_box_stack.items[ui_box_stack.depth - 1] : NULL;
+}
+
+UIBox* ui_box_get_root()
+{
+    Assert(ui_box_queue.count > 0);
+    return &ui_box_queue.items[0];
+}
+
+UIBox* ui_box_start(BoxConfig* config)
+{
+    Assert(ui_box_stack.depth <= STACK_SIZE);
+    Assert(ui_box_queue.count <= QUEUE_SIZE);
+
+    UIBox* box = ui_box_new();
+    UIBox* parent = ui_box_get_parent();
+
+    // Set the parent of the current box and add the current box as a child of its parent
+    if (parent)
+    {
+        box->parent = parent;
+        for (i32 i = 0; i < CHILDREN_SIZE; i++)
+        {
+            if (parent->children[i] == NULL)
+            {
+                parent->children[i] = box;
+                parent->data.container.child_count++;
+                break;
+            }
+        }
+    }
+
+    ui_box_stack.items[ui_box_stack.depth++] = box;
+    memcpy(&box->config, config, sizeof(*config));
+    return box;
+}
+
+void ui_box_end(UIBox* box)
+{
+    if (box->type == BOX_TYPE_CONTAINER)
+    {
+        // 'FIXED' sizing mode axis
+        if (box->config.sizing.width.mode == SIZING_MODE_FIXED)
+            box->min_size.width = box->config.sizing.width.value;
+        if (box->config.sizing.height.mode == SIZING_MODE_FIXED)
+            box->min_size.height = box->config.sizing.height.value;
+
+        // 'FIT/FIT_GROW' sizing mode axis
+        i32 child_gap_count = box->data.container.child_count - 1;
+        if (axis_has_fit_attribute(box->config.sizing.width))
+        {
+            box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
+            box->min_size.width += box->config.padding.left + box->config.padding.right;
+            if (box->config.direction == LAYOUT_LEFT_TO_RIGHT)
+            {
+                box->config.sizing.width.value += box->config.child_gap * child_gap_count;
+                box->min_size.width += box->config.child_gap * child_gap_count;
+            }
+        }
+        if (axis_has_fit_attribute(box->config.sizing.height))
+        {
+            box->config.sizing.height.value += box->config.padding.top + box->config.padding.bottom;
+            box->min_size.height += box->config.padding.top + box->config.padding.bottom;
+            if (box->config.direction == LAYOUT_TOP_TO_BOTTOM)
+            {
+                box->config.sizing.height.value += box->config.child_gap * child_gap_count;
+                box->min_size.height += box->config.child_gap * child_gap_count;
+            }
+        }
+    }
+
+    ui_box_stack.items[ui_box_stack.depth--] = NULL;
+}
+
+void ui_reset(UIContext* ui_context)
+{
+    Assert(ui_box_stack.depth == 0);
+    memset(&ui_box_queue, 0, sizeof(ui_box_queue));
+    memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
+}
+
+///
+
+UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config)
+{
+    f32 base_line_height = ui_context->get_text_height(text, ui_context->dpi);
+    f32 effective_line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
+    BoxConfig box_config = { .sizing = { .width = { ui_context->get_text_width(text, ui_context->dpi), SIZING_MODE_FIXED },
+                                         .height = { effective_line_height, SIZING_MODE_FIXED } } };
+
+    UIBox* text_box = ui_box_start(&box_config);
+    {
+        text_box->type = BOX_TYPE_TEXT;
+        text_box->data.text.content = text;
+        text_box->data.text.color = text_config->color;
+        text_box->data.text.line_count = 1;
+        text_box->data.text.line_height = effective_line_height;
+        text_box->data.text.half_leading = (effective_line_height - base_line_height) / 2.0f;
+    }
+
+    // Calculate box->min_size.width by finding the width of the shortest word in the text.
+    f32 min_width = INFINITY;
+    {
+        String s = text_box->data.text.content;
+        isize start = 0;
+        for (isize i = 0; i < s.len; i++)
+            if (s.data[i] == ' ')
+            {
+                String word = str_slice(s, start, i);
+                min_width = min(min_width, ui_context->get_text_width(word, ui_context->dpi));
+                start = i + 1;
+            }
+        f32 whole_text_width = ui_context->get_text_width(text_box->data.text.content, ui_context->dpi);
+        min_width = (min_width != INFINITY) ? min_width : whole_text_width;
+    }
+    text_box->min_size.width = min_width;
+    text_box->min_size.height = (f32)text_box->data.text.line_height;
+
+    ui_box_end(text_box);
+    return text_box;
+}
+
+///
+
+void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
+{
+    f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+
+    switch (box->type)
+    {
+        case BOX_TYPE_CONTAINER:
+        {
+            UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
+            cmd->rect.base.type = UI_COMMAND_RECT;
+            cmd->rect.base.size = sizeof(UICommandRect);
+            cmd->rect.rect = (Rect){
+                box->position.x * dpi_scale,
+                box->position.y * dpi_scale,
+                (box->position.x + box->config.sizing.width.value) * dpi_scale,
+                (box->position.y + box->config.sizing.height.value) * dpi_scale
+            };
+            cmd->rect.color = box->config.color;
+            cmd->rect.style = box->config.rect_style;
+        }
+        break;
+        case BOX_TYPE_TEXT:
+        {
+            for (i32 i = 0; i < box->data.text.line_count; i++)
+            {
+                UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
+                cmd->text.content = (box->data.text.line_count == 1) ? box->data.text.content : box->data.text.wrapped_lines[i];
+                cmd->text.base.type = UI_COMMAND_TEXT;
+                cmd->text.base.size = sizeof(UICommandText);
+                cmd->text.color = box->data.text.color;
+                cmd->text.position.x = box->position.x * dpi_scale;
+                cmd->text.position.y = (box->position.y + box->data.text.half_leading + i * box->data.text.line_height) * dpi_scale;
+            }
+        }
+        break;
+    }
+
+    if (box->type == BOX_TYPE_CONTAINER)
+        for (i32 i = 0; i < box->data.container.child_count; i++)
+            ui_generate_render_commands(ui_context, box->children[i]);
+}
+
+// -----------------------------------------------------------------------------
+// Layout
+// -----------------------------------------------------------------------------
 
 // Axis-specific helper structure to eliminate code duplication
 typedef struct {
@@ -58,13 +250,8 @@ static AxisContext get_axis_context(UIBox* box, Axis axis)
 
 ///
 
-static b32 axis_has_fit_attribute(SizingAxis axis)
-{
-    return axis.mode == SIZING_MODE_FIT || axis.mode == SIZING_MODE_FIT_GROW;
-}
-
 // Recursively calculate sizes for boxes configured with 'fit' attribute
-void ui_box_calculate_fit_axis(UIBox* box, Axis axis)
+static void ui_box_calculate_fit_axis(UIBox* box, Axis axis)
 {
     // Recursively resolve child box sizes (depth-first, reverse order)
     if (box->type == BOX_TYPE_CONTAINER)
@@ -212,7 +399,7 @@ static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[
 }
 
 // Recursively calculate sizes for boxes configured with 'grow' attribute
-void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
+static void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
 {
     if (box->type != BOX_TYPE_CONTAINER)
         return;
@@ -290,7 +477,7 @@ void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
             ui_box_grow_shrink_children_axis(box->children[i], axis);
 }
 
-void ui_box_resolve_position(UIBox* box)
+static void ui_box_resolve_position(UIBox* box)
 {
     if (box->parent)
     {
@@ -315,178 +502,12 @@ void ui_box_resolve_position(UIBox* box)
             ui_box_resolve_position(box->children[i]);
 }
 
-void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
-{
-    switch (box->type)
-    {
-        case BOX_TYPE_CONTAINER:
-        {
-            UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
-            cmd->rect.base.type = UI_COMMAND_RECT;
-            cmd->rect.base.size = sizeof(UICommandRect);
-            cmd->rect.rect = (Rect){ box->position.x, box->position.y, box->position.x + box->config.sizing.width.value,
-                                     box->position.y + box->config.sizing.height.value };
-            cmd->rect.color = box->config.color;
-            cmd->rect.style = box->config.rect_style;
-        }
-        break;
-        case BOX_TYPE_TEXT:
-        {
-            for (i32 i = 0; i < box->data.text.line_count; i++)
-            {
-                UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
-                cmd->text.content = (box->data.text.line_count == 1) ? box->data.text.content : box->data.text.wrapped_lines[i];
-                cmd->text.base.type = UI_COMMAND_TEXT;
-                cmd->text.base.size = sizeof(UICommandText);
-                cmd->text.color = box->data.text.color;
-                cmd->text.position.x = box->position.x;
-                cmd->text.position.y = box->position.y + box->data.text.half_leading + i * box->data.text.line_height;
-            }
-        }
-        break;
-    }
-
-    if (box->type == BOX_TYPE_CONTAINER)
-        for (i32 i = 0; i < box->data.container.child_count; i++)
-            ui_generate_render_commands(ui_context, box->children[i]);
-}
-
-static UIBox* ui_box_new()
-{
-    Assert(ui_box_queue.count < QUEUE_SIZE);
-    return &ui_box_queue.items[ui_box_queue.count++];
-}
-
-static UIBox* ui_box_get_parent()
-{
-    return (ui_box_stack.depth > 0) ? ui_box_stack.items[ui_box_stack.depth - 1] : NULL;
-}
-
-UIBox* ui_box_get_root()
-{
-    Assert(ui_box_queue.count > 0);
-    return &ui_box_queue.items[0];
-}
-
-UIBox* ui_box_start(BoxConfig* config)
-{
-    Assert(ui_box_stack.depth <= STACK_SIZE);
-    Assert(ui_box_queue.count <= QUEUE_SIZE);
-
-    UIBox* box = ui_box_new();
-    UIBox* parent = ui_box_get_parent();
-
-    // Set the parent of the current box and add the current box as a child of its parent
-    if (parent)
-    {
-        box->parent = parent;
-        for (i32 i = 0; i < CHILDREN_SIZE; i++)
-        {
-            if (parent->children[i] == NULL)
-            {
-                parent->children[i] = box;
-                parent->data.container.child_count++;
-                break;
-            }
-        }
-    }
-
-    ui_box_stack.items[ui_box_stack.depth++] = box;
-    memcpy(&box->config, config, sizeof(*config));
-    return box;
-}
-
-void ui_box_end(UIBox* box)
-{
-    if (box->type == BOX_TYPE_CONTAINER)
-    {
-        // 'FIXED' sizing mode axis
-        if (box->config.sizing.width.mode == SIZING_MODE_FIXED)
-            box->min_size.width = box->config.sizing.width.value;
-        if (box->config.sizing.height.mode == SIZING_MODE_FIXED)
-            box->min_size.height = box->config.sizing.height.value;
-
-        // 'FIT/FIT_GROW' sizing mode axis
-        i32 child_gap_count = box->data.container.child_count - 1;
-        if (axis_has_fit_attribute(box->config.sizing.width))
-        {
-            box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
-            box->min_size.width += box->config.padding.left + box->config.padding.right;
-            if (box->config.direction == LAYOUT_LEFT_TO_RIGHT)
-            {
-                box->config.sizing.width.value += box->config.child_gap * child_gap_count;
-                box->min_size.width += box->config.child_gap * child_gap_count;
-            }
-        }
-        if (axis_has_fit_attribute(box->config.sizing.height))
-        {
-            box->config.sizing.height.value += box->config.padding.top + box->config.padding.bottom;
-            box->min_size.height += box->config.padding.top + box->config.padding.bottom;
-            if (box->config.direction == LAYOUT_TOP_TO_BOTTOM)
-            {
-                box->config.sizing.height.value += box->config.child_gap * child_gap_count;
-                box->min_size.height += box->config.child_gap * child_gap_count;
-            }
-        }
-    }
-    else if (box->type == BOX_TYPE_TEXT)
-    {
-        // Calculate box->min_size.width by finding the width of the shortest word in the text.
-        f32 min_width = INFINITY;
-        {
-            String s = box->data.text.content;
-            isize start = 0;
-            for (isize i = 0; i < s.len; i++)
-                if (s.data[i] == ' ')
-                {
-                    String word = str_slice(s, start, i);
-                    min_width = min(min_width, box->data.text.get_text_width(word));
-                    start = i + 1;
-                }
-        }
-        f32 whole_text_width = (f32)box->data.text.get_text_width(box->data.text.content);
-        box->min_size.width = (min_width != INFINITY) ? min_width : whole_text_width;
-        box->min_size.height = (f32)box->data.text.line_height;
-    }
-
-    ui_box_stack.items[ui_box_stack.depth--] = NULL;
-}
-
-void ui_reset(UIContext* ui_context)
-{
-    Assert(ui_box_stack.depth == 0);
-    memset(&ui_box_queue, 0, sizeof(ui_box_queue));
-    memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
-}
-
-UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config)
-{
-    f32 base_line_height = (f32)ui_context->get_text_height(text);
-    f32 effective_line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
-    BoxConfig box_config = { .sizing = { .width = { (f32)ui_context->get_text_width(text), SIZING_MODE_FIXED },
-                                         .height = { effective_line_height, SIZING_MODE_FIXED } } };
-
-    UIBox* text_box = ui_box_start(&box_config);
-    {
-        text_box->type = BOX_TYPE_TEXT;
-        text_box->data.text.content = text;
-        text_box->data.text.color = text_config->color;
-        text_box->data.text.line_count = 1;
-        text_box->data.text.line_height = effective_line_height;
-        text_box->data.text.half_leading = (effective_line_height - base_line_height) / 2.0f;
-        text_box->data.text.get_text_width = ui_context->get_text_width;
-        text_box->data.text.get_text_height = ui_context->get_text_height;
-    }
-    ui_box_end(text_box);
-    return text_box;
-}
-
-static void perform_text_wrapping(UIBox* text_box)
+static void perform_text_wrapping(UIContext* ui_context, UIBox* text_box)
 {
     String text = text_box->data.text.content;
-    u32 text_width = text_box->data.text.get_text_width(text);
+    f32 text_width = ui_context->get_text_width(text, ui_context->dpi);
     f32 max_width = text_box->config.sizing.width.value;
-    if ((f32)text_width <= max_width)
+    if (text_width <= max_width)
         return;
 
     // TODO: 1. Don't hard code 64;
@@ -498,7 +519,7 @@ static void perform_text_wrapping(UIBox* text_box)
     // TODO: don't calculate whole text width in every loop [performance]
     for (isize i = 0; i <= text.len; i++)
     {
-        u32 current_line_width = text_box->data.text.get_text_width(str_slice(text, new_line_idx, i));
+        f32 current_line_width = ui_context->get_text_width(str_slice(text, new_line_idx, i), ui_context->dpi);
         if (current_line_width > max_width)
         {
             i32* line_count = &text_box->data.text.line_count;
@@ -528,11 +549,22 @@ static void perform_text_wrapping(UIBox* text_box)
     text_box->min_size.width = max_width;
 }
 
-void ui_box_apply_text_wrapping(UIContext* ui_context, UIBox* box)
+static void ui_box_apply_text_wrapping(UIContext* ui_context, UIBox* box)
 {
     if (box->type == BOX_TYPE_TEXT)
-        perform_text_wrapping(box);
+        perform_text_wrapping(ui_context, box);
     else if (box->type == BOX_TYPE_CONTAINER)
         for (i32 i = 0; i < box->data.container.child_count; i++)
             ui_box_apply_text_wrapping(ui_context, box->children[i]);
 }
+
+void ui_calculate_layout(UIContext* ui_context, UIBox* box)
+{
+    ui_box_calculate_fit_axis(box, WIDTH);
+    ui_box_grow_shrink_children_axis(box, WIDTH);
+    ui_box_apply_text_wrapping(ui_context, box);
+    ui_box_calculate_fit_axis(box, HEIGHT);
+    ui_box_grow_shrink_children_axis(box, HEIGHT);
+    ui_box_resolve_position(box);
+}
+
