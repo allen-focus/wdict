@@ -3,13 +3,14 @@
 #include "string.h"
 #include "ui.h"
 
+#include <debugapi.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
+#define STACK_SIZE 16
 #define EPSILON 1e-4f
 #define QUEUE_SIZE 256
-#define STACK_SIZE 16
 
 ///
 
@@ -68,7 +69,7 @@ void ui_box_calculate_fit_axis(UIBox* box, Axis axis)
     // Recursively resolve child box sizes (depth-first, reverse order)
     if (box->type == BOX_TYPE_CONTAINER)
         for (i32 i = 0; i < box->data.container.child_count; i++)
-                ui_box_calculate_fit_axis(box->children[i], axis);
+            ui_box_calculate_fit_axis(box->children[i], axis);
 
     // If the current box is a child, adjust its parent's size based on box direction.
     UIBox* parent = box->parent;
@@ -133,7 +134,8 @@ static void grow_axis(f32* remaining, f32* growable[], const i32 growable_count)
         if (to_add * smallest_count > *remaining)
             to_add = *remaining / smallest_count;
 
-        // Apply the calculated 'to_add' amount to all children currently equal to 'smallest', and update the remaining space.
+        // Apply the calculated 'to_add' amount to all children currently equal to 'smallest',
+        // and update the remaining space.
         for (i32 i = 0; i < growable_count; i++)
             if (fabsf(*growable[i] - smallest) < EPSILON)
             {
@@ -189,7 +191,8 @@ static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[
         if (to_add * largest_count < *remaining)
             to_add = *remaining / largest_count;
 
-        // Apply the calculated 'to_add' amount to all children currently equal to 'largest', and update the remaining space.
+        // Apply the calculated 'to_add' amount to all children currently equal to 'largest',
+        // and update the remaining space.
         for (i32 i = 0; i < *shrinkable_count; i++)
         {
             f32 width_backup = *shrinkable[i];
@@ -235,6 +238,7 @@ void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
         *ctx.remaining -= box->config.child_gap * child_gap_count;
 
     // Subtract the childrens' determined size from the parent's remaining space.
+    f32 cross_axis_remainings_min = *ctx.remaining;
     for (i32 i = 0; i < children_count; i++)
     {
         UIBox* child = box->children[i];
@@ -296,8 +300,8 @@ void ui_box_resolve_position(UIBox* box)
         box->position.y += parent->position.y + parent->config.padding.top;
         if (parent->config.direction == LAYOUT_LEFT_TO_RIGHT)
         {
-                box->position.x += parent_data->next_child_offset_x;
-                parent_data->next_child_offset_x += box->config.sizing.width.value + parent->config.child_gap;
+            box->position.x += parent_data->next_child_offset_x;
+            parent_data->next_child_offset_x += box->config.sizing.width.value + parent->config.child_gap;
         }
         else
         {
@@ -318,8 +322,8 @@ void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
         case BOX_TYPE_CONTAINER:
         {
             UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
-            cmd->rect.base.type = UI_COMMAND_RECT,
-            cmd->rect.base.size = sizeof(UICommandRect),
+            cmd->rect.base.type = UI_COMMAND_RECT;
+            cmd->rect.base.size = sizeof(UICommandRect);
             cmd->rect.rect = (Rect){ box->position.x, box->position.y, box->position.x + box->config.sizing.width.value,
                                      box->position.y + box->config.sizing.height.value };
             cmd->rect.color = box->config.color;

@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <wchar.h>
+#include <winuser.h>
 
 ///
 
@@ -48,17 +49,18 @@ RectStyle normal_rect_style = {
 };
 
 RectStyle full_rect_style = {
-    .border_color = { 39, 166, 87, 255 },
+    .border_color = { 255, 255, 255, 255 },
     .corner_radius = 12,
     .border_thickness = 4,
     .enable_shadow = true
 };
 
-Color purple = { 10,  110, 137, 255 };
-Color white  = { 255, 224, 224, 255 };
-Color red    = { 252, 147, 144, 255 };
-Color yellow = { 254, 216, 77,  255 };
-Color blue   = { 94,  203, 228, 255 };
+Color black = { 0,   0,   0,   255 };
+Color grey  = { 128, 128, 128, 255 };
+Color white = { 255, 255, 255, 255 };
+Color green = { 0,   255, 0,   255 };
+Color red   = { 255, 0,   0,   255 };
+Color blue  = { 0,   0,   255, 255 };
 
 Padding padding_bigger  = { 50, 50, 50, 50 };
 Padding padding_big     = { 30, 30, 30, 30 };
@@ -77,53 +79,30 @@ static void process_frame(UIContext* ui_context)
     ui_reset(ui_context);
 
     ui_box({ .sizing = { fixed(ui_context->client_width), fixed(ui_context->client_height) },
-             .color = purple,
+             .color = red,
              .rect_style = background_rect_style,
              .padding = padding_bigger,
              .child_gap = child_gap_bigger,
              .direction = LAYOUT_LEFT_TO_RIGHT })
     {
         ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
-                 .color = blue,
+                 .color = green,
                  .rect_style = normal_rect_style,
                  .padding = padding_big,
                  .child_gap = child_gap_big,
                  .direction = LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_box({ .sizing = { fit(0), fit(0) },
-                    .color = red,
-                    .rect_style = normal_rect_style,
-                    .padding = padding_medium,
-                    .child_gap = child_gap_medium,
-                    .direction = LAYOUT_LEFT_TO_RIGHT })
-            {
-                ui_text(ui_context, str("hey"), &(TextConfig){ .color = white });
-            }
-            ui_box({ .sizing = { fixed(200), fit_grow(0) },
-                     .color = yellow,
-                     .rect_style = full_rect_style,
-                     .padding = padding_medium,
-                     .child_gap = child_gap_medium,
-                     .direction = LAYOUT_LEFT_TO_RIGHT })
-            {
-            }
-            ui_box({ .sizing = { fit(0), fit(0) },
-                     .color = white,
-                     .rect_style = { 0 },
-                     .padding = { 0 },
-                     .child_gap = child_gap_medium,
-                     .direction = LAYOUT_LEFT_TO_RIGHT })
-            {
-                ui_text(ui_context, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = red, .line_height = 24.f });
-            }
+            ui_box({ .sizing = { fixed(200), fit_grow(0) }, .color = blue, .rect_style = full_rect_style }){}
             ui_box({ .sizing = { fit(0), fit(0) },
                      .color = white,
                      .rect_style = normal_rect_style,
                      .padding = padding_medium,
-                     .child_gap = child_gap_medium,
-                     .direction = LAYOUT_LEFT_TO_RIGHT })
+                     .child_gap = 0,
+                     .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_text(ui_context, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = red, .line_height = 24.f });
+                ui_box({ .sizing = { fit_grow(0), fixed(2) },.color = grey, .rect_style = normal_rect_style, .padding = { 0 }, .child_gap = 0}){}
+                ui_text(ui_context, str("Oops! Here's to you, Nicola and Bart"), &(TextConfig){ .color = black, .line_height = 0.f });
+                ui_box({ .sizing = { fit_grow(0), fixed(2) },.color = grey, .rect_style = normal_rect_style, .padding = { 0 }, .child_gap = 0}){}
             }
         }
     }
@@ -156,8 +135,7 @@ static void process_frame(UIContext* ui_context)
     }
 }
 
-static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam,
-                                         const LPARAM lparam)
+static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
 {
     UIContext* ui_context = NULL;
     {
@@ -175,15 +153,12 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         }
 
         if (app_context)
-        {
             ui_context = app_context->ui_context;
-        }
     }
 
     switch (message)
     {
         case WM_PAINT:
-        {
             PAINTSTRUCT ps;
             BeginPaint(window, &ps);
             {
@@ -193,10 +168,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 QueryPerformanceFrequency(&frequency);
                 QueryPerformanceCounter(&starting_time);
 #endif
-                {
-                    process_frame(ui_context);
-                    renderer_flush_and_present(ui_context->client_width, ui_context->client_height);
-                }
+                process_frame(ui_context);
+                renderer_flush_and_present(ui_context->client_width, ui_context->client_height);
 #ifndef NDEBUG
                 QueryPerformanceCounter(&ending_time);
                 elapsed_microseconds.QuadPart = ending_time.QuadPart - starting_time.QuadPart;
@@ -211,40 +184,31 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             }
             EndPaint(window, &ps);
             return 0;
-        }
         case WM_SIZE:
-        {
             ui_context->client_width = (u16)LOWORD(lparam);
             ui_context->client_height = (u16)HIWORD(lparam);
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
             {
                 ui_context->on_resize(ui_context->client_width, ui_context->client_height);
-
                 // Force an immediate repaint of entire client area to ensure the updated content is rendered promptly
                 InvalidateRect(window, NULL, FALSE);
             }
             return 0;
-        }
         case WM_KEYDOWN:
-        {
             if (wparam == VK_ESCAPE)
-            {
                 DestroyWindow(window);
-            }
             return 0;
         }
         case WM_DESTROY:
-        {
             PostQuitMessage(0);
             return 0;
-        }
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
 i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, i32 nShowCmd)
 {
-    // Set DPI awareness for better scaling on high DPI displays (Windows 10, v1607)
+    // Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607)
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     // Allocate user data

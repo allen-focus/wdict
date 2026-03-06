@@ -3,14 +3,14 @@
 #include "string.h"
 
 // clang-format off
-#define ui_box(...)                                                                                                 \
-    for (UIBox* box = ui_box_start(&(BoxConfig)__VA_ARGS__);                                      \
-         box != NULL;                                                                                     \
+#define ui_box(...) \
+    for (UIBox* box = ui_box_start(&(BoxConfig)__VA_ARGS__); \
+         box != NULL; \
          ui_box_end(box), box = NULL)
 // clang-format on
 
-#define fixed(value) { value, SIZING_MODE_FIXED }
-#define fit(value) { value, SIZING_MODE_FIT }
+#define fixed(value)    { value, SIZING_MODE_FIXED }
+#define fit(value)      { value, SIZING_MODE_FIT }
 #define fit_grow(value) { value, SIZING_MODE_FIT_GROW }
 
 // TODO: Don't hard-code
@@ -65,7 +65,8 @@ typedef enum
     HEIGHT
 } Axis;
 
-typedef struct {
+typedef struct
+{
     f32 width;
     f32 height;
 } Size;
@@ -142,7 +143,8 @@ typedef struct
 typedef struct UIBox UIBox;
 struct UIBox
 {
-    union {
+    union
+    {
         ContainerData container;
         TextData text;
     } data;

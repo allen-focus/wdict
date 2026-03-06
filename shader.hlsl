@@ -2,7 +2,7 @@ Texture2D glyph_atlas_texture : register(t0);
 SamplerState mysampler : register(s0);
 
 cbuffer cbuffer0 : register(b0)
-{
+
     float4x4 projection_matrix;
 };
 
@@ -246,6 +246,9 @@ float4 ps(PS_INPUT input) : SV_TARGET
     // but we sample at pixel centers. Need to create a half-pixel (0.5) offset to distance.
     // See: https://www.shadertoy.com/view/dtsXzH#
     float sdf_outer = rect_sdf(distance_to_shrunk_corner, input.corner_radius) + 0.5;
+    
+    // NOTE: Inner corners become sharp when border_thickness >= corner_radius,
+    // because the effective inner corner radius (corner_radius - border_thickness) goes negative.
     float sdf_inner = sdf_outer + input.border_thickness;
 
     // Anti-aliased alpha mask generation
@@ -284,7 +287,7 @@ float4 ps(PS_INPUT input) : SV_TARGET
     }
 
     // Alpha compositing using Porter-Duff "Over" operation
-    float3 shadow_color = float3(0.8, 0.8, 0.8);
+    float3 shadow_color = float3(0.2, 0.2, 0.2);
     float3 composed_rgb_linear = base_alpha * base_linear + shadow_alpha * shadow_color * (1.0 - base_alpha);
     float composed_alpha = base_alpha + shadow_alpha * (1.0 - base_alpha);
 
