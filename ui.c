@@ -76,6 +76,9 @@ UIBox* ui_box_start(const BoxConfig* config)
 
     ui_box_stack.items[ui_box_stack.depth++] = box;
     memcpy(&box->config, config, sizeof(*config));
+    box->size.width = box->config.sizing.width.mode == SIZING_MODE_FIXED ? box->config.sizing.width.min_max.min : 0;
+    box->size.height = box->config.sizing.height.mode == SIZING_MODE_FIXED ? box->config.sizing.height.min_max.min : 0;
+
     return box;
 }
 
@@ -83,32 +86,26 @@ void ui_box_end(UIBox* box)
 {
     if (box->type == BOX_TYPE_CONTAINER)
     {
-        // 'FIXED' sizing mode axis
-        if (box->config.sizing.width.mode == SIZING_MODE_FIXED)
-            box->min_size.width = box->config.sizing.width.value;
-        if (box->config.sizing.height.mode == SIZING_MODE_FIXED)
-            box->min_size.height = box->config.sizing.height.value;
-
         // 'FIT/FIT_GROW' sizing mode axis
         isize child_gap_count = box->data.container.child_count - 1;
         if (axis_has_fit_attribute(box->config.sizing.width))
         {
-            box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
-            box->min_size.width += box->config.padding.left + box->config.padding.right;
+            box->size.width += box->config.padding.left + box->config.padding.right;
+            box->config.sizing.width.min_max.min += box->config.padding.left + box->config.padding.right;
             if (box->config.direction == LAYOUT_LEFT_TO_RIGHT)
             {
-                box->config.sizing.width.value += box->config.child_gap * child_gap_count;
-                box->min_size.width += box->config.child_gap * child_gap_count;
+                box->size.width += box->config.child_gap * child_gap_count;
+                box->config.sizing.width.min_max.min += box->config.child_gap * child_gap_count;
             }
         }
         if (axis_has_fit_attribute(box->config.sizing.height))
         {
-            box->config.sizing.height.value += box->config.padding.top + box->config.padding.bottom;
-            box->min_size.height += box->config.padding.top + box->config.padding.bottom;
+            box->size.height += box->config.padding.top + box->config.padding.bottom;
+            box->config.sizing.height.min_max.min += box->config.padding.top + box->config.padding.bottom;
             if (box->config.direction == LAYOUT_TOP_TO_BOTTOM)
             {
-                box->config.sizing.height.value += box->config.child_gap * child_gap_count;
-                box->min_size.height += box->config.child_gap * child_gap_count;
+                box->size.height += box->config.child_gap * child_gap_count;
+                box->config.sizing.height.min_max.min += box->config.child_gap * child_gap_count;
             }
         }
     }
@@ -128,9 +125,10 @@ void ui_reset(UIContext* ui_context)
 UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const String text, const TextConfig* text_config)
 {
     f32 base_line_height = ui_context->get_text_height(glyph_cache, text, ui_context->dpi);
-    f32 effective_line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
-    BoxConfig box_config = { .sizing = { .width = { ui_context->get_text_width(glyph_cache, text, ui_context->dpi), SIZING_MODE_FIXED },
-                                         .height = { effective_line_height, SIZING_MODE_FIXED } } };
+    f32 line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
+    f32 fixed_width = ui_context->get_text_width(glyph_cache, text, ui_context->dpi);
+    BoxConfig box_config = { .sizing = { .width = { { fixed_width, fixed_width }, SIZING_MODE_FIXED },
+                                         .height = { { line_height, line_height }, SIZING_MODE_FIXED } } };
 
     UIBox* text_box = ui_box_start(&box_config);
     {
@@ -139,11 +137,11 @@ UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const
         text_box->data.text.color = text_config->color;
         memset(&text_box->data.text.wrapped_lines, 0, sizeof(text_box->data.text.wrapped_lines));
         text_box->data.text.line_count = 1;
-        text_box->data.text.line_height = effective_line_height;
-        text_box->data.text.half_leading = (effective_line_height - base_line_height) / 2.0f;
+        text_box->data.text.line_height = line_height;
+        text_box->data.text.half_leading = (line_height - base_line_height) / 2.0f;
     }
 
-    // Calculate box->min_size.width by finding the width of the longest word in the text.
+    // Calculate box->config.sizing.width.value.min by finding the width of the longest word in the text.
     f32 min_width = 0;
     {
         String s = text_box->data.text.content;
@@ -158,8 +156,8 @@ UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const
         f32 whole_text_width = ui_context->get_text_width(glyph_cache, text_box->data.text.content, ui_context->dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
-    text_box->min_size.width = min_width;
-    text_box->min_size.height = (f32)text_box->data.text.line_height;
+    text_box->config.sizing.width.min_max.min = min_width;
+    text_box->config.sizing.height.min_max.min = (f32)text_box->data.text.line_height;
 
     ui_box_end(text_box);
     return text_box;
@@ -181,8 +179,8 @@ void ui_generate_render_commands(UIContext* ui_context, const UIBox* box)
             cmd->rect.rect = (Rect){
                 box->position.x * dpi_scale,
                 box->position.y * dpi_scale,
-                (box->position.x + box->config.sizing.width.value) * dpi_scale,
-                (box->position.y + box->config.sizing.height.value) * dpi_scale
+                (box->position.x + box->size.width) * dpi_scale,
+                (box->position.y + box->size.height) * dpi_scale
             };
             cmd->rect.color = box->config.color;
             cmd->rect.style = box->config.rect_style;
@@ -229,8 +227,8 @@ static AxisContext get_axis_context(UIBox* box, const Axis axis)
     AxisContext ctx = { 0 };
     if (axis == WIDTH)
     {
-        ctx.size = &box->config.sizing.width.value;
-        ctx.min_size = &box->min_size.width;
+        ctx.size = &box->size.width;
+        ctx.min_size = &box->config.sizing.width.min_max.min;
         ctx.remaining = &box->data.container.remaining_space.width;
         ctx.padding_start = box->config.padding.left;
         ctx.padding_end = box->config.padding.right;
@@ -239,8 +237,8 @@ static AxisContext get_axis_context(UIBox* box, const Axis axis)
     }
     else
     {
-        ctx.size = &box->config.sizing.height.value;
-        ctx.min_size = &box->min_size.height;
+        ctx.size = &box->size.height;
+        ctx.min_size = &box->config.sizing.height.min_max.min;
         ctx.remaining = &box->data.container.remaining_space.height;
         ctx.padding_start = box->config.padding.top;
         ctx.padding_end = box->config.padding.bottom;
@@ -400,7 +398,7 @@ static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[
     }
 }
 
-// Recursively calculate sizes for boxes configured with 'grow' attribute
+// Recursively grow/shrink axis size of box
 static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
 {
     if (box->type != BOX_TYPE_CONTAINER)
@@ -490,12 +488,12 @@ static void ui_box_resolve_position(UIBox* box)
         if (parent->config.direction == LAYOUT_LEFT_TO_RIGHT)
         {
             box->position.x += parent_data->next_child_offset_x;
-            parent_data->next_child_offset_x += box->config.sizing.width.value + parent->config.child_gap;
+            parent_data->next_child_offset_x += box->size.width + parent->config.child_gap;
         }
         else
         {
             box->position.y += parent_data->next_child_offset_y;
-            parent_data->next_child_offset_y += box->config.sizing.height.value + parent->config.child_gap;
+            parent_data->next_child_offset_y += box->size.height + parent->config.child_gap;
         }
     }
 
@@ -508,7 +506,7 @@ static void perform_text_wrapping(UIContext* ui_context, const GlyphCache* glyph
 {
     String text = text_box->data.text.content;
     f32 text_width = ui_context->get_text_width(glyph_cache, text, ui_context->dpi);
-    f32 max_width = text_box->config.sizing.width.value;
+    f32 max_width = text_box->size.width;
     if (text_width <= max_width)
         return;
 
@@ -533,9 +531,9 @@ static void perform_text_wrapping(UIContext* ui_context, const GlyphCache* glyph
     *slice_push(&text_box->data.text.wrapped_lines, &ui_context->arena) = str_slice(text, new_line_idx, text.len);
 
     // Update box dimensions
-    text_box->config.sizing.height.value = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
-    text_box->min_size.height = text_box->config.sizing.height.value;
-    text_box->min_size.width = max_width;
+    text_box->size.height = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
+    text_box->config.sizing.height.min_max.min = text_box->size.height;
+    text_box->config.sizing.width.min_max.min = max_width;
 }
 
 static void ui_box_apply_text_wrapping(UIContext* ui_context, const GlyphCache* glyph_cache, UIBox* box)

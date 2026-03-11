@@ -10,9 +10,9 @@
          ui_box_end(box), box = NULL)
 // clang-format on
 
-#define fixed(value)    { value, SIZING_MODE_FIXED }
-#define fit(value)      { value, SIZING_MODE_FIT }
-#define fit_grow(value) { value, SIZING_MODE_FIT_GROW }
+#define fixed(value)  { { value, value }, SIZING_MODE_FIXED }
+#define fit(...)      { __VA_ARGS__, SIZING_MODE_FIT }
+#define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }
 
 // TODO: Don't hard-code
 #define CHILDREN_SIZE      16
@@ -72,6 +72,12 @@ typedef struct
     f32 height;
 } Size;
 
+typedef struct
+{
+    f32 min;
+    f32 max;
+} SizingMinMax;
+
 typedef enum
 {
     SIZING_MODE_FIXED,
@@ -81,7 +87,7 @@ typedef enum
 
 typedef struct
 {
-    f32 value;
+    SizingMinMax min_max;
     SizingMode mode;
 } SizingAxis;
 
@@ -157,7 +163,7 @@ struct UIBox
     BoxType type;
     BoxConfig config;
     Position position;
-    Size min_size;
+    Size size;
     UIBox* parent;
     UIBox* children[CHILDREN_SIZE];
 };

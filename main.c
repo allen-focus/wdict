@@ -75,26 +75,33 @@ static void process_frame(AppContext* app_context)
              .child_gap = child_gap_bigger,
              .direction = LAYOUT_LEFT_TO_RIGHT })
     {
-        ui_box({ .sizing = { fit_grow(0), fit_grow(0) },
+        ui_box({ .sizing = { fit_grow({}), fit_grow({}) },
                  .color = green,
                  .rect_style = normal_rect_style,
                  .padding = padding_big,
                  .child_gap = child_gap_big,
                  .direction = LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_box({ .sizing = { fixed(200), fit_grow(0) }, .color = blue, .rect_style = full_rect_style }) { }
-            ui_box({ .sizing = { fit(0), fit(0) },
+            ui_box({ .sizing = { fixed(200), fit_grow({}) }, .color = blue, .rect_style = full_rect_style }) {}
+            ui_box({ .sizing = { fit({}), fit({}) },
                      .color = white,
                      .rect_style = normal_rect_style,
                      .padding = padding_medium,
                      .child_gap = 0,
                      .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = grey }) { }
-                ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart. Here is       to    you."), &(TextConfig){ .color = black });
-                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = grey }) { }
+                ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black });
             }
-            ui_box({ .sizing = { fixed(50), fit_grow(0) }, .color = blue, .rect_style = normal_rect_style }) { }
+            ui_box({ .sizing = { fit({}), fit_grow({}) }, 
+                    .color = blue, 
+                    .rect_style = normal_rect_style,
+                    .padding = padding_small,
+                    .child_gap = child_gap_small,
+                    .direction = LAYOUT_TOP_TO_BOTTOM }) 
+            { 
+                ui_box({ .sizing = { fixed(30), fixed(30) }, .color = white, .rect_style = normal_rect_style}) {}
+                ui_box({ .sizing = { fixed(30), fixed(30) }, .color = white, .rect_style = normal_rect_style}) {}
+            }
         }
     }
 
