@@ -141,20 +141,20 @@ UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config)
         text_box->data.text.half_leading = (effective_line_height - base_line_height) / 2.0f;
     }
 
-    // Calculate box->min_size.width by finding the width of the shortest word in the text.
-    f32 min_width = INFINITY;
+    // Calculate box->min_size.width by finding the width of the longest word in the text.
+    f32 min_width = 0;
     {
         String s = text_box->data.text.content;
         isize start = 0;
-        for (isize i = 0; i < s.len; i++)
-            if (s.data[i] == ' ')
+        for (isize i = 0; i <= s.len; i++)
+            if (s.data[i] == ' ' || i == s.len)
             {
-                String word = str_slice(s, start, i);
-                min_width = min(min_width, ui_context->get_text_width(word, ui_context->dpi));
+                if (s.data[start] != ' ')
+                    min_width = max(min_width, ui_context->get_text_width(str_slice(s, start, i), ui_context->dpi));
                 start = i + 1;
             }
         f32 whole_text_width = ui_context->get_text_width(text_box->data.text.content, ui_context->dpi);
-        min_width = (min_width != INFINITY) ? min_width : whole_text_width;
+        min_width = (min_width != 0) ? min_width : whole_text_width;
     }
     text_box->min_size.width = min_width;
     text_box->min_size.height = (f32)text_box->data.text.line_height;
@@ -522,19 +522,11 @@ static void perform_text_wrapping(UIContext* ui_context, UIBox* text_box)
         f32 current_line_width = ui_context->get_text_width(str_slice(text, new_line_idx, i), ui_context->dpi);
         if (current_line_width > max_width)
         {
+            Assert(distance_between_line_start_and_newest_space);
             i32* line_count = &text_box->data.text.line_count;
-            if (!distance_between_line_start_and_newest_space)
-            {
-                // The width of first word of current line has exceeded the maximum width, force a line break
-                text_box->data.text.wrapped_lines[(*line_count)++ - 1] = str_slice(text, new_line_idx, --i);
-                new_line_idx = i;
-            }
-            else
-            {
-                isize end = new_line_idx + distance_between_line_start_and_newest_space;
-                text_box->data.text.wrapped_lines[(*line_count)++ - 1] = str_slice(text, new_line_idx, end);
-                new_line_idx = end + 1;
-            }
+            isize end = new_line_idx + distance_between_line_start_and_newest_space;
+            text_box->data.text.wrapped_lines[(*line_count)++ - 1] = str_slice(text, new_line_idx, end);
+            new_line_idx = end + 1;
             distance_between_line_start_and_newest_space = 0;
         }
         if (text.data[i] == ' ')
