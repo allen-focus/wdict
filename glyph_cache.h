@@ -1,7 +1,9 @@
 #pragma once
 
 #include "pch.h"  // IWYU pragma: keep
+#include "arena.h"
 #include "lib.h"
+
 #include <stdint.h>
 
 #define GLYPH_ATLAS_WIDTH  1024
@@ -46,22 +48,13 @@ typedef struct
 
 typedef struct
 {
+    Arena arena;
+    Font font;
+    GlyphAtlas atlas;
     Glyph* glyphs;
-    GlyphAtlas* atlas;
 } GlyphCache;
 
 ///
 
-Font* font_create(IDWriteFactory3* dwrite_factory, const wchar_t* font_name, const f32 font_size);
-void font_destroy(Font* font);
-
-void glyph_cache_init(GlyphCache* glyph_cache, const u32 glyphs_length);
-void glyph_cache_pack_codepoints(IDWriteFactory3* dwrite_factory, GlyphCache* glyph_cache, Font* font,
-                                 const u32* codepoints, const i32 codepoints_length, const u32 dpi);
 void glyph_cache_deinit(GlyphCache* glyph_cache);
-
-void glyph_cache_init_and_fill(const HWND window, GlyphCache* glyph_cache, const wchar_t* font_family, const u32 dpi);
-
-///
-
-extern GlyphCache* g_glyph_cache;
+void glyph_cache_init_and_fill(GlyphCache* glyph_cache, const wchar_t* font_family, const u32 dpi);

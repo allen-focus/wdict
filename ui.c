@@ -1,5 +1,6 @@
 #include "pch.h"  // IWYU pragma: keep
 #include "lib.h"
+#include "slice.h"
 #include "string.h"
 #include "ui.h"
 
@@ -24,7 +25,7 @@ static Stack(UIBox*, STACK_SIZE) ui_box_stack = { 0 };
 // Helper
 // -----------------------------------------------------------------------------
 
-static b32 axis_has_fit_attribute(SizingAxis axis)
+static b32 axis_has_fit_attribute(const SizingAxis axis)
 {
     return axis.mode == SIZING_MODE_FIT || axis.mode == SIZING_MODE_FIT_GROW;
 }
@@ -50,7 +51,7 @@ UIBox* ui_box_get_root()
     return &ui_box_queue.items[0];
 }
 
-UIBox* ui_box_start(BoxConfig* config)
+UIBox* ui_box_start(const BoxConfig* config)
 {
     Assert(ui_box_stack.depth <= STACK_SIZE);
     Assert(ui_box_queue.count <= QUEUE_SIZE);
@@ -62,7 +63,7 @@ UIBox* ui_box_start(BoxConfig* config)
     if (parent)
     {
         box->parent = parent;
-        for (i32 i = 0; i < CHILDREN_SIZE; i++)
+        for (isize i = 0; i < CHILDREN_SIZE; i++)
         {
             if (parent->children[i] == NULL)
             {
@@ -89,7 +90,7 @@ void ui_box_end(UIBox* box)
             box->min_size.height = box->config.sizing.height.value;
 
         // 'FIT/FIT_GROW' sizing mode axis
-        i32 child_gap_count = box->data.container.child_count - 1;
+        isize child_gap_count = box->data.container.child_count - 1;
         if (axis_has_fit_attribute(box->config.sizing.width))
         {
             box->config.sizing.width.value += box->config.padding.left + box->config.padding.right;
@@ -119,16 +120,16 @@ void ui_reset(UIContext* ui_context)
 {
     Assert(ui_box_stack.depth == 0);
     memset(&ui_box_queue, 0, sizeof(ui_box_queue));
-    memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
+    memset(&ui_context->command_queue, 0, sizeof(ui_context->command_queue));
 }
 
 ///
 
-UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config)
+UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const String text, const TextConfig* text_config)
 {
-    f32 base_line_height = ui_context->get_text_height(text, ui_context->dpi);
+    f32 base_line_height = ui_context->get_text_height(glyph_cache, text, ui_context->dpi);
     f32 effective_line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
-    BoxConfig box_config = { .sizing = { .width = { ui_context->get_text_width(text, ui_context->dpi), SIZING_MODE_FIXED },
+    BoxConfig box_config = { .sizing = { .width = { ui_context->get_text_width(glyph_cache, text, ui_context->dpi), SIZING_MODE_FIXED },
                                          .height = { effective_line_height, SIZING_MODE_FIXED } } };
 
     UIBox* text_box = ui_box_start(&box_config);
@@ -136,6 +137,7 @@ UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config)
         text_box->type = BOX_TYPE_TEXT;
         text_box->data.text.content = text;
         text_box->data.text.color = text_config->color;
+        memset(&text_box->data.text.wrapped_lines, 0, sizeof(text_box->data.text.wrapped_lines));
         text_box->data.text.line_count = 1;
         text_box->data.text.line_height = effective_line_height;
         text_box->data.text.half_leading = (effective_line_height - base_line_height) / 2.0f;
@@ -150,10 +152,10 @@ UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config)
             if (s.data[i] == ' ' || i == s.len)
             {
                 if (s.data[start] != ' ')
-                    min_width = max(min_width, ui_context->get_text_width(str_slice(s, start, i), ui_context->dpi));
+                    min_width = max(min_width, ui_context->get_text_width(glyph_cache, str_slice(s, start, i), ui_context->dpi));
                 start = i + 1;
             }
-        f32 whole_text_width = ui_context->get_text_width(text_box->data.text.content, ui_context->dpi);
+        f32 whole_text_width = ui_context->get_text_width(glyph_cache, text_box->data.text.content, ui_context->dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
     text_box->min_size.width = min_width;
@@ -165,7 +167,7 @@ UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config)
 
 ///
 
-void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
+void ui_generate_render_commands(UIContext* ui_context, const UIBox* box)
 {
     f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
 
@@ -173,7 +175,7 @@ void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
     {
         case BOX_TYPE_CONTAINER:
         {
-            UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
+            UICommand* cmd = ui_context->command_queue.items + ui_context->command_queue.count++;
             cmd->rect.base.type = UI_COMMAND_RECT;
             cmd->rect.base.size = sizeof(UICommandRect);
             cmd->rect.rect = (Rect){
@@ -188,22 +190,22 @@ void ui_generate_render_commands(UIContext* ui_context, UIBox* box)
         break;
         case BOX_TYPE_TEXT:
         {
-            for (i32 i = 0; i < box->data.text.line_count; i++)
-            {
-                UICommand* cmd = ui_context->ui_command_queue.items + ui_context->ui_command_queue.count++;
-                cmd->text.content = (box->data.text.line_count == 1) ? box->data.text.content : box->data.text.wrapped_lines[i];
+            isize i = 0;
+            do {
+                UICommand* cmd = ui_context->command_queue.items + ui_context->command_queue.count++;
+                cmd->text.content = box->data.text.wrapped_lines.len ? *(box->data.text.wrapped_lines.data + i) : box->data.text.content;
                 cmd->text.base.type = UI_COMMAND_TEXT;
                 cmd->text.base.size = sizeof(UICommandText);
                 cmd->text.color = box->data.text.color;
                 cmd->text.position.x = box->position.x * dpi_scale;
                 cmd->text.position.y = (box->position.y + box->data.text.half_leading + i * box->data.text.line_height) * dpi_scale;
-            }
+            } while (++i < box->data.text.wrapped_lines.len);
         }
         break;
     }
 
     if (box->type == BOX_TYPE_CONTAINER)
-        for (i32 i = 0; i < box->data.container.child_count; i++)
+        for (isize i = 0; i < box->data.container.child_count; i++)
             ui_generate_render_commands(ui_context, box->children[i]);
 }
 
@@ -222,7 +224,7 @@ typedef struct {
     LayoutDirection main_direction;
 } AxisContext;
 
-static AxisContext get_axis_context(UIBox* box, Axis axis)
+static AxisContext get_axis_context(UIBox* box, const Axis axis)
 {
     AxisContext ctx = { 0 };
     if (axis == WIDTH)
@@ -251,11 +253,11 @@ static AxisContext get_axis_context(UIBox* box, Axis axis)
 ///
 
 // Recursively calculate sizes for boxes configured with 'fit' attribute
-static void ui_box_calculate_fit_axis(UIBox* box, Axis axis)
+static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
 {
     // Recursively resolve child box sizes (depth-first, reverse order)
     if (box->type == BOX_TYPE_CONTAINER)
-        for (i32 i = 0; i < box->data.container.child_count; i++)
+        for (isize i = 0; i < box->data.container.child_count; i++)
             ui_box_calculate_fit_axis(box->children[i], axis);
 
     // If the current box is a child, adjust its parent's size based on box direction.
@@ -285,7 +287,7 @@ static void ui_box_calculate_fit_axis(UIBox* box, Axis axis)
 }
 
 // Distribute remaining space proportionally among children that are configured to grow.
-static void grow_axis(f32* remaining, f32* growable[], const i32 growable_count)
+static void grow_axis(f32* remaining, f32* growable[], const isize growable_count)
 {
     while (*remaining > EPSILON && growable_count > 0)
     {
@@ -294,7 +296,7 @@ static void grow_axis(f32* remaining, f32* growable[], const i32 growable_count)
         f32 to_add = 0;
 
         // Find the smallest size and the next smallest size (to determine the increment).
-        for (i32 i = 0; i < growable_count; i++)
+        for (isize i = 0; i < growable_count; i++)
             if (*growable[i] < smallest)
             {
                 second_smallest = smallest;
@@ -314,8 +316,8 @@ static void grow_axis(f32* remaining, f32* growable[], const i32 growable_count)
 
         // If distributing 'to_add' to all 'smallest_count' children would exceed the remaining space,
         // calculate the exact amount that can be distributed equally among them.
-        i32 smallest_count = 0;
-        for (i32 i = 0; i < growable_count; i++)
+        isize smallest_count = 0;
+        for (isize i = 0; i < growable_count; i++)
             if (fabsf(*growable[i] - smallest) < EPSILON)
                 smallest_count++;
         if (to_add * smallest_count > *remaining)
@@ -323,7 +325,7 @@ static void grow_axis(f32* remaining, f32* growable[], const i32 growable_count)
 
         // Apply the calculated 'to_add' amount to all children currently equal to 'smallest',
         // and update the remaining space.
-        for (i32 i = 0; i < growable_count; i++)
+        for (isize i = 0; i < growable_count; i++)
             if (fabsf(*growable[i] - smallest) < EPSILON)
             {
                 *growable[i] += to_add;
@@ -332,7 +334,7 @@ static void grow_axis(f32* remaining, f32* growable[], const i32 growable_count)
     }
 }
 
-void remove_shrinkable(f32* shrinkable[], f32* shrinkable_mins[], int* shrinkable_count, i32 index)
+void remove_shrinkable(f32* shrinkable[], f32* shrinkable_mins[], isize* shrinkable_count, const isize index)
 {
     // Remove the shrinkable at the given index and update the count.
     shrinkable[index] = shrinkable[*shrinkable_count - 1];
@@ -342,7 +344,7 @@ void remove_shrinkable(f32* shrinkable[], f32* shrinkable_mins[], int* shrinkabl
     --(*shrinkable_count);
 }
 
-static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[], int* shrinkable_count)
+static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[], isize* shrinkable_count)
 {
     while (*remaining < -EPSILON && *shrinkable_count > 0)
     {
@@ -351,7 +353,7 @@ static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[
         f32 to_add = 0;
 
         // Find the largest size and the next largest size (to determine the decrement).
-        for (i32 i = 0; i < *shrinkable_count; i++)
+        for (isize i = 0; i < *shrinkable_count; i++)
             if (*shrinkable[i] > largest)
             {
                 second_largest = largest;
@@ -371,8 +373,8 @@ static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[
 
         // If 'to_add' is less than the remaining space, calculate the exact amount
         // that can be distributed equally among them.
-        i32 largest_count = 0;
-        for (i32 i = 0; i < *shrinkable_count; i++)
+        isize largest_count = 0;
+        for (isize i = 0; i < *shrinkable_count; i++)
             if (fabsf(*shrinkable[i] - largest) < EPSILON)
                 largest_count++;
         if (to_add * largest_count < *remaining)
@@ -380,7 +382,7 @@ static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[
 
         // Apply the calculated 'to_add' amount to all children currently equal to 'largest',
         // and update the remaining space.
-        for (i32 i = 0; i < *shrinkable_count; i++)
+        for (isize i = 0; i < *shrinkable_count; i++)
         {
             f32 width_backup = *shrinkable[i];
             f32* child = shrinkable[i];
@@ -399,20 +401,20 @@ static void shrink_axis(f32* remaining, f32* shrinkable[], f32* shrinkable_mins[
 }
 
 // Recursively calculate sizes for boxes configured with 'grow' attribute
-static void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
+static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
 {
     if (box->type != BOX_TYPE_CONTAINER)
         return;
 
-    i32 children_count = box->data.container.child_count;
+    isize children_count = box->data.container.child_count;
     AxisContext ctx = get_axis_context(box, axis);
 
     f32* growable[CHILDREN_SIZE] = { 0 };
-    i32 growable_count = 0;
+    isize growable_count = 0;
 
     f32* shrinkable[CHILDREN_SIZE] = { 0 };
     f32* shrinkable_mins[CHILDREN_SIZE] = { 0 };
-    i32 shrinkable_count = 0;
+    isize shrinkable_count = 0;
 
     // Initialize remaining space (which might be fixed or determined by a
     // parent's 'grow' attribute in a previous pass)
@@ -420,13 +422,13 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
 
     // Subtract padding and child gap
     *ctx.remaining -= ctx.padding_start + ctx.padding_end;
-    i32 child_gap_count = children_count - 1;
+    isize child_gap_count = children_count - 1;
     if (box->config.direction == ctx.main_direction)
         *ctx.remaining -= box->config.child_gap * child_gap_count;
 
     // Subtract the childrens' determined size from the parent's remaining space.
     f32 cross_axis_remainings_min = *ctx.remaining;
-    for (i32 i = 0; i < children_count; i++)
+    for (isize i = 0; i < children_count; i++)
     {
         UIBox* child = box->children[i];
         AxisContext child_ctx = get_axis_context(child, axis);
@@ -460,20 +462,20 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, Axis axis)
     {
         // Cross axis
         if (*ctx.remaining > 0)
-            for (i32 i = 0; i < growable_count; i++)
+            for (isize i = 0; i < growable_count; i++)
                 *growable[i] = max(*growable[i], *ctx.remaining);
         else if (*ctx.remaining < 0)
-            for (i32 i = 0; i < shrinkable_count; i++)
+            for (isize i = 0; i < shrinkable_count; i++)
                 *shrinkable[i] = max(*shrinkable_mins[i], *shrinkable[i] + *ctx.remaining);
 
         if (cross_axis_remainings_min < 0)
-            for (i32 i = 0; i < shrinkable_count; i++)
+            for (isize i = 0; i < shrinkable_count; i++)
                 *shrinkable[i] = max(*shrinkable_mins[i], *shrinkable[i] + cross_axis_remainings_min);
     }
 
     // Recursively resolve size (breadth first)
     if (box->type == BOX_TYPE_CONTAINER)
-        for (i32 i = 0; i < children_count; i++)
+        for (isize i = 0; i < children_count; i++)
             ui_box_grow_shrink_children_axis(box->children[i], axis);
 }
 
@@ -498,34 +500,29 @@ static void ui_box_resolve_position(UIBox* box)
     }
 
     if (box->type == BOX_TYPE_CONTAINER)
-        for (i32 i = 0; i < box->data.container.child_count; i++)
+        for (isize i = 0; i < box->data.container.child_count; i++)
             ui_box_resolve_position(box->children[i]);
 }
 
-static void perform_text_wrapping(UIContext* ui_context, UIBox* text_box)
+static void perform_text_wrapping(UIContext* ui_context, const GlyphCache* glyph_cache, UIBox* text_box)
 {
     String text = text_box->data.text.content;
-    f32 text_width = ui_context->get_text_width(text, ui_context->dpi);
+    f32 text_width = ui_context->get_text_width(glyph_cache, text, ui_context->dpi);
     f32 max_width = text_box->config.sizing.width.value;
     if (text_width <= max_width)
         return;
-
-    // TODO: 1. Don't hard code 64;
-    //       2. Have to free it.
-    text_box->data.text.wrapped_lines = calloc(64, sizeof(text));
 
     isize new_line_idx = 0;
     isize distance_between_line_start_and_newest_space = 0;
     // TODO: don't calculate whole text width in every loop [performance]
     for (isize i = 0; i <= text.len; i++)
     {
-        f32 current_line_width = ui_context->get_text_width(str_slice(text, new_line_idx, i), ui_context->dpi);
+        f32 current_line_width = ui_context->get_text_width(glyph_cache, str_slice(text, new_line_idx, i), ui_context->dpi);
         if (current_line_width > max_width)
         {
             Assert(distance_between_line_start_and_newest_space);
-            i32* line_count = &text_box->data.text.line_count;
             isize end = new_line_idx + distance_between_line_start_and_newest_space;
-            text_box->data.text.wrapped_lines[(*line_count)++ - 1] = str_slice(text, new_line_idx, end);
+            *slice_push(&text_box->data.text.wrapped_lines, &ui_context->arena) = str_slice(text, new_line_idx, end);
             new_line_idx = end + 1;
             distance_between_line_start_and_newest_space = 0;
         }
@@ -533,28 +530,28 @@ static void perform_text_wrapping(UIContext* ui_context, UIBox* text_box)
             distance_between_line_start_and_newest_space = i - new_line_idx;
     }
     // Handle last line
-    text_box->data.text.wrapped_lines[text_box->data.text.line_count - 1] = str_slice(text, new_line_idx, text.len);
+    *slice_push(&text_box->data.text.wrapped_lines, &ui_context->arena) = str_slice(text, new_line_idx, text.len);
 
     // Update box dimensions
-    text_box->config.sizing.height.value = text_box->data.text.line_height * text_box->data.text.line_count;
+    text_box->config.sizing.height.value = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
     text_box->min_size.height = text_box->config.sizing.height.value;
     text_box->min_size.width = max_width;
 }
 
-static void ui_box_apply_text_wrapping(UIContext* ui_context, UIBox* box)
+static void ui_box_apply_text_wrapping(UIContext* ui_context, const GlyphCache* glyph_cache, UIBox* box)
 {
     if (box->type == BOX_TYPE_TEXT)
-        perform_text_wrapping(ui_context, box);
+        perform_text_wrapping(ui_context, glyph_cache, box);
     else if (box->type == BOX_TYPE_CONTAINER)
-        for (i32 i = 0; i < box->data.container.child_count; i++)
-            ui_box_apply_text_wrapping(ui_context, box->children[i]);
+        for (isize i = 0; i < box->data.container.child_count; i++)
+            ui_box_apply_text_wrapping(ui_context, glyph_cache, box->children[i]);
 }
 
-void ui_calculate_layout(UIContext* ui_context, UIBox* box)
+void ui_calculate_layout(UIContext* ui_context, const GlyphCache* glyph_cache, UIBox* box)
 {
     ui_box_calculate_fit_axis(box, WIDTH);
     ui_box_grow_shrink_children_axis(box, WIDTH);
-    ui_box_apply_text_wrapping(ui_context, box);
+    ui_box_apply_text_wrapping(ui_context, glyph_cache, box);
     ui_box_calculate_fit_axis(box, HEIGHT);
     ui_box_grow_shrink_children_axis(box, HEIGHT);
     ui_box_resolve_position(box);

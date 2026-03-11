@@ -87,7 +87,7 @@ void swapchain_resize(const u32 client_width, const u32 client_height)
 // renderer core
 //
 
-void renderer_init(const HWND window)
+void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
 {
     // Create device and context
     {
@@ -190,7 +190,6 @@ void renderer_init(const HWND window)
 
     // Create texture (glyph atlas)
     {
-        GlyphAtlas* glyph_atlas = g_glyph_cache->atlas;
         D3D11_TEXTURE2D_DESC desc = {
             .Width = glyph_atlas->w,
             .Height = glyph_atlas->h,
@@ -257,13 +256,12 @@ void renderer_init(const HWND window)
     }
 }
 
-void renderer_recreate_glyph_atlas_texture()
+void renderer_recreate_glyph_atlas_texture(const GlyphAtlas* glyph_atlas)
 {
     Assert(s_renderer_state.glyph_atlas_texture); // Should we check others?
     ID3D11Texture2D_Release(s_renderer_state.glyph_atlas_texture);
     ID3D11ShaderResourceView_Release(s_renderer_state.glyph_atlas_shader_resource_view);
 
-    GlyphAtlas* glyph_atlas = g_glyph_cache->atlas;
     D3D11_TEXTURE2D_DESC desc = {
         .Width = glyph_atlas->w,
         .Height = glyph_atlas->h,
@@ -428,12 +426,12 @@ void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const C
 // text width & height
 //
 
-f32 renderer_get_text_width_for_dpi(const String text, const u32 dpi)
+f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi)
 {
     f32 text_width = 0;
     for (isize i = 0; i < text.len; i++)
     {
-        Glyph* glyph = &g_glyph_cache->glyphs[text.data[i] - ASCII_START];
+        Glyph* glyph = &glyph_cache->glyphs[text.data[i] - ASCII_START];
         text_width += glyph->xadvance;
     }
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
@@ -442,10 +440,10 @@ f32 renderer_get_text_width_for_dpi(const String text, const u32 dpi)
 
 // TODO: Future support for multiple fonts per line is planned. This will require calculating text height
 // based on varying font line spaces rather than relying on a single font's line space.
-f32 renderer_get_text_height_for_dpi(const String text, const u32 dpi)
+f32 renderer_get_text_height_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi)
 {
     Assert(text.len);
-    Glyph* glyph = &g_glyph_cache->glyphs[text.data[0] - ASCII_START];
+    Glyph* glyph = &glyph_cache->glyphs[text.data[0] - ASCII_START];
     return glyph->font->size;
 }
 
@@ -453,7 +451,7 @@ f32 renderer_get_text_height_for_dpi(const String text, const u32 dpi)
 // draw
 //
 
-void renderer_draw_rect(const Rect rect, const Color color, const RectStyle style)
+void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style)
 {
     // Calculate expanded rect
     Rect expanded_rect = rect;
@@ -475,7 +473,7 @@ void renderer_draw_rect(const Rect rect, const Color color, const RectStyle styl
         expanded_rect.ymax += 14;
     }
 
-    Glyph* glyph_white = &g_glyph_cache->glyphs[GLYPHS_LENGTH - 1];
+    Glyph* glyph_white = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
     Rect glyph_white_rect = {
         .xmin = (f32)glyph_white->atlas_x,
         .ymin = (f32)glyph_white->atlas_y,
@@ -485,17 +483,17 @@ void renderer_draw_rect(const Rect rect, const Color color, const RectStyle styl
     renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
 }
 
-void renderer_draw_text(String text, const Position position, const Color color, const u32 dpi)
+void renderer_draw_text(const GlyphCache* glyph_cache, String text, const Position position, const Color color, const u32 dpi)
 {
     f32 next_position_x = position.x;
 
     // Get physical pixel position of y
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
-    f32 position_y = position.y + renderer_get_text_height_for_dpi(text, dpi) * dpi_scale;
+    f32 position_y = position.y + renderer_get_text_height_for_dpi(glyph_cache, text, dpi) * dpi_scale;
 
     for (isize i = 0; i < text.len; i++)
     {
-        Glyph* glyph = &g_glyph_cache->glyphs[text.data[i] - ASCII_START];
+        Glyph* glyph = &glyph_cache->glyphs[text.data[i] - ASCII_START];
         Rect target_rect = {
             .xmin = next_position_x + (f32)glyph->xoff,
             .ymin = position_y + (f32)glyph->yoff,

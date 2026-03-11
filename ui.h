@@ -1,5 +1,6 @@
 #pragma once
 #include "lib.h"
+#include "glyph_cache.h"
 #include "string.h"
 
 // clang-format off
@@ -125,15 +126,22 @@ typedef struct
     Size remaining_space;
     f32 next_child_offset_x;
     f32 next_child_offset_y;
-    i32 child_count;
+    isize child_count;
 } ContainerData;
+
+typedef struct
+{
+    String* data;
+    isize len;
+    isize capacity;
+} StringSlice;
 
 typedef struct
 {
     String content;
     Color color;
-    String* wrapped_lines;
-    i32 line_count;
+    StringSlice wrapped_lines;
+    isize line_count;
     f32 line_height;
     f32 half_leading;
 } TextData;
@@ -158,26 +166,27 @@ struct UIBox
 
 typedef struct
 {
+    Arena arena;
     u32 dpi;
     u32 client_width; // logic client width
     u32 client_height; // logic client height
     void (*on_resize)(const u32 client_width, const u32 client_height);
-    f32 (*get_text_width)(String text, const u32 dpi);
-    f32 (*get_text_height)(String text, const u32 dpi);
-    Queue(UICommand, COMMAND_QUEUE_SIZE) ui_command_queue;
+    f32 (*get_text_width)(const GlyphCache* glyph_cache, const String text, const u32 dpi);
+    f32 (*get_text_height)(const GlyphCache* glyph_cache, const String text, const u32 dpi);
+    Queue(UICommand, COMMAND_QUEUE_SIZE) command_queue;
 } UIContext;
 
 ///
 
 void ui_reset(UIContext* ui_context);
-UIBox* ui_box_start(BoxConfig* config);
+UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
 UIBox* ui_box_get_root();
 
-void ui_calculate_layout(UIContext* ui_context, UIBox* box);
-void ui_generate_render_commands(UIContext* ui_context, UIBox* box);
+void ui_calculate_layout(UIContext* ui_context, const GlyphCache* glyph_cache, UIBox* box);
+void ui_generate_render_commands(UIContext* ui_context, const UIBox* box);
 
-UIBox* ui_text(UIContext* ui_context, String text, TextConfig* text_config);
+UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const String text, const TextConfig* text_config);
 
 ///
 

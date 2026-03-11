@@ -25,6 +25,11 @@ typedef int32_t       b32; // bool
 
 ///
 
+#define KB(x) ((x) << 10)
+#define MB(x) ((x) << 20)
+#define GB(x) ((x) << 30)
+#define TB(x) ((u64)(x) << 40llu)
+
 #define Assert(cond)                                                                                                   \
     do                                                                                                                 \
     {                                                                                                                  \
@@ -32,9 +37,29 @@ typedef int32_t       b32; // bool
             __debugbreak();                                                                                            \
     } while (0)
 
+/**
+ * Aligns value x up to the next multiple of b (which must be a power of two)
+ * 
+ * How it works:
+ * - For a power of two b, its binary form is 1000... (1 followed by zeros)
+ * - (b - 1) creates a low-bit mask (e.g., b=8 => b-1=0b0111)
+ * - ~(b - 1) creates a high-bit mask that clears lower bits
+ * - Adding (b - 1) before masking rounds up instead of down
+ * 
+ * Example with x=13, b=8:
+ *   x + b - 1 = 20 (0b10100)
+ *   ~(b - 1)  = ~7 = 0b...11111000
+ *   20 & (~7) = 16 (0b10000)
+ * 
+ * @param x Value to align (should be unsigned integer)
+ * @param b Alignment boundary (must be power of two)
+ * @return Smallest multiple of b that is >= x
+ */
+#define AlignUpPow2(x, b) (((x) + (b) - 1) & (~((b) - 1)))
+
 // clang-format off
-#define Queue(type, size) struct { type items[size]; size_t count; }
-#define Stack(type, size) struct { type items[size]; size_t depth; }
+#define Queue(type, size) struct { type items[size]; isize count; }
+#define Stack(type, size) struct { type items[size]; isize depth; }
 // clang-format on
 
 ///

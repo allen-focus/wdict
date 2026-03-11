@@ -1,4 +1,5 @@
 #include "pch.h" // IWYU pragma: keep
+#include "arena.h"
 #include "glyph_cache.h"
 #include "lib.h"
 #include "renderer.h"
@@ -9,7 +10,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <wchar.h>
 #include <winuser.h>
 
@@ -18,20 +18,16 @@
 #define CLIENT_WIDTH  800
 #define CLIENT_HEIGHT 400
 
-#define MAX_WINDOW_TITLE_LENGTH 64
+#define MAX_TITLE_LENGTH 64
 
 ///
 
 typedef struct
 {
-    UIContext* ui_context;
+    wchar_t title[MAX_TITLE_LENGTH];
+    UIContext ui;
+    GlyphCache glyph_cache;
 } AppContext;
-
-///
-
-GlyphCache* g_glyph_cache;
-
-static wchar_t s_window_title[MAX_WINDOW_TITLE_LENGTH] = L"windows title";
 
 /// Temp
 
@@ -66,8 +62,10 @@ f32 child_gap_small = 5;
 
 ///
 
-static void process_frame(UIContext* ui_context)
+static void process_frame(AppContext* app_context)
 {
+    UIContext* ui_context = &app_context->ui;
+    GlyphCache* glyph_cache = &app_context->glyph_cache;
     ui_reset(ui_context);
 
     ui_box({ .sizing = { fixed((f32)ui_context->client_width), fixed((f32)ui_context->client_height) },
@@ -92,9 +90,9 @@ static void process_frame(UIContext* ui_context)
                      .child_gap = 0,
                      .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = grey, .rect_style = normal_rect_style, .padding = { 0 }, .child_gap = 0 }) { }
-                ui_text(ui_context, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black, .line_height = 0.f });
-                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = grey, .rect_style = normal_rect_style, .padding = { 0 }, .child_gap = 0 }) { }
+                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = grey }) { }
+                ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart. Here is       to    you."), &(TextConfig){ .color = black });
+                ui_box({ .sizing = { fit_grow(0), fixed(2) }, .color = grey }) { }
             }
             ui_box({ .sizing = { fixed(50), fit_grow(0) }, .color = blue, .rect_style = normal_rect_style }) { }
         }
@@ -103,32 +101,34 @@ static void process_frame(UIContext* ui_context)
     //
 
     UIBox* root = ui_box_get_root();
-    ui_calculate_layout(ui_context, root);
+    ui_calculate_layout(ui_context, glyph_cache, root);
     ui_generate_render_commands(ui_context, root);
 
     // Draw
-    for (i32 i = 0; i < ui_context->ui_command_queue.count; i++)
+    for (isize i = 0; i < ui_context->command_queue.count; i++)
     {
-        UICommand* cmd = &ui_context->ui_command_queue.items[i];
+        UICommand* cmd = &ui_context->command_queue.items[i];
         switch (cmd->type)
         {
             case UI_COMMAND_RECT:
-                renderer_draw_rect(cmd->rect.rect, cmd->rect.color, cmd->rect.style);
+                renderer_draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
                 break;
             case UI_COMMAND_TEXT:
-                renderer_draw_text(cmd->text.content, cmd->text.position, cmd->text.color, ui_context->dpi);
+                renderer_draw_text(glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, ui_context->dpi);
                 break;
             default:
                 Assert(0);
         }
     }
+    arena_pop_to(&ui_context->arena, 0);
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
 {
+    AppContext* app_context = NULL;
     UIContext* ui_context = NULL;
+    GlyphCache* glyph_cache = NULL;
     {
-        AppContext* app_context = NULL;
         if (message == WM_CREATE)
         {
             CREATESTRUCT* create = (CREATESTRUCT*)(lparam);
@@ -142,7 +142,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         }
 
         if (app_context)
-            ui_context = app_context->ui_context;
+        {
+            ui_context = &app_context->ui;
+            glyph_cache = &app_context->glyph_cache;
+        }
     }
 
     switch (message)
@@ -158,7 +161,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 QueryPerformanceFrequency(&frequency);
                 QueryPerformanceCounter(&starting_time);
 #endif
-                process_frame(ui_context);
+                process_frame(app_context);
 
                 f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
                 u32 physical_client_width = (u32)(ui_context->client_width * dpi_scale);
@@ -171,9 +174,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 elapsed_microseconds.QuadPart /= frequency.QuadPart;
 
                 // Set window title to show frame time
-                swprintf(s_window_title, MAX_WINDOW_TITLE_LENGTH, L"Frame Time: %lld μs",
-                         elapsed_microseconds.QuadPart);
-                SetWindowTextW(window, s_window_title);
+                swprintf(app_context->title, MAX_TITLE_LENGTH, L"Frame Time: %lld μs", elapsed_microseconds.QuadPart);
+                SetWindowTextW(window, app_context->title);
 #endif
             }
             EndPaint(window, &ps);
@@ -206,12 +208,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_context->dpi = GetDpiForWindow(window);
 
             // Reinit glyph cache
-            glyph_cache_deinit(g_glyph_cache);
-            g_glyph_cache = malloc(sizeof(GlyphCache));
-            glyph_cache_init_and_fill(window, g_glyph_cache, L"Segoe UI Symbol", ui_context->dpi);
+            glyph_cache_deinit(glyph_cache);
+            glyph_cache_init_and_fill(glyph_cache, L"Segoe UI Symbol", ui_context->dpi);
 
             // Recreate glyph atlas texture
-            renderer_recreate_glyph_atlas_texture();
+            renderer_recreate_glyph_atlas_texture(&glyph_cache->atlas);
 
             // Set new window
             RECT* const suggested_rect = (RECT*)lparam;
@@ -234,24 +235,40 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
     // Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607)
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // Init ui_context
-    UIContext* ui_context = malloc(sizeof(UIContext));
-    {
-        ui_context->dpi = GetDpiForSystem();
-        ui_context->client_width = CLIENT_WIDTH;
-        ui_context->client_height = CLIENT_HEIGHT;
-        ui_context->on_resize = swapchain_resize;
-        ui_context->get_text_width = renderer_get_text_width_for_dpi;
-        ui_context->get_text_height = renderer_get_text_height_for_dpi;
-        memset(&ui_context->ui_command_queue, 0, sizeof(ui_context->ui_command_queue));
-    }
+    // Init context
+    AppContext app_context = { 
+        .title = L"App Title",
+        .ui = {
+            .arena = arena_new(MB(16)),
+            .dpi = GetDpiForSystem(),
+            .client_width = CLIENT_WIDTH,
+            .client_height = CLIENT_HEIGHT,
+            .on_resize = swapchain_resize,
+            .get_text_width = renderer_get_text_width_for_dpi,
+            .get_text_height = renderer_get_text_height_for_dpi,
+            .command_queue = { 0 },
+        },
+        .glyph_cache = {
+            .arena = arena_new(MB(32)),
+            .font = { 0 },
+            .glyphs = NULL,
+            .atlas = {
+                .w = GLYPH_ATLAS_WIDTH,
+                .h = GLYPH_ATLAS_HEIGHT,
+                .bitmap = NULL,
+                .next_x = 0,
+                .next_y = 0,
+                .maxy = 0,
+            }
+        }
+    };
 
     // Create window
     HWND window;
     {
-        f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
-        u32 physical_client_width = (u32)(ui_context->client_width * dpi_scale);
-        u32 physical_client_height = (u32)(ui_context->client_height * dpi_scale);
+        f32 dpi_scale = (f32)app_context.ui.dpi / USER_DEFAULT_SCREEN_DPI;
+        u32 physical_client_width = (u32)(app_context.ui.client_width * dpi_scale);
+        u32 physical_client_height = (u32)(app_context.ui.client_height * dpi_scale);
 
         // Set the client position to screen center
         i32 screen_width = GetSystemMetrics(SM_CXSCREEN);
@@ -273,16 +290,13 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
         RegisterClassW(&wc);
 
         // Create window with user data
-        AppContext* app_context = malloc(sizeof(AppContext));
-        app_context->ui_context = ui_context;
-        window = CreateWindowExW(0, wc.lpszClassName, s_window_title, window_style, rect.left, rect.top,
-                                 rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, app_context);
+        window = CreateWindowExW(0, wc.lpszClassName, app_context.title, window_style, rect.left, rect.top,
+                                 rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
     }
 
     // Initialize glyph cache & renderer
-    g_glyph_cache = malloc(sizeof(GlyphCache));
-    glyph_cache_init_and_fill(window, g_glyph_cache, L"Segoe UI Symbol", ui_context->dpi);
-    renderer_init(window);
+    glyph_cache_init_and_fill(&app_context.glyph_cache, L"Segoe UI Symbol", app_context.ui.dpi);
+    renderer_init(window, &app_context.glyph_cache.atlas);
 
     // Show window
     ShowWindow(window, SW_SHOWDEFAULT);
@@ -297,8 +311,10 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 
     // Clean
     renderer_deinit();
-    glyph_cache_deinit(g_glyph_cache);
-    free(ui_context);
+    glyph_cache_deinit(&app_context.glyph_cache);
+
+    arena_release(&app_context.ui.arena);
+    arena_release(&app_context.glyph_cache.arena);
 
     return 0;
 }
