@@ -60,6 +60,7 @@ typedef int32_t       b32; // bool
 // clang-format off
 #define Queue(type, size) struct { type items[size]; isize count; }
 #define Stack(type, size) struct { type items[size]; isize depth; }
+#define Slice(type)       struct { type* data; isize len; isize capacity; }
 // clang-format on
 
 ///

@@ -137,16 +137,9 @@ typedef struct
 
 typedef struct
 {
-    String* data;
-    isize len;
-    isize capacity;
-} StringSlice;
-
-typedef struct
-{
     String content;
     Color color;
-    StringSlice wrapped_lines;
+    Slice(String) wrapped_lines;
     isize line_count;
     f32 line_height;
     f32 half_leading;
@@ -160,12 +153,17 @@ struct UIBox
         ContainerData container;
         TextData text;
     } data;
+
     BoxType type;
     BoxConfig config;
     Position position;
     Size size;
+
     UIBox* parent;
-    UIBox* children[CHILDREN_SIZE];
+    UIBox* prev;
+    UIBox* next;
+    UIBox* child_first;
+    UIBox* child_last;
 };
 
 // Context -----------------------------
