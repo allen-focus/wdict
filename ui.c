@@ -28,9 +28,9 @@ static Stack(UIBox*, STACK_SIZE) ui_box_stack = { 0 };
 // Helper
 // -----------------------------------------------------------------------------
 
-static b32 axis_has_fit_attribute(const SizingAxis axis)
+static b32 axis_has_fit_attribute(const SizingMode mode)
 {
-    return axis.mode == SIZING_MODE_FIT || axis.mode == SIZING_MODE_FIT_GROW;
+    return mode == SIZING_MODE_FIT || mode == SIZING_MODE_FIT_GROW;
 }
 
 // -----------------------------------------------------------------------------
@@ -89,32 +89,6 @@ UIBox* ui_box_start( const BoxConfig* config)
 
 void ui_box_end(UIBox* box)
 {
-    if (box->type == BOX_TYPE_CONTAINER)
-    {
-        // 'FIT/FIT_GROW' sizing mode axis
-        isize child_gap_count = box->data.container.child_count - 1;
-        if (axis_has_fit_attribute(box->config.sizing.width))
-        {
-            box->size.width += box->config.padding.left + box->config.padding.right;
-            box->config.sizing.width.min_max.min += box->config.padding.left + box->config.padding.right;
-            if (box->config.direction == LAYOUT_LEFT_TO_RIGHT)
-            {
-                box->size.width += box->config.child_gap * child_gap_count;
-                box->config.sizing.width.min_max.min += box->config.child_gap * child_gap_count;
-            }
-        }
-        if (axis_has_fit_attribute(box->config.sizing.height))
-        {
-            box->size.height += box->config.padding.top + box->config.padding.bottom;
-            box->config.sizing.height.min_max.min += box->config.padding.top + box->config.padding.bottom;
-            if (box->config.direction == LAYOUT_TOP_TO_BOTTOM)
-            {
-                box->size.height += box->config.child_gap * child_gap_count;
-                box->config.sizing.height.min_max.min += box->config.child_gap * child_gap_count;
-            }
-        }
-    }
-
     ui_box_stack.items[ui_box_stack.depth--] = NULL;
 }
 
@@ -229,7 +203,7 @@ typedef struct {
     f32* remaining;
     f32 padding_start;
     f32 padding_end;
-    SizingAxis* sizing_axis;
+    SizingMode sizing_mode;
     LayoutDirection main_direction;
 } AxisContext;
 
@@ -243,7 +217,7 @@ static AxisContext get_axis_context(UIBox* box, const Axis axis)
         ctx.remaining = &box->data.container.remaining_space.width;
         ctx.padding_start = box->config.padding.left;
         ctx.padding_end = box->config.padding.right;
-        ctx.sizing_axis = &box->config.sizing.width;
+        ctx.sizing_mode = box->config.sizing.width.mode;
         ctx.main_direction = LAYOUT_LEFT_TO_RIGHT;
     }
     else
@@ -253,7 +227,7 @@ static AxisContext get_axis_context(UIBox* box, const Axis axis)
         ctx.remaining = &box->data.container.remaining_space.height;
         ctx.padding_start = box->config.padding.top;
         ctx.padding_end = box->config.padding.bottom;
-        ctx.sizing_axis = &box->config.sizing.height;
+        ctx.sizing_mode = box->config.sizing.height.mode;
         ctx.main_direction = LAYOUT_TOP_TO_BOTTOM;
     }
     return ctx;
@@ -264,6 +238,22 @@ static AxisContext get_axis_context(UIBox* box, const Axis axis)
 // Recursively calculate sizes for boxes configured with 'fit' attribute
 static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
 {
+    AxisContext box_ctx = get_axis_context(box, axis);
+
+    f32 box_axis_min_size_backup = *box_ctx.min_size;
+    if (axis_has_fit_attribute(box_ctx.sizing_mode))
+    {
+        isize child_gap_count = box->data.container.child_count - 1;
+        *box_ctx.size += box_ctx.padding_start + box_ctx.padding_end;
+        *box_ctx.min_size = 0;
+        *box_ctx.min_size += box_ctx.padding_start + box_ctx.padding_end;
+        if (box->config.direction == box_ctx.main_direction)
+        {
+            *box_ctx.size += box->config.child_gap * child_gap_count;
+            *box_ctx.min_size += box->config.child_gap * child_gap_count;
+        }
+    }
+
     // Recursively resolve child box sizes (depth-first, reverse order)
     if (box->type == BOX_TYPE_CONTAINER)
     {
@@ -275,24 +265,25 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
         }
     }
 
+    // Select a bigger min size if box axis has both fit attribute and min size config
+    if (axis_has_fit_attribute(box_ctx.sizing_mode))
+        if (box_axis_min_size_backup > *box_ctx.min_size)
+            *box_ctx.min_size = box_axis_min_size_backup;
+
     // If the current box is a child, adjust its parent's size based on box direction.
     UIBox* parent = box->parent;
     if (parent)
     {
         AxisContext parent_ctx = get_axis_context(parent, axis);
-        AxisContext box_ctx = get_axis_context(box, axis);
-
-        if (axis_has_fit_attribute(*parent_ctx.sizing_axis))
+        if (axis_has_fit_attribute(parent_ctx.sizing_mode))
         {
             if (parent->config.direction == parent_ctx.main_direction)
             {
-                // Main axis: accumulate children sizes
                 *parent_ctx.size += *box_ctx.size;
                 *parent_ctx.min_size += *box_ctx.min_size;
             }
             else
             {
-                // Cross axis: take maximum of children sizes
                 f32 padding = parent_ctx.padding_start + parent_ctx.padding_end;
                 *parent_ctx.size = max(*box_ctx.size + padding, *parent_ctx.size);
                 *parent_ctx.min_size = max(*box_ctx.min_size + padding, *parent_ctx.min_size);
@@ -454,7 +445,7 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
         while (child)
         {
             AxisContext child_ctx = get_axis_context(child, axis);
-            if (child_ctx.sizing_axis->mode == SIZING_MODE_FIT_GROW)
+            if (child_ctx.sizing_mode == SIZING_MODE_FIT_GROW)
                 *slice_push(&growables, &ui_context->arena) = child_ctx.size;
 
             if (*child_ctx.size > *child_ctx.min_size)
@@ -466,7 +457,6 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
         }
         if (box->config.direction == ctx.main_direction)
         {
-            // Main axis
             if (*ctx.remaining > 0)
                 grow_axis(ctx.remaining, &growables);
             else if (*ctx.remaining < 0)
@@ -474,11 +464,9 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
         }
         else
         {
-            // Cross axis
             if (*ctx.remaining > 0)
                 for (isize i = 0; i < growables.len; i++)
                     *growables.data[i] = max(*growables.data[i], *ctx.remaining);
-
             if (cross_axis_remainings_min < 0)
                 for (isize i = 0; i < shrinkables.len; i++)
                     if (*ctx.remaining < *shrinkables.data[i])

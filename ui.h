@@ -10,6 +10,18 @@
          ui_box_end(box), box = NULL)
 // clang-format on
 
+// NOTE: In FIT mode, min/max constraints act as bounds on content wrapping:
+// They define the range within which content can shrink or expand due to wrapping,
+// but do not override the content's natural size if it falls outside this range.
+//
+// Example 1: Parent width = fit({ .min = 100, .max = 300 }), child is text with 400 width
+//   → The parent can be sized down to 100 (text wraps at that point), 
+//     and can grow up to 300 before wrapping stops. The text's intrinsic width (400)
+//     is constrained within this range for wrapping behavior.
+//
+// Example 2: Parent width = fit({ .min = 100, .max = 300 }), child is a fixed 50-width box
+//   → The parent width becomes 50, ignoring the .min constraint,
+//     because FIT mode adapts to the child's size when it's smaller than the min bound.
 #define fixed(value)  { { value, value }, SIZING_MODE_FIXED }
 #define fit(...)      { __VA_ARGS__, SIZING_MODE_FIT }
 #define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }

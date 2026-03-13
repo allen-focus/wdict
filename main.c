@@ -19,6 +19,8 @@
 #define CLIENT_HEIGHT 400
 
 #define MAX_TITLE_LENGTH 64
+#define FONT_FAMILY L"Segoe UI Symbol"
+#define FONT_SIZE 12
 
 ///
 
@@ -31,17 +33,9 @@ typedef struct
 
 /// Temp
 
-RectStyle background_rect_style = {
-    .border_color = { 0, 0, 0, 0 }, .corner_radius = 0, .border_thickness = 0, .enable_shadow = false
-};
-
-RectStyle normal_rect_style = {
-    .border_color = { 0, 0, 0, 0 }, .corner_radius = 12, .border_thickness = 0, .enable_shadow = false
-};
-
-RectStyle full_rect_style = {
-    .border_color = { 255, 255, 255, 255 }, .corner_radius = 12, .border_thickness = 4, .enable_shadow = true
-};
+RectStyle background_rect_style = { .border_color = { 0, 0, 0, 0 }, .corner_radius = 0, .border_thickness = 0, .enable_shadow = false };
+RectStyle normal_rect_style = { .border_color = { 0, 0, 0, 0 }, .corner_radius = 12, .border_thickness = 0, .enable_shadow = false };
+RectStyle full_rect_style = { .border_color = { 255, 255, 255, 255 }, .corner_radius = 12, .border_thickness = 4, .enable_shadow = true };
 
 Color black = { 0, 0, 0, 255 };
 Color grey = { 128, 128, 128, 255 };
@@ -82,25 +76,57 @@ static void process_frame(AppContext* app_context)
                  .child_gap = child_gap_big,
                  .direction = LAYOUT_LEFT_TO_RIGHT })
         {
-            ui_box({ .sizing = { fixed(200), fit_grow({}) }, .color = blue, .rect_style = full_rect_style }) {}
+            ui_box({ .sizing = { fixed(180), fit_grow({}) },
+                     .color = blue,
+                     .rect_style = full_rect_style,
+                     .padding = padding_medium,
+                     .child_gap = child_gap_medium,
+                     .direction = LAYOUT_LEFT_TO_RIGHT }) 
+            {
+                ui_box({ .sizing = { fixed(40), fixed(40) }, .color = white }) {}
+                ui_box({ .sizing = { fixed(40), fit({}) },
+                         .color = white,
+                         .padding = padding_small,
+                         .child_gap = child_gap_small,
+                         .direction = LAYOUT_TOP_TO_BOTTOM }) 
+                {
+                    ui_box({ .sizing = { fixed(10), fixed(35) }, .color = green }) {}
+                    ui_box({ .sizing = { fixed(10), fixed(35) }, .color = green }) {}
+                }
+                ui_box({ .sizing = { fixed(40), fit_grow({}) }, .color = white }) {}
+            }
             ui_box({ .sizing = { fit({}), fit({}) },
-                     .color = white,
+                     .color = blue,
                      .rect_style = normal_rect_style,
                      .padding = padding_medium,
-                     .child_gap = 0,
+                     .child_gap = child_gap_medium,
                      .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black });
+                ui_box({ .sizing = { fit_grow({ .min = 200 }), fit({}) },
+                         .color = white,
+                         .padding = padding_small,
+                         .child_gap = child_gap_small,
+                         .direction = LAYOUT_TOP_TO_BOTTOM })
+                {
+                    ui_text(ui_context, glyph_cache, str("Hello world"), &(TextConfig){ .color = red });
+                    ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black });
+                    ui_text(ui_context, glyph_cache, str("Bye"), &(TextConfig){ .color = green });
+                }
+                ui_box({ .sizing = { fit_grow({}), fit_grow({}) } })
+                {
+                    ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = white }) {}
+                    ui_box({ .sizing = { fixed(50), fixed(50) }, .color = green }) {}
+                }
             }
             ui_box({ .sizing = { fit({}), fit_grow({}) }, 
-                    .color = blue, 
-                    .rect_style = normal_rect_style,
-                    .padding = padding_small,
-                    .child_gap = child_gap_small,
-                    .direction = LAYOUT_TOP_TO_BOTTOM }) 
+                     .color = blue, 
+                     .rect_style = normal_rect_style,
+                     .padding = padding_medium,
+                     .child_gap = child_gap_medium,
+                     .direction = LAYOUT_TOP_TO_BOTTOM }) 
             { 
-                ui_box({ .sizing = { fixed(30), fixed(30) }, .color = white, .rect_style = normal_rect_style}) {}
-                ui_box({ .sizing = { fixed(30), fixed(30) }, .color = white, .rect_style = normal_rect_style}) {}
+                ui_box({ .sizing = { fit_grow({}), fixed(30) }, .color = white }) {}
+                ui_box({ .sizing = { fixed(30), fixed(30) }, .color = white }) {}
             }
         }
     }
@@ -132,6 +158,7 @@ static void process_frame(AppContext* app_context)
 
 static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
 {
+    // Read passing data from param
     AppContext* app_context = NULL;
     UIContext* ui_context = NULL;
     GlyphCache* glyph_cache = NULL;
@@ -155,6 +182,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         }
     }
 
+    // Handle message
     switch (message)
     {
         case WM_PAINT:
@@ -216,7 +244,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
             // Reinit glyph cache
             glyph_cache_deinit(glyph_cache);
-            glyph_cache_init_and_fill(glyph_cache, L"Segoe UI Symbol", ui_context->dpi);
+            glyph_cache_init_and_fill(glyph_cache, FONT_FAMILY, FONT_SIZE, ui_context->dpi);
 
             // Recreate glyph atlas texture
             renderer_recreate_glyph_atlas_texture(&glyph_cache->atlas);
@@ -302,10 +330,9 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
     }
 
     // Initialize glyph cache & renderer
-    glyph_cache_init_and_fill(&app_context.glyph_cache, L"Segoe UI Symbol", app_context.ui.dpi);
+    glyph_cache_init_and_fill(&app_context.glyph_cache, FONT_FAMILY, FONT_SIZE, app_context.ui.dpi);
     renderer_init(window, &app_context.glyph_cache.atlas);
 
-    // Show window
     ShowWindow(window, SW_SHOWDEFAULT);
 
     // Run message loop

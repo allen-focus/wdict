@@ -9,8 +9,6 @@
 #define GLYPH_ATLAS_WIDTH  1024
 #define GLYPH_ATLAS_HEIGHT 1024
 
-#define FONT_SIZE 16
-
 #define ASCII_START   32
 #define GLYPHS_LENGTH (127 - ASCII_START + 1 + 1) // ascii glyphs ([32, 126]) plus a close icon glyph and a white region
 
@@ -57,4 +55,4 @@ typedef struct
 ///
 
 void glyph_cache_deinit(GlyphCache* glyph_cache);
-void glyph_cache_init_and_fill(GlyphCache* glyph_cache, const wchar_t* font_family, const u32 dpi);
+void glyph_cache_init_and_fill(GlyphCache* glyph_cache, const wchar_t* font_family, const f32 font_size, const u32 dpi);

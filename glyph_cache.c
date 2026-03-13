@@ -215,7 +215,7 @@ static void glyph_cache_pack_codepoints(GlyphCache* glyph_cache, IDWriteFactory3
 // TODO: Currently only include ASCII characters, custom icons from a specified font, and a small
 // white region to render solid-colored rectangles.
 // TODO: Need to handle multiple fonts
-void glyph_cache_init_and_fill(GlyphCache* glyph_cache, const wchar_t* font_family, const u32 dpi)
+void glyph_cache_init_and_fill(GlyphCache* glyph_cache, const wchar_t* font_family, const f32 font_size, const u32 dpi)
 {
     glyph_cache_init(glyph_cache, GLYPHS_LENGTH);
 
@@ -223,7 +223,7 @@ void glyph_cache_init_and_fill(GlyphCache* glyph_cache, const wchar_t* font_fami
     IDWriteFactory3* dwrite_factory = NULL;
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (void**)&dwrite_factory);
 
-    font_init(&glyph_cache->font, dwrite_factory, font_family, FONT_SIZE);
+    font_init(&glyph_cache->font, dwrite_factory, font_family, font_size);
 
     // Pack ascii & icons glyphs
     u32 codepoints[GLYPHS_LENGTH - 1];
