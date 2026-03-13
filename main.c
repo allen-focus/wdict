@@ -48,6 +48,7 @@ Padding padding_bigger = { 50, 50, 50, 50 };
 Padding padding_big = { 30, 30, 30, 30 };
 Padding padding_medium = { 20, 20, 20, 20 };
 Padding padding_small = { 10, 10, 10, 10 };
+Padding padding_smaller = { 5, 5, 5, 5 };
 
 f32 child_gap_bigger = 30;
 f32 child_gap_big = 20;
@@ -95,27 +96,35 @@ static void process_frame(AppContext* app_context)
                 }
                 ui_box({ .sizing = { fixed(40), fit_grow({}) }, .color = white }) {}
             }
-            ui_box({ .sizing = { fit({}), fit({}) },
+            ui_box({ .sizing = { fit_grow({}), fit_grow({ .max = 300 }) },
                      .color = blue,
                      .rect_style = normal_rect_style,
                      .padding = padding_medium,
                      .child_gap = child_gap_medium,
                      .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_box({ .sizing = { fit_grow({ .min = 200 }), fit({}) },
-                         .color = white,
-                         .padding = padding_small,
-                         .child_gap = child_gap_small,
-                         .direction = LAYOUT_TOP_TO_BOTTOM })
+                ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = child_gap_medium })
                 {
-                    ui_text(ui_context, glyph_cache, str("Hello world"), &(TextConfig){ .color = red });
-                    ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black });
-                    ui_text(ui_context, glyph_cache, str("Bye"), &(TextConfig){ .color = green });
+                    ui_box({ .sizing = { fit_grow({ .min = 200, .max = 300 }), fit({}) },
+                             .color = white,
+                             .padding = padding_small,
+                             .child_gap = child_gap_small,
+                             .direction = LAYOUT_TOP_TO_BOTTOM })
+                    {
+                        ui_text(ui_context, glyph_cache, str("Hello world"), &(TextConfig){ .color = red });
+                        ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black });
+                        ui_text(ui_context, glyph_cache, str("Bye"), &(TextConfig){ .color = green });
+                    }
+                    ui_box({ .sizing = { fit_grow({}), fit_grow({}) }, .color = white, .padding = padding_smaller })
+                    {
+                        ui_box({ .sizing = { fit_grow({}), fit_grow({}) }, .color = red }) {}
+                        ui_box({ .sizing = { fixed(50), fit_grow({}) }, .color = green }) {}
+                    }
                 }
-                ui_box({ .sizing = { fit_grow({}), fit_grow({}) } })
+                ui_box({ .sizing = { fit_grow({}), fit_grow({}) }, .color = white, .padding = padding_smaller })
                 {
-                    ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = white }) {}
-                    ui_box({ .sizing = { fixed(50), fixed(50) }, .color = green }) {}
+                    ui_box({ .sizing = { fit_grow({}), fit_grow({}) }, .color = grey }) {}
+                    ui_box({ .sizing = { fit_grow({}), fit_grow({}) }, .color = black }) {}
                 }
             }
             ui_box({ .sizing = { fit({}), fit_grow({}) }, 

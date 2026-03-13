@@ -88,7 +88,7 @@ typedef struct
 {
     f32 min;
     f32 max;
-} SizingMinMax;
+} MinMax;
 
 typedef enum
 {
@@ -99,7 +99,7 @@ typedef enum
 
 typedef struct
 {
-    SizingMinMax min_max;
+    MinMax min_max;
     SizingMode mode;
 } SizingAxis;
 
