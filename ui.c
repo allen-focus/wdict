@@ -251,8 +251,6 @@ static AxisContext get_axis_context(UIBox* box, const Axis axis)
     return ctx;
 }
 
-///
-
 // Recursively calculate sizes for boxes configured with 'fit' attribute
 static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
 {
@@ -318,119 +316,70 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
     }
 }
 
-// -----------------------------------------------------------------------------
-
-// Distribute remaining space proportionally among children that are configured to grow.
-static void grow_axis(f32* remaining, F32PtrSlice* growables, F32PtrSlice* growable_maxs)
+typedef enum
 {
-    while (*remaining > EPSILON && growables->len > 0)
+    GROW,
+    SHRINK
+} DistributeMode;
+
+static void distribute_axis(f32* remaining, F32PtrSlice* items, F32PtrSlice* limits, const DistributeMode mode)
+{
+    while ((mode == GROW && *remaining > EPSILON) || (mode == SHRINK && *remaining < -EPSILON))
     {
-        f32 smallest = **growables->data;
-        f32 second_smallest = INFINITY;
+        if (items->len == 0)
+            break;
+
+        f32 pivot = *items->data[0];
+        f32 second_pivot = mode == GROW ? INFINITY : 0;
         f32 to_add = 0;
 
-        // Find the smallest size and the next smallest size (to determine the increment).
-        for (isize i = 0; i < growables->len; i++)
-            if (*growables->data[i] < smallest)
-            {
-                second_smallest = smallest;
-                smallest = *growables->data[i];
-                to_add = second_smallest - smallest;
-            }
-            else if (*growables->data[i] > smallest)
-            {
-                second_smallest = min(*growables->data[i], second_smallest);
-                to_add = second_smallest - smallest;
-            }
-
-        // If all growable children have the same size (second_smallest remains INFINITY),
-        // distribute the remaining space equally among all growable children.
-        if (second_smallest == INFINITY)
-            to_add = *remaining / growables->len;
-
-        // If distributing 'to_add' to all 'smallest_count' children would exceed the remaining space,
-        // calculate the exact amount that can be distributed equally among them.
-        isize smallest_count = 0;
-        for (isize i = 0; i < growables->len; i++)
-            if (fabsf(*growables->data[i] - smallest) < EPSILON)
-                smallest_count++;
-        if (to_add * smallest_count > *remaining)
-            to_add = *remaining / smallest_count;
-
-        // Distribute remaining space among shrinkable items that are currently at the smallest size.
-        // When an item would grow exceed its maximum, clamp it and remove it from further distribution.
-        for (isize i = 0; i < growables->len; i++)
+        // Find the pivot size (smallest for grow, largest for shrink) and the next pivot.
+        for (isize i = 0; i < items->len; i++)
         {
-            f32 size_backup = *growables->data[i];
-            f32* child = growables->data[i];
-            if (fabsf(*growables->data[i] - smallest) < EPSILON)
+            if (mode == GROW ? (*items->data[i] < pivot) : (*items->data[i] > pivot))
             {
-                *child += to_add;
-                if (*child >= *growable_maxs->data[i])
-                {
-                    *child = *growable_maxs->data[i];
-                    growables->data[i] = growables->data[growables->len-- - 1];
-                    growable_maxs->data[i] = growable_maxs->data[growable_maxs->len-- - 1];
-                }
-                *remaining -= (*child - size_backup);
+                second_pivot = pivot;
+                pivot = *items->data[i];
+                to_add = second_pivot - pivot;
+            }
+            else if (mode == GROW ? (*items->data[i] > pivot) : (*items->data[i] < pivot))
+            {
+                second_pivot = mode == GROW ? min(*items->data[i], second_pivot) : max(*items->data[i], second_pivot);
+                to_add = second_pivot - pivot;
             }
         }
-    }
-}
 
-static void shrink_axis(f32* remaining, F32PtrSlice* shrinkables, F32PtrSlice* shrinkable_mins)
-{
-    while (*remaining < -EPSILON && shrinkables->len > 0)
-    {
-        f32 largest = *shrinkables->data[0];
-        f32 second_largest = 0;
-        f32 to_add = 0;
+        // If all items have the same size, distribute remaining space equally.
+        if ((mode == GROW && second_pivot == INFINITY) || (mode == SHRINK && second_pivot == 0))
+            to_add = *remaining / items->len;
 
-        // Find the largest size and the next largest size (to determine the decrement).
-        for (isize i = 0; i < shrinkables->len; i++)
-            if (*shrinkables->data[i] > largest)
-            {
-                second_largest = largest;
-                largest = *shrinkables->data[i];
-                to_add = second_largest - largest;
-            }
-            else if (*shrinkables->data[i] < largest)
-            {
-                second_largest = max(*shrinkables->data[i], second_largest);
-                to_add = second_largest - largest;
-            }
+        // Count items at the pivot and adjust to_add if it would "exceed" remaining space.
+        isize pivot_count = 0;
+        for (isize i = 0; i < items->len; i++)
+            if (fabsf(*items->data[i] - pivot) < EPSILON)
+                pivot_count++;
+        if (mode == GROW ? (to_add * pivot_count > *remaining) : (to_add * pivot_count < *remaining))
+            to_add = *remaining / pivot_count;
 
-        // If all shrinkable children have the same size (second_largest remains 0),
-        // distribute the remaining space equally among all shrinkable children.
-        if (second_largest == 0)
-            to_add = *remaining / shrinkables->len;
-
-        // If 'to_add' is less than the remaining space, calculate the exact amount
-        // that can be distributed equally among them.
-        isize largest_count = 0;
-        for (isize i = 0; i < shrinkables->len; i++)
-            if (fabsf(*shrinkables->data[i] - largest) < EPSILON)
-                largest_count++;
-        if (to_add * largest_count < *remaining)
-            to_add = *remaining / largest_count;
-
-        // Distribute remaining space among shrinkable items that are currently at the largest size.
-        // When an item would shrink below its minimum, clamp it and remove it from further distribution.
-        for (isize i = 0; i < shrinkables->len; i++)
+        // Distribute space among items at the pivot size.
+        // When an item hits its limit, clamp it and remove from further distribution.
+        for (isize i = 0; i < items->len; i++)
         {
-            f32 size_backup = *shrinkables->data[i];
-            f32* child = shrinkables->data[i];
-            if (fabsf(*child - largest) < EPSILON)
+            if (fabsf(*items->data[i] - pivot) >= EPSILON)
+                continue;
+
+            f32 size_backup = *items->data[i];
+            f32* child = items->data[i];
+            f32 limit = *limits->data[i];
+
+            *child += to_add;
+            if (mode == GROW ? (*child >= limit) : (*child <= limit))
             {
-                *child += to_add;
-                if (*child <= *shrinkable_mins->data[i])
-                {
-                    *child = *shrinkable_mins->data[i];
-                    shrinkables->data[i] = shrinkables->data[shrinkables->len-- - 1];
-                    shrinkable_mins->data[i] = shrinkable_mins->data[shrinkable_mins->len-- - 1];
-                }
-                *remaining -= (*child - size_backup);
+                *child = limit;
+                items->data[i] = items->data[items->len-- - 1];
+                limits->data[i] = limits->data[limits->len-- - 1];
             }
+            *remaining -= (*child - size_backup);
         }
     }
 }
@@ -499,9 +448,9 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
         if (box->config.direction == ctx.main_direction)
         {
             if (*ctx.remaining > 1) // NOTE: To avoid distributing meaningless slivers
-                grow_axis(ctx.remaining, &growables, &growable_maxs);
+                distribute_axis(ctx.remaining, &growables, &growable_maxs, GROW);
             else if (*ctx.remaining < 0)
-                shrink_axis(ctx.remaining, &shrinkables, &shrinkable_mins);
+                distribute_axis(ctx.remaining, &shrinkables, &shrinkable_mins, SHRINK);
         }
         else
         {
@@ -527,8 +476,6 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
         }
     }
 }
-
-// -----------------------------------------------------------------------------
 
 static void ui_box_resolve_position(UIBox* box)
 {
