@@ -86,8 +86,3 @@ typedef struct
     f32 corner_radius, border_thickness;
     b32 enable_shadow;
 } RectStyle;
-
-typedef struct
-{
-    f32 top, right, bottom, left;
-} Padding;

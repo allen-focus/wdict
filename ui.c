@@ -206,6 +206,12 @@ void ui_generate_render_commands(UIContext* ui_context, const UIBox* box)
 // -----------------------------------------------------------------------------
 
 // Axis-specific helper structure to eliminate code duplication
+typedef enum
+{
+    WIDTH,
+    HEIGHT
+} Axis;
+
 typedef struct {
     f32* size;
     f32* min_size;
@@ -311,6 +317,8 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
         }
     }
 }
+
+// -----------------------------------------------------------------------------
 
 // Distribute remaining space proportionally among children that are configured to grow.
 static void grow_axis(f32* remaining, F32PtrSlice* growables, F32PtrSlice* growable_maxs)
@@ -520,6 +528,8 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
     }
 }
 
+// -----------------------------------------------------------------------------
+
 static void ui_box_resolve_position(UIBox* box)
 {
     if (box->parent)
@@ -532,11 +542,31 @@ static void ui_box_resolve_position(UIBox* box)
         {
             box->position.x += parent_data->next_child_offset_x;
             parent_data->next_child_offset_x += box->size.width + parent->config.child_gap;
+
+            if (parent->config.alignment.x == ALIGN_CENTER)
+                box->position.x += parent->data.container.remaining_space.width / 2;
+            else if (parent->config.alignment.x == ALIGN_END)
+                box->position.x += parent->data.container.remaining_space.width;
+
+            if (parent->config.alignment.y == ALIGN_CENTER)
+                box->position.y += (parent->data.container.remaining_space.height - box->size.height) / 2;
+            else if (parent->config.alignment.y == ALIGN_END)
+                box->position.y += parent->data.container.remaining_space.height - box->size.height;
         }
         else
         {
             box->position.y += parent_data->next_child_offset_y;
             parent_data->next_child_offset_y += box->size.height + parent->config.child_gap;
+
+            if (parent->config.alignment.y == ALIGN_CENTER)
+                box->position.y += parent->data.container.remaining_space.height / 2;
+            else if (parent->config.alignment.y == ALIGN_END)
+                box->position.y += parent->data.container.remaining_space.height;
+
+            if (parent->config.alignment.x == ALIGN_CENTER)
+                box->position.x += (parent->data.container.remaining_space.width - box->size.width) / 2;
+            else if (parent->config.alignment.x == ALIGN_END)
+                box->position.x += parent->data.container.remaining_space.width - box->size.width;
         }
     }
 

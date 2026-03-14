@@ -72,12 +72,6 @@ typedef union
 
 // Sizing ------------------------------
 
-typedef enum
-{
-    WIDTH,
-    HEIGHT
-} Axis;
-
 typedef struct
 {
     f32 width;
@@ -119,11 +113,30 @@ typedef enum
 
 typedef struct
 {
+    f32 top, right, bottom, left;
+} Padding;
+
+typedef enum
+{
+    ALIGN_START,
+    ALIGN_CENTER,
+    ALIGN_END,
+} AlignPosition;
+
+typedef struct
+{
+    AlignPosition x;
+    AlignPosition y;
+} Alignment;
+
+typedef struct
+{
     Sizing sizing;
     Color color;
     RectStyle rect_style;
     Padding padding;
     f32 child_gap;
+    Alignment alignment;
     LayoutDirection direction;
 } BoxConfig;
 
