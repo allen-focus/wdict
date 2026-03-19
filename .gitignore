@@ -2,6 +2,6 @@
 /shaders/
 /.cache/
 /.zed/
-
 /.overseer.lua
+/.todo.md
 /compile_commands.json

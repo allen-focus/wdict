@@ -166,7 +166,7 @@ static void process_frame(AppContext* app_context)
                 .padding = padding_medium,
                 .child_gap = child_gap_medium,
                 .direction = LAYOUT_TOP_TO_BOTTOM
-            }) { 
+            }) {
                 ui_box({ .sizing = { fit_grow({}), fixed(30) }, .color = white }) {}
                 ui_box({ .sizing = { fixed(30), fixed(30) }, .color = white }) {}
             }
@@ -307,13 +307,19 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
+#ifndef NDEBUG
 i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, i32 nShowCmd)
+#else
+#pragma comment (lib, "libvcruntime")
+#pragma comment (lib, "ucrt")
+i32 WinMainCRTStartup()
+#endif
 {
     // Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607)
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     // Init context
-    AppContext app_context = { 
+    AppContext app_context = {
         .title = L"App Title",
         .ui = {
             .arena = arena_new(MB(16)),

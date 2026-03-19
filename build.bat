@@ -46,13 +46,12 @@ where /Q cl.exe || (
 :: ---------------------------------------------------------
 
 set CommonCompilerFlags=/nologo /W3 /WX /MP /D_CRT_SECURE_NO_WARNINGS
-set CompilerReleaseFlags= /O2 /DNDEBUG
-
 :: Comment sanitize flag as it is too slow
+:: set CompilerDebugFlags=/Od /Zi /RTC1 /fsanitize=address
 set CompilerDebugFlags=/Od /Zi /RTC1
-::set CompilerDebugFlags=/Od /Zi /RTC1 /fsanitize=address
+set CompilerReleaseFlags=/O2 /GS- /DNDEBUG
 
-set LinkerReleaseFlags=/incremental:no /opt:icf /opt:ref
+set LinkerReleaseFlags=/fixed /incremental:no /opt:icf /opt:ref /subsystem:windows
 set LinkerDebugFlags=
 
 if %IsRelease%==1 (

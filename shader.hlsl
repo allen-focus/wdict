@@ -135,7 +135,8 @@ float rect_sdf(float2 distance_to_shrunk_corner, float corner_radius)
 }
 
 //
-// sRGB decode & encode (TODO: Need to learn about sRGB)
+// sRGB decode & encode 
+// TODO: Need to learn more about the relationship between sRGB and linear color space.
 //
 
 float3 sRGBToLinear(float3 srgb)
