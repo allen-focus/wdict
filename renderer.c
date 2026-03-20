@@ -5,6 +5,7 @@
 #include "shaders/d3d11_vshader.h"
 #include "string.h"
 
+#include <d3d11.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -197,7 +198,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
             .ArraySize = 1,
             .Format = DXGI_FORMAT_R8_UNORM,
             .SampleDesc.Count = 1,
-            .Usage = D3D11_USAGE_IMMUTABLE,
+            .Usage = D3D11_USAGE_DEFAULT,
             .BindFlags = D3D11_BIND_SHADER_RESOURCE,
         };
         D3D11_SUBRESOURCE_DATA data = {
@@ -256,6 +257,21 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
     }
 }
 
+static void renderer_upload_glyph(const GlyphAtlas* atlas, const Glyph* glyph)
+{
+    D3D11_BOX box = {
+        .left   = glyph->atlas_x,
+        .top    = glyph->atlas_y,
+        .front  = 0,
+        .right  = glyph->atlas_x + glyph->w,
+        .bottom = glyph->atlas_y + glyph->h,
+        .back   = 1,
+    };
+    const u8* src = atlas->bitmap + glyph->atlas_y * atlas->w  + glyph->atlas_x;
+    ID3D11DeviceContext_UpdateSubresource(
+        s_renderer_state.context, (ID3D11Resource*)s_renderer_state.glyph_atlas_texture, 0, &box, src, atlas->w, 0);
+}
+
 void renderer_recreate_glyph_atlas_texture(const GlyphAtlas* glyph_atlas)
 {
     Assert(s_renderer_state.glyph_atlas_texture); // Should we check others?
@@ -269,7 +285,7 @@ void renderer_recreate_glyph_atlas_texture(const GlyphAtlas* glyph_atlas)
         .ArraySize = 1,
         .Format = DXGI_FORMAT_R8_UNORM,
         .SampleDesc.Count = 1,
-        .Usage = D3D11_USAGE_IMMUTABLE,
+        .Usage = D3D11_USAGE_DEFAULT,
         .BindFlags = D3D11_BIND_SHADER_RESOURCE,
     };
     D3D11_SUBRESOURCE_DATA data = {
@@ -387,7 +403,7 @@ void renderer_deinit()
 // rect push
 //
 
-void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const RectStyle style)
+static void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color, const RectStyle style)
 {
     Assert(s_vertex_stack.count != VERTEX_SIZE);
 
@@ -443,10 +459,8 @@ f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String 
 f32 renderer_get_text_height_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi)
 {
     Assert(text.len);
-    // TODO: Need to check whether 'A' has been rasterized
-    Glyph* glyph_A = &glyph_cache->glyphs['A' - ASCII_START];
-    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
-    return glyph_A->h / dpi_scale;
+    f32 font_size = glyph_cache->glyphs[text.data[0] - ASCII_START].font_size;
+    return font_size;
 }
 
 //
@@ -485,7 +499,8 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
     renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
 }
 
-void renderer_draw_text(const GlyphCache* glyph_cache, String text, const Position position, const Color color, const u32 dpi)
+void renderer_draw_text(IDWriteFactory3* dwrite_factory, Font* font, GlyphCache* glyph_cache, String text,
+                        const Position position, const Color color, const u32 dpi, const f32 font_size)
 {
     f32 next_position_x = position.x;
 
@@ -495,7 +510,22 @@ void renderer_draw_text(const GlyphCache* glyph_cache, String text, const Positi
 
     for (isize i = 0; i < text.len; i++)
     {
-        Glyph* glyph = &glyph_cache->glyphs[text.data[i] - ASCII_START];
+        u32 codepoint = text.data[i];
+        Glyph* glyph = &glyph_cache->glyphs[codepoint - ASCII_START];
+        // TODO: Currently using `font_size == 0` as a proxy for "uninitialized glyph".
+        // Future work: Introduce an explicit `glyph->valid` flag to properly support
+        // multi-font-size caching and per-glyph lifecycle management.
+        if (!glyph->font_size)
+        {
+            GlyphAtlas* atlas = &glyph_cache->atlas;
+            u8* glyph_bitmap = glyph_rasterize(&glyph_cache->arena, dwrite_factory, font, codepoint, glyph, dpi, font_size);
+            if (glyph->codepoint != ' ')
+            {
+                atlas_insert_glyph(atlas, glyph, glyph_bitmap);
+                renderer_upload_glyph(&glyph_cache->atlas, glyph);
+            }
+        }
+
         Rect target_rect = {
             .xmin = next_position_x + (f32)glyph->xoff,
             .ymin = position_y + (f32)glyph->yoff,

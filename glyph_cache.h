@@ -35,7 +35,7 @@ typedef struct
 // physical pixels, not logic
 typedef struct
 {
-    u8* bitmap;
+    byte* bitmap;
     u16 w, h;
     // Manages the next position for placing glyphs within the atlas
     u16 next_x, next_y;
@@ -57,5 +57,9 @@ typedef struct
 void font_register(Font* font, IDWriteFactory3* dwrite_factory, const wchar_t* font_name);
 void font_unregister(Font* font);
 
+void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length);
 void glyph_cache_deinit(GlyphCache* glyph_cache);
-void glyph_cache_init_and_fill(IDWriteFactory3* dwrite_factory, Font* font, GlyphCache* glyph_cache, const wchar_t* font_family, const f32 font_size, const u32 dpi);
+u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, Font* font, const u32 codepoint, Glyph* glyph,
+                    const u32 dpi, f32 font_size);
+
+void atlas_insert_glyph(GlyphAtlas* atlas, Glyph* glyph, byte* glyph_bitmap);

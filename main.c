@@ -23,6 +23,7 @@
 #define FONT_FAMILY L"Segoe UI Symbol"
 #define FONT_SIZE 12
 
+
 ///
 
 typedef struct
@@ -192,13 +193,19 @@ static void process_frame(AppContext* app_context)
                 renderer_draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
                 break;
             case UI_COMMAND_TEXT:
-                renderer_draw_text(glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, ui_context->dpi);
+                renderer_draw_text(app_context->dwrite_factory, &app_context->font, glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, ui_context->dpi, FONT_SIZE);
                 break;
             default:
                 Assert(0);
         }
     }
     arena_pop_to(&ui_context->arena, 0);
+
+    // Present
+    f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+    u32 physical_client_width = (u32)(ui_context->client_width * dpi_scale);
+    u32 physical_client_height = (u32)(ui_context->client_height * dpi_scale);
+    renderer_flush_and_present(physical_client_width, physical_client_height);
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
@@ -242,11 +249,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 QueryPerformanceCounter(&starting_time);
 #endif
                 process_frame(app_context);
-
-                f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
-                u32 physical_client_width = (u32)(ui_context->client_width * dpi_scale);
-                u32 physical_client_height = (u32)(ui_context->client_height * dpi_scale);
-                renderer_flush_and_present(physical_client_width, physical_client_height);
 #ifndef NDEBUG
                 QueryPerformanceCounter(&ending_time);
                 elapsed_microseconds.QuadPart = ending_time.QuadPart - starting_time.QuadPart;
@@ -286,13 +288,16 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_DPICHANGED:
         {
             ui_context->dpi = GetDpiForWindow(window);
-
-            // Reinit glyph cache
             glyph_cache_deinit(glyph_cache);
-            glyph_cache_init_and_fill(app_context->dwrite_factory, &app_context->font, glyph_cache, FONT_FAMILY, FONT_SIZE, ui_context->dpi);
-
-            // Recreate glyph atlas texture
+            glyph_cache_init(glyph_cache, GLYPHS_LENGTH);
             renderer_recreate_glyph_atlas_texture(&glyph_cache->atlas);
+
+            // NOTE:
+            //   After a DPI change, the first frame still uses the old glyphs, so the visual quality is poor;
+            //   the second frame renders correctly. To prevent the glitch we could capture the currently‑visible
+            //   glyphs, rasterize them into the new atlas, and update the texture. Because the effect is minor, we
+            //   keep the existing behavior.
+            process_frame(app_context); // Rasterize needed glyphs
 
             // Set new window
             RECT* const suggested_rect = (RECT*)lparam;
@@ -384,10 +389,12 @@ i32 WinMainCRTStartup()
     // Initialize dwrite factory, font, glyph cache and renderer
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (void**)&app_context.dwrite_factory);
     font_register(&app_context.font, app_context.dwrite_factory, FONT_FAMILY);
-    glyph_cache_init_and_fill(app_context.dwrite_factory, &app_context.font, &app_context.glyph_cache, FONT_FAMILY, FONT_SIZE, app_context.ui.dpi);
+    glyph_cache_init(&app_context.glyph_cache, GLYPHS_LENGTH);
     renderer_init(window, &app_context.glyph_cache.atlas);
 
-    // Show window
+    // Render first frame before showing window
+    process_frame(&app_context); // Rasterize needed glyphs
+    process_frame(&app_context);
     ShowWindow(window, SW_SHOWDEFAULT);
 
     // Run message loop
