@@ -19,6 +19,7 @@
 #define CLIENT_HEIGHT 400
 
 #define MAX_TITLE_LENGTH 64
+#define FONT_CAPACITY 4
 #define FONT_FAMILY L"Segoe UI Symbol"
 #define FONT_SIZE 12
 
@@ -28,6 +29,8 @@ typedef struct
 {
     wchar_t title[MAX_TITLE_LENGTH];
     UIContext ui;
+    IDWriteFactory3* dwrite_factory;
+    Font font;
     GlyphCache glyph_cache;
 } AppContext;
 
@@ -286,7 +289,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
             // Reinit glyph cache
             glyph_cache_deinit(glyph_cache);
-            glyph_cache_init_and_fill(glyph_cache, FONT_FAMILY, FONT_SIZE, ui_context->dpi);
+            glyph_cache_init_and_fill(app_context->dwrite_factory, &app_context->font, glyph_cache, FONT_FAMILY, FONT_SIZE, ui_context->dpi);
 
             // Recreate glyph atlas texture
             renderer_recreate_glyph_atlas_texture(&glyph_cache->atlas);
@@ -331,9 +334,10 @@ i32 WinMainCRTStartup()
             .get_text_height = renderer_get_text_height_for_dpi,
             .command_queue = { 0 },
         },
+        .dwrite_factory = NULL,
+        .font = NULL,
         .glyph_cache = {
             .arena = arena_new(MB(32)),
-            .font = { 0 },
             .glyphs = NULL,
             .atlas = {
                 .w = GLYPH_ATLAS_WIDTH,
@@ -377,10 +381,13 @@ i32 WinMainCRTStartup()
                                  rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
     }
 
-    // Initialize glyph cache & renderer
-    glyph_cache_init_and_fill(&app_context.glyph_cache, FONT_FAMILY, FONT_SIZE, app_context.ui.dpi);
+    // Initialize dwrite factory, font, glyph cache and renderer
+    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (void**)&app_context.dwrite_factory);
+    font_register(&app_context.font, app_context.dwrite_factory, FONT_FAMILY);
+    glyph_cache_init_and_fill(app_context.dwrite_factory, &app_context.font, &app_context.glyph_cache, FONT_FAMILY, FONT_SIZE, app_context.ui.dpi);
     renderer_init(window, &app_context.glyph_cache.atlas);
 
+    // Show window
     ShowWindow(window, SW_SHOWDEFAULT);
 
     // Run message loop
@@ -394,6 +401,8 @@ i32 WinMainCRTStartup()
     // Clean
     renderer_deinit();
     glyph_cache_deinit(&app_context.glyph_cache);
+    font_unregister(&app_context.font);
+    IDWriteFactory3_Release(app_context.dwrite_factory);
 
     arena_release(&app_context.ui.arena);
     arena_release(&app_context.glyph_cache.arena);

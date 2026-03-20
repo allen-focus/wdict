@@ -18,16 +18,17 @@ typedef struct
 {
     IDWriteFontFace* face;
     IDWriteFontFace3* face3;
-    f32 size; // Controls capital letter height in pixels
 } Font;
 
 // physical pixels, not logic
 typedef struct
 {
-    Font* font;
     u32 codepoint;
+    f32 font_size; // Controls capital letter height in pixels
+
     u32 w, h, xadvance;
     i32 xoff, yoff;
+
     u16 atlas_x, atlas_y;
 } Glyph;
 
@@ -47,12 +48,14 @@ typedef struct
 typedef struct
 {
     Arena arena;
-    Font font;
     GlyphAtlas atlas;
     Glyph* glyphs;
 } GlyphCache;
 
 ///
 
+void font_register(Font* font, IDWriteFactory3* dwrite_factory, const wchar_t* font_name);
+void font_unregister(Font* font);
+
 void glyph_cache_deinit(GlyphCache* glyph_cache);
-void glyph_cache_init_and_fill(GlyphCache* glyph_cache, const wchar_t* font_family, const f32 font_size, const u32 dpi);
+void glyph_cache_init_and_fill(IDWriteFactory3* dwrite_factory, Font* font, GlyphCache* glyph_cache, const wchar_t* font_family, const f32 font_size, const u32 dpi);

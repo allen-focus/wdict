@@ -443,8 +443,10 @@ f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String 
 f32 renderer_get_text_height_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi)
 {
     Assert(text.len);
-    Glyph* glyph = &glyph_cache->glyphs[text.data[0] - ASCII_START];
-    return glyph->font->size;
+    // TODO: Need to check whether 'A' has been rasterized
+    Glyph* glyph_A = &glyph_cache->glyphs['A' - ASCII_START];
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    return glyph_A->h / dpi_scale;
 }
 
 //
