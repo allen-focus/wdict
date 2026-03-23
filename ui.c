@@ -4,6 +4,7 @@
 #include "slice.h"
 #include "string.h"
 #include "ui.h"
+#include "unicode.h"
 
 #include <debugapi.h>
 #include <math.h>
@@ -129,16 +130,33 @@ UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const
     f32 whole_text_width = 0;
     isize word_count = 0;
     {
-        String s = text_box->data.text.content;
+        String text = text_box->data.text.content;
+
         isize start = 0;
-        for (isize i = 0; i <= s.len; i++)
-            if (s.data[i] == ' ' || i == s.len)
+        u32 start_codepoint = 0;
+
+        u32 current_codepoint = 0;
+        byte* ptr = text.data;
+        while (ptr - text.data < text.len)
+        {
+            byte* next = utf8_decode(ptr, &current_codepoint);
+            if (current_codepoint == ' ' || current_codepoint > 127)
             {
-                if (s.data[start] != ' ')
-                    min_width = max(min_width, ui_context->get_text_width(glyph_cache, str_slice(s, start, i), ui_context->dpi));
-                start = i + 1;
+                utf8_decode(&text.data[start], &start_codepoint);
+                if (start_codepoint != ' ')
+                {
+                    // For ASCII: measure up to current position (word boundary before delimiter).
+                    // For non-ASCII: include this character itself, treating it as a single-word unit.
+                    isize end = start_codepoint < 127 ? ptr - text.data : next - text.data;
+                    f32 word_width = ui_context->get_text_width(glyph_cache, str_slice(text, start, end), ui_context->dpi);
+                    min_width = max(min_width, word_width);
+                }
+                start = next - text.data;
                 word_count++;
             }
+            ptr = next;
+        }
+
         whole_text_width = ui_context->get_text_width(glyph_cache, text_box->data.text.content, ui_context->dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
@@ -525,32 +543,43 @@ static void ui_box_resolve_position(UIBox* box)
 static void perform_text_wrapping(UIContext* ui_context, const GlyphCache* glyph_cache, UIBox* text_box)
 {
     String text = text_box->data.text.content;
-    f32 text_width = ui_context->get_text_width(glyph_cache, text, ui_context->dpi);
     f32 max_width = text_box->size.width;
-    if (text_width <= max_width)
+
+    if (ui_context->get_text_width(glyph_cache, text, ui_context->dpi) <= max_width)
         return;
 
-    isize new_line_idx = 0;
-    isize distance_between_line_start_and_newest_space = 0;
-    // TODO: don't calculate whole text width in every loop [performance]
-    for (isize i = 0; i <= text.len; i++)
-    {
-        f32 current_line_width = ui_context->get_text_width(glyph_cache, str_slice(text, new_line_idx, i), ui_context->dpi);
-        if (current_line_width > max_width)
-        {
-            Assert(distance_between_line_start_and_newest_space);
-            isize end = new_line_idx + distance_between_line_start_and_newest_space;
-            *slice_push(&text_box->data.text.wrapped_lines, &ui_context->arena) = str_slice(text, new_line_idx, end);
-            new_line_idx = end + 1;
-            distance_between_line_start_and_newest_space = 0;
-        }
-        if (text.data[i] == ' ')
-            distance_between_line_start_and_newest_space = i - new_line_idx;
-    }
-    // Handle last line
-    *slice_push(&text_box->data.text.wrapped_lines, &ui_context->arena) = str_slice(text, new_line_idx, text.len);
+    isize line_start = 0;
+    isize last_break = 0;
 
-    // Update box dimensions
+    byte* ptr = text.data;
+    while (ptr - text.data < text.len)
+    {
+        u32 codepoint;
+        byte* next = utf8_decode(ptr, &codepoint);
+        isize distance = ptr - text.data;
+
+        // Check width
+        f32 width = ui_context->get_text_width(glyph_cache, str_slice(text, line_start, distance), ui_context->dpi);
+        if (width > max_width && last_break > line_start)
+        {
+            *slice_push(&text_box->data.text.wrapped_lines, &ui_context->arena) = str_slice(text, line_start, last_break);
+
+            // Skip space if needed
+            line_start = (text.data[last_break] == ' ') ? last_break + 1 : last_break;
+            last_break = line_start;
+            continue;
+        }
+
+        // Update break position
+        if (codepoint == ' ' || codepoint > 127)
+            last_break = distance;
+
+        ptr = next;
+    }
+
+    // Handle last line
+    *slice_push(&text_box->data.text.wrapped_lines, &ui_context->arena) = str_slice(text, line_start, text.len);
+
     text_box->size.height = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
     text_box->config.sizing.height.min_max.min = text_box->size.height;
 }
@@ -581,4 +610,3 @@ void ui_calculate_layout(UIContext* ui_context, const GlyphCache* glyph_cache, U
     ui_box_grow_shrink_children_axis(ui_context, box, HEIGHT);
     ui_box_resolve_position(box);
 }
-

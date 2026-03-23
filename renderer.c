@@ -1,10 +1,10 @@
 #include "pch.h"  // IWYU pragma: keep
 #include "glyph_cache.h"
-#include "unicode.h"
 #include "lib.h"
 #include "shaders/d3d11_pshader.h"
 #include "shaders/d3d11_vshader.h"
 #include "string.h"
+#include "unicode.h"
 
 #include <d3d11.h>
 #include <stdbool.h>

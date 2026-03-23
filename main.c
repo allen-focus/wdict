@@ -124,9 +124,9 @@ static void process_frame(AppContext* app_context)
                         .child_gap = child_gap_small,
                         .direction = LAYOUT_TOP_TO_BOTTOM
                     }) {
-                        ui_text(ui_context, glyph_cache, str("你好，世界"), &(TextConfig){ .color = red });
-                        ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black });
-                        ui_text(ui_context, glyph_cache, str("Bye"), &(TextConfig){ .color = green });
+                        ui_text(ui_context, glyph_cache, str("你好，世界。亲爱的观众朋友们，我想死你们啦！"), &(TextConfig){ .color = red, .line_height = 18 });
+                        ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black, .line_height = 14 });
+                        ui_text(ui_context, glyph_cache, str("Bye"), &(TextConfig){ .color = green, .line_height = 14 });
                     }
                     ui_box({
                         .sizing = { fit_grow({}), fit_grow({}) },

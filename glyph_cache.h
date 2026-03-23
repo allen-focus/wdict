@@ -10,7 +10,8 @@
 #define GLYPH_ATLAS_HEIGHT 1024
 
 #define ASCII_START   32
-#define GLYPHS_LENGTH 1024
+#define GLYPHS_CP_LENGTH 1024
+#define GLYPHS_LENGTH (GLYPHS_CP_LENGTH + 1) // Plus an additional white rectangle glyph
 
 ///
 
