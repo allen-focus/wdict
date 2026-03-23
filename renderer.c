@@ -437,7 +437,8 @@ static void renderer_rect_push(const Rect target_rect, const Rect texture_rect, 
 // text width & height
 //
 
-f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi)
+f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi, const Font* font,
+                                    const f32 font_size)
 {
     f32 text_width = 0;
     u32 codepoint = 0;
@@ -445,7 +446,7 @@ f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String 
     while (p - text.data < text.len)
     {
         p = utf8_decode(p, &codepoint);
-        Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint);
+        Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint, font, font_size);
         Assert(glyph);
         text_width += glyph->xadvance;
     }
@@ -455,12 +456,13 @@ f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String 
 
 // TODO: Future support for multiple fonts per line is planned. This will require calculating text height
 // based on varying font line spaces rather than relying on a single font's line space.
-f32 renderer_get_text_height_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi)
+f32 renderer_get_text_height_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi, const Font* font,
+                                     const f32 font_size)
 {
     u32 codepoint = 0;
     utf8_decode(text.data, &codepoint); // Get first glyph codepoint of the text
     Assert(codepoint);
-    Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint);
+    Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint, font, font_size);
     return glyph->font_size;
 }
 
@@ -500,30 +502,27 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
     renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
 }
 
-void renderer_draw_text(IDWriteFactory3* dwrite_factory, Font* font, GlyphCache* glyph_cache, String text,
-                        const Position position, const Color color, const u32 dpi, const f32 font_size)
+void renderer_draw_text(IDWriteFactory3* dwrite_factory, GlyphCache* glyph_cache, String text, const Position position,
+                        const Color color, const u32 dpi, Font* font, const f32 font_size)
 {
     f32 next_position_x = position.x;
 
     // Get physical pixel position of y
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
-    f32 position_y = position.y + renderer_get_text_height_for_dpi(glyph_cache, text, dpi) * dpi_scale;
+    f32 position_y = position.y + renderer_get_text_height_for_dpi(glyph_cache, text, dpi, font, font_size) * dpi_scale;
 
     u32 codepoint = 0;
     byte* p = text.data;
     while (p - text.data < text.len)
     {
         p = utf8_decode(p, &codepoint);
-        Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint);
+        Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint, font, font_size);
         Assert(glyph);
 
-        // TODO: Currently using `font_size == 0` as a proxy for "uninitialized glyph".
-        // Future work: Introduce an explicit `glyph->valid` flag to properly support
-        // multi-font-size caching and per-glyph lifecycle management.
-        if (!glyph->font_size)
+        if (!glyph->valid)
         {
             GlyphAtlas* atlas = &glyph_cache->atlas;
-            u8* glyph_bitmap = glyph_rasterize(&glyph_cache->arena, dwrite_factory, font, codepoint, glyph, dpi, font_size);
+            u8* glyph_bitmap = glyph_rasterize(&glyph_cache->arena, dwrite_factory, codepoint, glyph, font, font_size, dpi);
             if (glyph->codepoint != ' ')
             {
                 atlas_insert_glyph(atlas, glyph, glyph_bitmap);

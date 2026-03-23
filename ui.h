@@ -56,6 +56,8 @@ typedef struct
 typedef struct
 {
     UICommandBase base;
+    Font* font;
+    f32 font_size;
     String content;
     Color color;
     Position position;
@@ -141,6 +143,8 @@ typedef struct
 
 typedef struct
 {
+    Font* font;
+    f32 font_size;
     Color color;
     f32 line_height;
 } TextConfig;
@@ -161,6 +165,8 @@ typedef struct
 
 typedef struct
 {
+    Font* font;
+    f32 font_size;
     String content;
     Color color;
     Slice(String) wrapped_lines;
@@ -199,8 +205,8 @@ typedef struct
     u32 client_width; // logic client width
     u32 client_height; // logic client height
     void (*on_resize)(const u32 client_width, const u32 client_height);
-    f32 (*get_text_width)(const GlyphCache* glyph_cache, const String text, const u32 dpi);
-    f32 (*get_text_height)(const GlyphCache* glyph_cache, const String text, const u32 dpi);
+    f32 (*get_text_width)(const GlyphCache* glyph_cache, const String text, const u32 dpi, const Font* font, const f32 font_size);
+    f32 (*get_text_height)(const GlyphCache* glyph_cache, const String text, const u32 dpi, const Font* font, const f32 font_size);
     Queue(UICommand, COMMAND_QUEUE_SIZE) command_queue;
 } UIContext;
 

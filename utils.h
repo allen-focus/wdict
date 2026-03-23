@@ -89,6 +89,11 @@ typedef struct
     b32 enable_shadow;
 } RectStyle;
 
+//
+// hash
+//
+
+u32 fnv1a_hash(const void* data, isize size);
 
 //
 // unicode

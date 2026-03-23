@@ -100,15 +100,21 @@ void ui_reset(UIContext* ui_context)
 
 UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const String text, const TextConfig* text_config)
 {
-    f32 base_line_height = ui_context->get_text_height(glyph_cache, text, ui_context->dpi);
+    f32 base_line_height = ui_context->get_text_height(glyph_cache, text, ui_context->dpi, text_config->font, text_config->font_size);
     f32 line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
-    f32 fixed_width = ui_context->get_text_width(glyph_cache, text, ui_context->dpi);
+    f32 fixed_width = ui_context->get_text_width(glyph_cache, text, ui_context->dpi, text_config->font, text_config->font_size);
     BoxConfig box_config = { .sizing = { .width = { { fixed_width, fixed_width }, SIZING_MODE_FIXED },
                                          .height = { { line_height, line_height }, SIZING_MODE_FIXED } } };
 
     UIBox* text_box = ui_box_start(&box_config);
     {
         text_box->type = BOX_TYPE_TEXT;
+
+        Assert(text_config->font);
+        Assert(text_config->font_size);
+        text_box->data.text.font = text_config->font;
+        text_box->data.text.font_size = text_config->font_size;
+
         text_box->data.text.content = text;
         text_box->data.text.color = text_config->color;
         memset(&text_box->data.text.wrapped_lines, 0, sizeof(text_box->data.text.wrapped_lines));
@@ -140,7 +146,7 @@ UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const
                     // For ASCII: measure up to current position (word boundary before delimiter).
                     // For non-ASCII: include this character itself, treating it as a single-word unit.
                     isize end = start_codepoint < 127 ? ptr - text.data : next - text.data;
-                    f32 word_width = ui_context->get_text_width(glyph_cache, str_slice(text, start, end), ui_context->dpi);
+                    f32 word_width = ui_context->get_text_width(glyph_cache, str_slice(text, start, end), ui_context->dpi, text_box->data.text.font, text_box->data.text.font_size);
                     min_width = max(min_width, word_width);
                 }
                 start = next - text.data;
@@ -149,7 +155,7 @@ UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const
             ptr = next;
         }
 
-        whole_text_width = ui_context->get_text_width(glyph_cache, text_box->data.text.content, ui_context->dpi);
+        whole_text_width = ui_context->get_text_width(glyph_cache, text_box->data.text.content, ui_context->dpi, text_box->data.text.font, text_box->data.text.font_size);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
     text_box->config.sizing.width.min_max.min = min_width;
@@ -189,9 +195,11 @@ void ui_generate_render_commands(UIContext* ui_context, const UIBox* box)
             isize i = 0;
             do {
                 UICommand* cmd = ui_context->command_queue.items + ui_context->command_queue.count++;
-                cmd->text.content = box->data.text.wrapped_lines.len ? *(box->data.text.wrapped_lines.data + i) : box->data.text.content;
                 cmd->text.base.type = UI_COMMAND_TEXT;
                 cmd->text.base.size = sizeof(UICommandText);
+                cmd->text.font = box->data.text.font;
+                cmd->text.font_size = box->data.text.font_size;
+                cmd->text.content = box->data.text.wrapped_lines.len ? *(box->data.text.wrapped_lines.data + i) : box->data.text.content;
                 cmd->text.color = box->data.text.color;
                 cmd->text.position.x = box->position.x * dpi_scale;
                 cmd->text.position.y = (box->position.y + box->data.text.half_leading + i * box->data.text.line_height) * dpi_scale;
@@ -537,7 +545,7 @@ static void perform_text_wrapping(UIContext* ui_context, const GlyphCache* glyph
     String text = text_box->data.text.content;
     f32 max_width = text_box->size.width;
 
-    if (ui_context->get_text_width(glyph_cache, text, ui_context->dpi) <= max_width)
+    if (ui_context->get_text_width(glyph_cache, text, ui_context->dpi, text_box->data.text.font, text_box->data.text.font_size) <= max_width)
         return;
 
     isize line_start = 0;
@@ -551,7 +559,7 @@ static void perform_text_wrapping(UIContext* ui_context, const GlyphCache* glyph
         isize distance = ptr - text.data;
 
         // Check width
-        f32 width = ui_context->get_text_width(glyph_cache, str_slice(text, line_start, distance), ui_context->dpi);
+        f32 width = ui_context->get_text_width(glyph_cache, str_slice(text, line_start, distance), ui_context->dpi, text_box->data.text.font, text_box->data.text.font_size);
         if (width > max_width && last_break > line_start)
         {
             *slice_push(&text_box->data.text.wrapped_lines, &ui_context->arena) = str_slice(text, line_start, last_break);

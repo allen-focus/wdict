@@ -114,9 +114,12 @@ void glyph_cache_deinit(GlyphCache* glyph_cache)
     arena_pop_to(&glyph_cache->arena, 0);
 }
 
-u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, Font* font, const u32 codepoint, Glyph* glyph,
-                    const u32 dpi, f32 font_size)
+u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, const u32 codepoint, Glyph* glyph,
+                    Font* font, f32 font_size, const u32 dpi)
 {
+    glyph->valid = True;
+
+    glyph->font = font;
     glyph->font_size = font_size;
 
     // Get pixel size & scale, see: https://learn.microsoft.com/en-us/windows/win32/learnwin32/dpi-and-device-independent-pixels
@@ -189,15 +192,21 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, Font* font, c
     return glyph_bitmap;
 }
 
-Glyph* glyph_lookup(Glyph* glyphs, const u32 codepoint)
+typedef struct
 {
-    isize idx = codepoint & (GLYPHS_CP_LENGTH - 1);
+    const Font* font;
+    const f32 font_size; // Controls capital letter height in pixels
+    const u32 codepoint;
+} GlyphKey;
+
+Glyph* glyph_lookup(Glyph* glyphs, const u32 codepoint, const Font* font, const f32 font_size)
+{
+    GlyphKey key = { font, font_size, codepoint };
+    isize idx = fnv1a_hash((void*)&key, sizeof(key)) & (GLYPHS_CP_LENGTH - 1);
     for (isize i = 0; i < GLYPHS_CP_LENGTH; i++)
     {
         Glyph* glyph = &glyphs[idx];
-        if (!glyph->font_size)
-            return glyph;
-        if (glyph->codepoint == codepoint)
+        if (!glyph->valid || glyph->codepoint == codepoint)
             return glyph;
         idx = (idx + 1) & (GLYPHS_CP_LENGTH - 1);
     }

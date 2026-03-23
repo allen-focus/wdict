@@ -13,10 +13,11 @@
 #define CLIENT_HEIGHT 400
 
 #define MAX_TITLE_LENGTH 64
-#define FONT_CAPACITY 4
-#define FONT_FAMILY L"Microsoft YaHei"
-#define FONT_SIZE 12
 
+#define FONT_INDEX_UI 0
+#define FONT_INDEX_ZH 1
+#define FONT_INDEX_MONO 2
+#define FONT_CAPACITY 3
 
 ///
 
@@ -25,7 +26,7 @@ typedef struct
     wchar_t title[MAX_TITLE_LENGTH];
     UIContext ui;
     IDWriteFactory3* dwrite_factory;
-    Font font;
+    Font fonts[FONT_CAPACITY];
     GlyphCache glyph_cache;
 } AppContext;
 
@@ -60,6 +61,9 @@ static void process_frame(AppContext* app_context)
 {
     UIContext* ui_context = &app_context->ui;
     GlyphCache* glyph_cache = &app_context->glyph_cache;
+    Font* font_ui = &app_context->fonts[FONT_INDEX_UI];
+    Font* font_zh = &app_context->fonts[FONT_INDEX_ZH];
+    Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
     ui_reset(ui_context);
 
     ui_box({
@@ -118,9 +122,12 @@ static void process_frame(AppContext* app_context)
                         .child_gap = child_gap_small,
                         .direction = LAYOUT_TOP_TO_BOTTOM
                     }) {
-                        ui_text(ui_context, glyph_cache, str("你好，世界。亲爱的观众朋友们，我想死你们啦！"), &(TextConfig){ .color = red, .line_height = 18 });
-                        ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black, .line_height = 14 });
-                        ui_text(ui_context, glyph_cache, str("Bye"), &(TextConfig){ .color = green, .line_height = 14 });
+                        ui_text(ui_context, glyph_cache, str("你好，世界。亲爱的观众朋友们，我想死你们啦！"),
+                                &(TextConfig){ .font = font_zh, .font_size = 12, .color = red, .line_height = 18 });
+                        ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"),
+                                &(TextConfig){ .font = font_mono, .font_size = 12, .color = black, .line_height = 14 });
+                        ui_text(ui_context, glyph_cache, str("Nicola and v"),
+                                &(TextConfig){ .font = font_ui, .font_size = 18, .color = green, .line_height = 14 });
                     }
                     ui_box({
                         .sizing = { fit_grow({}), fit_grow({}) },
@@ -187,7 +194,7 @@ static void process_frame(AppContext* app_context)
                 renderer_draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
                 break;
             case UI_COMMAND_TEXT:
-                renderer_draw_text(app_context->dwrite_factory, &app_context->font, glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, ui_context->dpi, FONT_SIZE);
+                renderer_draw_text(app_context->dwrite_factory, glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, ui_context->dpi, cmd->text.font, cmd->text.font_size);
                 break;
             default:
                 Assert(0);
@@ -334,7 +341,7 @@ i32 WinMainCRTStartup()
             .command_queue = { 0 },
         },
         .dwrite_factory = NULL,
-        .font = NULL,
+        .fonts = NULL,
         .glyph_cache = {
             .arena = arena_new(MB(32)),
             .glyphs = NULL,
@@ -382,7 +389,9 @@ i32 WinMainCRTStartup()
 
     // Initialize dwrite factory, font, glyph cache and renderer
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (void**)&app_context.dwrite_factory);
-    font_register(&app_context.font, app_context.dwrite_factory, FONT_FAMILY);
+    font_register(&app_context.fonts[FONT_INDEX_UI], app_context.dwrite_factory, L"Segoe UI");
+    font_register(&app_context.fonts[FONT_INDEX_ZH], app_context.dwrite_factory, L"Microsoft YaHei");
+    font_register(&app_context.fonts[FONT_INDEX_MONO], app_context.dwrite_factory, L"Consolas");
     glyph_cache_init(&app_context.glyph_cache, GLYPHS_LENGTH);
     renderer_init(window, &app_context.glyph_cache.atlas);
 
@@ -402,7 +411,9 @@ i32 WinMainCRTStartup()
     // Clean
     renderer_deinit();
     glyph_cache_deinit(&app_context.glyph_cache);
-    font_unregister(&app_context.font);
+    font_unregister(&app_context.fonts[FONT_INDEX_UI]);
+    font_unregister(&app_context.fonts[FONT_INDEX_ZH]);
+    font_unregister(&app_context.fonts[FONT_INDEX_MONO]);
     IDWriteFactory3_Release(app_context.dwrite_factory);
 
     arena_release(&app_context.ui.arena);
