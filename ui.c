@@ -397,7 +397,7 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
         *ctx.remaining = *ctx.size;
 
         // Subtract padding and child gap
-        // TODO: When the window is resized to very small, the root box's remaining will be less 
+        // TODO: When the window is resized to very small, the root box's remaining will be less
         // than padding, then `Assert` broken.
         *ctx.remaining -= ctx.padding_start + ctx.padding_end;
         Assert(*ctx.remaining >= 0);
@@ -406,7 +406,6 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
             *ctx.remaining -= box->config.child_gap * child_gap_count;
 
         // Subtract the childrens' determined size from the parent's remaining space.
-        f32 cross_axis_remainings_min = 0;
         UIBox* child = box->child_first;
         while (child)
         {
@@ -415,19 +414,15 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
             // Subtract the child's determined size from the parent's remaining space.
             if (box->config.direction == ctx.main_direction)
                 *ctx.remaining -= *child_ctx.size;
-            else
-                // Handle the situation when text child width exceeds current box
-                if (cross_axis_remainings_min > *ctx.remaining - *child_ctx.size)
-                    cross_axis_remainings_min = *ctx.remaining - *child_ctx.size;
 
             child = child->next;
         }
 
         // Distribute remaining space to children (growables and shrinkables are mutually exclusive)
         F32PtrSlice growables = { 0 };
-        F32PtrSlice growable_maxs = { 0 };
+        F32PtrSlice growable_limits = { 0 };
         F32PtrSlice shrinkables = { 0 };
-        F32PtrSlice shrinkable_mins = { 0 };
+        F32PtrSlice shrinkable_limits = { 0 };
         child = box->child_first;
         while (child)
         {
@@ -435,32 +430,31 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
             if (child_ctx.sizing_mode == SIZING_MODE_FIT_GROW)
             {
                 *slice_push(&growables, &ui_context->arena) = child_ctx.size;
-                *slice_push(&growable_maxs, &ui_context->arena) = child_ctx.max_size;
+                *slice_push(&growable_limits, &ui_context->arena) = child_ctx.max_size;
             }
 
             if (*child_ctx.size > *child_ctx.min_size)
             {
                 *slice_push(&shrinkables, &ui_context->arena) = child_ctx.size;
-                *slice_push(&shrinkable_mins, &ui_context->arena) = child_ctx.min_size;
+                *slice_push(&shrinkable_limits, &ui_context->arena) = child_ctx.min_size;
             }
             child = child->next;
         }
         if (box->config.direction == ctx.main_direction)
         {
             if (*ctx.remaining > 1) // NOTE: To avoid distributing meaningless slivers
-                distribute_axis(ctx.remaining, &growables, &growable_maxs, GROW);
+                distribute_axis(ctx.remaining, &growables, &growable_limits, GROW);
             else if (*ctx.remaining < 0)
-                distribute_axis(ctx.remaining, &shrinkables, &shrinkable_mins, SHRINK);
+                distribute_axis(ctx.remaining, &shrinkables, &shrinkable_limits, SHRINK);
         }
         else
         {
             if (*ctx.remaining > 0)
                 for (isize i = 0; i < growables.len; i++)
-                    *growables.data[i] = max(*growables.data[i], min(*ctx.remaining, *growable_maxs.data[i]));
-            if (cross_axis_remainings_min < 0)
-                for (isize i = 0; i < shrinkables.len; i++)
-                    if (*ctx.remaining < *shrinkables.data[i])
-                        *shrinkables.data[i] = max(*shrinkable_mins.data[i], *shrinkables.data[i] + cross_axis_remainings_min);
+                    *growables.data[i] = max(*growables.data[i], min(*ctx.remaining, *growable_limits.data[i]));
+            for (isize i = 0; i < shrinkables.len; i++)
+                if (*ctx.remaining < *shrinkables.data[i])
+                    *shrinkables.data[i] = max(*shrinkable_limits.data[i], *ctx.remaining);
         }
     }
     ui_context->arena.pos = arena_pos_backup;
