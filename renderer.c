@@ -1,5 +1,6 @@
 #include "pch.h"  // IWYU pragma: keep
 #include "glyph_cache.h"
+#include "unicode.h"
 #include "lib.h"
 #include "shaders/d3d11_pshader.h"
 #include "shaders/d3d11_vshader.h"
@@ -445,9 +446,13 @@ static void renderer_rect_push(const Rect target_rect, const Rect texture_rect, 
 f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi)
 {
     f32 text_width = 0;
-    for (isize i = 0; i < text.len; i++)
+    u32 codepoint = 0;
+    byte* p = text.data;
+    while (p - text.data < text.len)
     {
-        Glyph* glyph = &glyph_cache->glyphs[text.data[i] - ASCII_START];
+        p = utf8_decode(p, &codepoint);
+        Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint);
+        Assert(glyph);
         text_width += glyph->xadvance;
     }
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
@@ -458,9 +463,11 @@ f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String 
 // based on varying font line spaces rather than relying on a single font's line space.
 f32 renderer_get_text_height_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi)
 {
-    Assert(text.len);
-    f32 font_size = glyph_cache->glyphs[text.data[0] - ASCII_START].font_size;
-    return font_size;
+    u32 codepoint = 0;
+    utf8_decode(text.data, &codepoint); // Get first glyph codepoint of the text
+    Assert(codepoint);
+    Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint);
+    return glyph->font_size;
 }
 
 //
@@ -508,10 +515,14 @@ void renderer_draw_text(IDWriteFactory3* dwrite_factory, Font* font, GlyphCache*
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     f32 position_y = position.y + renderer_get_text_height_for_dpi(glyph_cache, text, dpi) * dpi_scale;
 
-    for (isize i = 0; i < text.len; i++)
+    u32 codepoint = 0;
+    byte* p = text.data;
+    while (p - text.data < text.len)
     {
-        u32 codepoint = text.data[i];
-        Glyph* glyph = &glyph_cache->glyphs[codepoint - ASCII_START];
+        p = utf8_decode(p, &codepoint);
+        Glyph* glyph = glyph_lookup(glyph_cache->glyphs, codepoint);
+        Assert(glyph);
+
         // TODO: Currently using `font_size == 0` as a proxy for "uninitialized glyph".
         // Future work: Introduce an explicit `glyph->valid` flag to properly support
         // multi-font-size caching and per-glyph lifecycle management.

@@ -193,3 +193,18 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, Font* font, c
     }
     return glyph_bitmap;
 }
+
+Glyph* glyph_lookup(Glyph* glyphs, const u32 codepoint)
+{
+    isize idx = codepoint & (GLYPHS_LENGTH - 1);
+    for (isize i = 0; i < GLYPHS_LENGTH; i++)
+    {
+        Glyph* glyph = &glyphs[idx];
+        if (!glyph->font_size)
+            return glyph;
+        if (glyph->codepoint == codepoint)
+            return glyph;
+        idx = (idx + 1) & (GLYPHS_LENGTH - 1);
+    }
+    return NULL;
+}

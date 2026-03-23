@@ -20,7 +20,7 @@
 
 #define MAX_TITLE_LENGTH 64
 #define FONT_CAPACITY 4
-#define FONT_FAMILY L"Segoe UI Symbol"
+#define FONT_FAMILY L"Microsoft YaHei"
 #define FONT_SIZE 12
 
 
@@ -124,7 +124,7 @@ static void process_frame(AppContext* app_context)
                         .child_gap = child_gap_small,
                         .direction = LAYOUT_TOP_TO_BOTTOM
                     }) {
-                        ui_text(ui_context, glyph_cache, str("Hello world"), &(TextConfig){ .color = red });
+                        ui_text(ui_context, glyph_cache, str("你好，世界"), &(TextConfig){ .color = red });
                         ui_text(ui_context, glyph_cache, str("Here's to you, Nicola and Bart"), &(TextConfig){ .color = black });
                         ui_text(ui_context, glyph_cache, str("Bye"), &(TextConfig){ .color = green });
                     }

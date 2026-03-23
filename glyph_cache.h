@@ -10,7 +10,7 @@
 #define GLYPH_ATLAS_HEIGHT 1024
 
 #define ASCII_START   32
-#define GLYPHS_LENGTH (127 - ASCII_START + 1 + 1) // ascii glyphs ([32, 126]) plus a close icon glyph and a white region
+#define GLYPHS_LENGTH 1024
 
 ///
 
@@ -61,5 +61,6 @@ void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length);
 void glyph_cache_deinit(GlyphCache* glyph_cache);
 u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, Font* font, const u32 codepoint, Glyph* glyph,
                     const u32 dpi, f32 font_size);
+Glyph* glyph_lookup(Glyph* glyphs, const u32 codepoint);
 
 void atlas_insert_glyph(GlyphAtlas* atlas, Glyph* glyph, byte* glyph_bitmap);
