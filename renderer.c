@@ -1,14 +1,8 @@
 #include "pch.h"  // IWYU pragma: keep
 #include "glyph_cache.h"
-#include "lib.h"
 #include "shaders/d3d11_pshader.h"
 #include "shaders/d3d11_vshader.h"
-#include "string.h"
-#include "unicode.h"
-
-#include <d3d11.h>
-#include <stdbool.h>
-#include <stdint.h>
+#include "utils.h"
 
 ///
 
@@ -107,8 +101,8 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
     {
         ID3D11InfoQueue* info;
         ID3D11Device_QueryInterface(s_renderer_state.device, &IID_ID3D11InfoQueue, (void**)&info);
-        ID3D11InfoQueue_SetBreakOnSeverity(info, D3D11_MESSAGE_SEVERITY_CORRUPTION, TRUE);
-        ID3D11InfoQueue_SetBreakOnSeverity(info, D3D11_MESSAGE_SEVERITY_ERROR, TRUE);
+        ID3D11InfoQueue_SetBreakOnSeverity(info, D3D11_MESSAGE_SEVERITY_CORRUPTION, True);
+        ID3D11InfoQueue_SetBreakOnSeverity(info, D3D11_MESSAGE_SEVERITY_ERROR, True);
         ID3D11InfoQueue_Release(info);
     }
 
@@ -116,8 +110,8 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
     {
         IDXGIInfoQueue* dxgiInfo;
         DXGIGetDebugInterface1(0, &IID_IDXGIInfoQueue, (void**)&dxgiInfo);
-        IDXGIInfoQueue_SetBreakOnSeverity(dxgiInfo, DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, TRUE);
-        IDXGIInfoQueue_SetBreakOnSeverity(dxgiInfo, DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, TRUE);
+        IDXGIInfoQueue_SetBreakOnSeverity(dxgiInfo, DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, True);
+        IDXGIInfoQueue_SetBreakOnSeverity(dxgiInfo, DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, True);
         IDXGIInfoQueue_Release(dxgiInfo);
     }
 #endif
@@ -179,7 +173,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
 
     // Create blend state
     {
-        D3D11_BLEND_DESC desc = { .RenderTarget[0] = { .BlendEnable = TRUE,
+        D3D11_BLEND_DESC desc = { .RenderTarget[0] = { .BlendEnable = True,
                                                        .SrcBlend = D3D11_BLEND_SRC_ALPHA,
                                                        .DestBlend = D3D11_BLEND_INV_SRC_ALPHA,
                                                        .BlendOp = D3D11_BLEND_OP_ADD,
@@ -369,11 +363,11 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
     // TODO: Need investigate the input latency issue more
     // https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains
     // (1000 is the timeout fallback; should never trigger under normal rendering)
-    WaitForSingleObjectEx(s_renderer_state.frame_latency_waitable_object, 1000, true);
-    b32 vsync = true;
+    WaitForSingleObjectEx(s_renderer_state.frame_latency_waitable_object, 1000, True);
+    b32 vsync = True;
     u32 flags = 0;
 #ifndef NDEBUG
-    vsync = false;
+    vsync = False;
     flags |= DXGI_PRESENT_ALLOW_TEARING;
 #endif
     IDXGISwapChain1_Present(s_renderer_state.swapchain, vsync, flags);

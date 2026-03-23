@@ -1,11 +1,6 @@
 #include "pch.h" // IWYU pragma: keep
-#include "arena.h"
 #include "glyph_cache.h"
-#include "lib.h"
-
-#include <stdint.h>
-#include <stdlib.h>
-#include <winuser.h>
+#include "utils.h"
 
 //
 // font

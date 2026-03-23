@@ -1,17 +1,11 @@
 #include "pch.h" // IWYU pragma: keep
-#include "arena.h"
 #include "glyph_cache.h"
-#include "lib.h"
 #include "renderer.h"
-#include "string.h"
 #include "ui.h"
+#include "utils.h"
 
 #include <math.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <wchar.h>
-#include <winuser.h>
 
 ///
 
@@ -37,9 +31,9 @@ typedef struct
 
 /// Temp
 
-RectStyle background_rect_style = { .border_color = { 0, 0, 0, 0 }, .corner_radius = 0, .border_thickness = 0, .enable_shadow = false };
-RectStyle normal_rect_style = { .border_color = { 0, 0, 0, 0 }, .corner_radius = 12, .border_thickness = 0, .enable_shadow = false };
-RectStyle full_rect_style = { .border_color = { 255, 255, 255, 255 }, .corner_radius = 12, .border_thickness = 4, .enable_shadow = true };
+RectStyle background_rect_style = { .border_color = { 0, 0, 0, 0 }, .corner_radius = 0, .border_thickness = 0, .enable_shadow = False };
+RectStyle normal_rect_style = { .border_color = { 0, 0, 0, 0 }, .corner_radius = 12, .border_thickness = 0, .enable_shadow = False };
+RectStyle full_rect_style = { .border_color = { 255, 255, 255, 255 }, .corner_radius = 12, .border_thickness = 4, .enable_shadow = True };
 
 Color black = { 0, 0, 0, 255 };
 Color grey = { 128, 128, 128, 255 };

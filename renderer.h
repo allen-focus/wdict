@@ -2,10 +2,7 @@
 
 #include "pch.h"  // IWYU pragma: keep
 #include "glyph_cache.h"
-#include "lib.h"
-#include "string.h"
-
-#include <stdint.h>
+#include "utils.h"
 
 ///
 

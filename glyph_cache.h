@@ -1,10 +1,7 @@
 #pragma once
 
 #include "pch.h"  // IWYU pragma: keep
-#include "arena.h"
-#include "lib.h"
-
-#include <stdint.h>
+#include "utils.h"
 
 #define GLYPH_ATLAS_WIDTH  1024
 #define GLYPH_ATLAS_HEIGHT 1024

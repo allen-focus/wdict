@@ -1,7 +1,6 @@
 #pragma once
-#include "lib.h"
+#include "utils.h"
 #include "glyph_cache.h"
-#include "string.h"
 
 // clang-format off
 #define ui_box(...) \
@@ -15,7 +14,7 @@
 // but do not override the content's natural size if it falls outside this range.
 //
 // Example 1: Parent width = fit({ .min = 100, .max = 300 }), child is text with 400 width
-//   → The parent can be sized down to 100 (text wraps at that point), 
+//   → The parent can be sized down to 100 (text wraps at that point),
 //     and can grow up to 300 before wrapping stops. The text's intrinsic width (400)
 //     is constrained within this range for wrapping behavior.
 //

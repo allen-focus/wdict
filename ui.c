@@ -1,16 +1,8 @@
 #include "pch.h"  // IWYU pragma: keep
-#include "arena.h"
-#include "lib.h"
-#include "slice.h"
-#include "string.h"
 #include "ui.h"
-#include "unicode.h"
+#include "utils.h"
 
-#include <debugapi.h>
 #include <math.h>
-#include <stdlib.h>
-#include <string.h>
-#include <winuser.h>
 
 #define STACK_SIZE 16
 #define EPSILON 1e-4f
