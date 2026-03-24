@@ -4,6 +4,8 @@
 #include "ui.h"
 #include "utils.h"
 
+#include "thirdparty/tracy/public/tracy/TracyC.h"
+
 #include <math.h>
 #include <wchar.h>
 
@@ -34,7 +36,7 @@ typedef struct
 
 RectStyle background_rect_style = { .border_color = { 0, 0, 0, 0 }, .corner_radius = 0, .border_thickness = 0, .enable_shadow = False };
 RectStyle normal_rect_style = { .border_color = { 0, 0, 0, 0 }, .corner_radius = 12, .border_thickness = 0, .enable_shadow = False };
-RectStyle full_rect_style = { .border_color = { 255, 255, 255, 255 }, .corner_radius = 12, .border_thickness = 4, .enable_shadow = True };
+RectStyle full_rect_style = { .border_color = { 255, 255, 255, 255 }, .corner_radius = 15, .border_thickness = 5, .enable_shadow = True };
 
 Color black = { 0, 0, 0, 255 };
 Color grey = { 128, 128, 128, 255 };
@@ -59,6 +61,10 @@ f32 child_gap_smaller = 3;
 
 static void process_frame(AppContext* app_context)
 {
+    TracyCFrameMark;
+
+    TracyCZone(ctx, 1);
+
     UIContext* ui_context = &app_context->ui;
     GlyphCache* glyph_cache = &app_context->glyph_cache;
     Font* font_ui = &app_context->fonts[FONT_INDEX_UI];
@@ -207,6 +213,8 @@ static void process_frame(AppContext* app_context)
     u32 physical_client_width = (u32)(ui_context->client_width * dpi_scale);
     u32 physical_client_height = (u32)(ui_context->client_height * dpi_scale);
     renderer_flush_and_present(physical_client_width, physical_client_height);
+
+    TracyCZoneEnd(ctx);
 }
 
 static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
@@ -243,14 +251,14 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             PAINTSTRUCT ps;
             BeginPaint(window, &ps);
             {
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(TRACY_ENABLE)
                 LARGE_INTEGER starting_time, ending_time, elapsed_microseconds;
                 LARGE_INTEGER frequency;
                 QueryPerformanceFrequency(&frequency);
                 QueryPerformanceCounter(&starting_time);
 #endif
                 process_frame(app_context);
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(TRACY_ENABLE)
                 QueryPerformanceCounter(&ending_time);
                 elapsed_microseconds.QuadPart = ending_time.QuadPart - starting_time.QuadPart;
                 elapsed_microseconds.QuadPart *= 1000000;
@@ -262,6 +270,17 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 #endif
             }
             EndPaint(window, &ps);
+        } return 0;
+
+        case WM_MOUSEMOVE:
+        {
+            InvalidateRect(window, NULL, False);
+        } return 0;
+
+        case WM_KEYDOWN:
+        {
+            if (wparam == VK_ESCAPE)
+                DestroyWindow(window);
         } return 0;
 
         case WM_SIZE:
@@ -276,14 +295,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 ui_context->on_resize(physical_client_width, physical_client_height);
                 // Force an immediate repaint of entire client area to ensure the updated content is rendered promptly
-                InvalidateRect(window, NULL, FALSE);
+                InvalidateRect(window, NULL, False);
             }
-        } return 0;
-
-        case WM_KEYDOWN:
-        {
-            if (wparam == VK_ESCAPE)
-                DestroyWindow(window);
         } return 0;
 
         case WM_DPICHANGED:
@@ -316,7 +329,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(TRACY_ENABLE)
 i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, i32 nShowCmd)
 #else
 #pragma comment (lib, "libvcruntime")

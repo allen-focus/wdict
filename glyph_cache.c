@@ -13,10 +13,10 @@ void font_register(Font* font, IDWriteFactory3* dwrite_factory, const wchar_t* f
         IDWriteFontFamily* font_family = NULL;
         {
             IDWriteFontCollection* font_collection = NULL;
-            IDWriteFactory3_GetSystemFontCollection(dwrite_factory, &font_collection, FALSE);
+            IDWriteFactory3_GetSystemFontCollection(dwrite_factory, &font_collection, False);
 
             u32 family_index = 0;
-            b32 family_exists = FALSE;
+            b32 family_exists = False;
             IDWriteFontCollection_FindFamilyName(font_collection, font_name, &family_index, &family_exists);
             Assert(family_exists);
 
@@ -137,7 +137,7 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, const u32 cod
     // Get glyph advances
     f32 metrics_scale = physical_pixel_size / (f32)font_metrics.capHeight;
     DWRITE_GLYPH_METRICS design_metrics[1] = { 0 };
-    IDWriteFontFace3_GetDesignGlyphMetrics(font->face3, glyph_indices, 1, design_metrics, FALSE);
+    IDWriteFontFace3_GetDesignGlyphMetrics(font->face3, glyph_indices, 1, design_metrics, False);
     f32 glyph_advances[1] = { design_metrics[0].advanceWidth * metrics_scale };
     glyph->xadvance = (u32)glyph_advances[0];
 

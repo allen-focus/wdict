@@ -4,6 +4,8 @@
 #include "shaders/d3d11_vshader.h"
 #include "utils.h"
 
+#include "thirdparty/tracy/public/tracy/TracyC.h"
+
 ///
 
 #define VERTEX_SIZE 1024
@@ -65,7 +67,7 @@ void swapchain_resize(const u32 client_width, const u32 client_height)
 
     // Resize swapchain
     u32 flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(TRACY_ENABLE)
     flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 #endif
     IDXGISwapChain1_ResizeBuffers(s_renderer_state.swapchain, 0, client_width, client_height, DXGI_FORMAT_UNKNOWN,
@@ -137,7 +139,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
             .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
             .Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT,
         };
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(TRACY_ENABLE)
         desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING,
 #endif
             IDXGIFactory2_CreateSwapChainForHwnd(factory, (IUnknown*)s_renderer_state.device, window, &desc, NULL, NULL,
@@ -297,6 +299,7 @@ void renderer_recreate_glyph_atlas_texture(const GlyphAtlas* glyph_atlas)
 
 void renderer_flush_and_present(const u32 client_width, const u32 client_height)
 {
+    TracyCZone(ctx, 1);
     // Map vertex buffer
     {
         D3D11_MAPPED_SUBRESOURCE mapped;
@@ -366,7 +369,7 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
     WaitForSingleObjectEx(s_renderer_state.frame_latency_waitable_object, 1000, True);
     b32 vsync = True;
     u32 flags = 0;
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(TRACY_ENABLE)
     vsync = False;
     flags |= DXGI_PRESENT_ALLOW_TEARING;
 #endif
@@ -374,6 +377,8 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
 
     // Reset vertex stack
     s_vertex_stack.count = 0;
+
+    TracyCZoneEnd(ctx);
 }
 
 void renderer_deinit()

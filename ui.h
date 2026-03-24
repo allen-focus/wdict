@@ -221,7 +221,3 @@ void ui_calculate_layout(UIContext* ui_context, const GlyphCache* glyph_cache, U
 void ui_generate_render_commands(UIContext* ui_context, const UIBox* box);
 
 UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const String text, const TextConfig* text_config);
-
-///
-
-extern UICommand* g_ui_command_queue;

@@ -2,6 +2,8 @@
 #include "ui.h"
 #include "utils.h"
 
+#include "thirdparty/tracy/public/tracy/TracyC.h"
+
 #include <math.h>
 
 #define STACK_SIZE 16
@@ -408,6 +410,7 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
     if (box->type != BOX_TYPE_CONTAINER)
         return;
 
+
     isize arena_pos_backup = ui_context->arena.pos;
     {
         isize children_count = box->data.container.child_count;
@@ -603,10 +606,12 @@ static void ui_box_apply_text_wrapping(UIContext* ui_context, const GlyphCache* 
 
 void ui_calculate_layout(UIContext* ui_context, const GlyphCache* glyph_cache, UIBox* box)
 {
+    TracyCZone(ctx, 1);
     ui_box_calculate_fit_axis(box, WIDTH);
     ui_box_grow_shrink_children_axis(ui_context, box, WIDTH);
     ui_box_apply_text_wrapping(ui_context, glyph_cache, box);
     ui_box_calculate_fit_axis(box, HEIGHT);
     ui_box_grow_shrink_children_axis(ui_context, box, HEIGHT);
     ui_box_resolve_position(box);
+    TracyCZoneEnd(ctx);
 }
