@@ -135,7 +135,7 @@ float rect_sdf(float2 distance_to_shrunk_corner, float corner_radius)
 }
 
 //
-// sRGB decode & encode 
+// sRGB decode & encode
 // TODO: Need to learn more about the relationship between sRGB and linear color space.
 //
 
@@ -235,6 +235,12 @@ float4 ps(PS_INPUT input) : SV_TARGET
         return float4(input.color.rgb, text_alpha);
     }
 
+    // If the pixel is completely inside, skip subsequent corner‑radius and shadow calculations.
+    float2 d = abs(input.position.xy - input.original_rect_center)
+               - input.original_rect_half_size + max(input.corner_radius, input.border_thickness);
+    if (d.x < -1.0 && d.y < -1.0)
+        return input.color;
+
     // SDF-based rounded rectangle generation
     float2 distance_to_shrunk_corner = calculate_distance_to_shrunk_corner(
         input.position.xy,
@@ -247,7 +253,7 @@ float4 ps(PS_INPUT input) : SV_TARGET
     // but we sample at pixel centers. Need to create a half-pixel (0.5) offset to distance.
     // See: https://www.shadertoy.com/view/dtsXzH#
     float sdf_outer = rect_sdf(distance_to_shrunk_corner, input.corner_radius) + 0.5;
-    
+
     // NOTE: Inner corners become sharp when border_thickness >= corner_radius,
     // because the effective inner corner radius (corner_radius - border_thickness) goes negative.
     float sdf_inner = sdf_outer + input.border_thickness;
