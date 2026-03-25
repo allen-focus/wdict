@@ -84,7 +84,7 @@ typedef struct
 
 typedef struct
 {
-    u8 border_color[4];
+    Color border_color;
     f32 corner_radius, border_thickness;
     b32 enable_shadow;
 } RectStyle;

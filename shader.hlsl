@@ -135,32 +135,6 @@ float rect_sdf(float2 distance_to_shrunk_corner, float corner_radius)
 }
 
 //
-// sRGB decode & encode
-// TODO: Need to learn more about the relationship between sRGB and linear color space.
-//
-
-float3 sRGBToLinear(float3 srgb)
-{
-    srgb = saturate(srgb);
-    return float3(
-        srgb.r < 0.04045 ? srgb.r / 12.92 : pow((srgb.r + 0.055) / 1.055, 2.4),
-        srgb.g < 0.04045 ? srgb.g / 12.92 : pow((srgb.g + 0.055) / 1.055, 2.4),
-        srgb.b < 0.04045 ? srgb.b / 12.92 : pow((srgb.b + 0.055) / 1.055, 2.4)
-    );
-}
-
-float3 linearToSRGB(float3 lin)
-{
-    lin = saturate(lin);
-    return float3(
-        lin.r < 0.0031308 ? lin.r * 12.92 : 1.055 * pow(lin.r, 1.0/2.4) - 0.055,
-        lin.g < 0.0031308 ? lin.g * 12.92 : 1.055 * pow(lin.g, 1.0/2.4) - 0.055,
-        lin.b < 0.0031308 ? lin.b * 12.92 : 1.055 * pow(lin.b, 1.0/2.4) - 0.055
-    );
-}
-
-
-//
 // Rounded Rectangle Blur (see: https://madebyevan.com/shaders/fast-rounded-rectangle-shadows)
 //
 
@@ -263,12 +237,12 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float is_outer = 1.0 - smoothstep(0, 1, sdf_outer);
     float is_inner = 1.0 - smoothstep(0, 1, sdf_inner);
 
-    // Color space conversion and blending
-    float3 texture_linear = sRGBToLinear(input.color.rgb);
+    // Blending
+    float3 texture_linear = input.color.rgb;
     float3 base_linear;
     if (input.border_thickness > 0.0)
     {
-        float3 border_linear = sRGBToLinear(input.border_color.rgb);
+        float3 border_linear = input.border_color.rgb;
         base_linear = lerp(border_linear, texture_linear, is_inner);
     }
     else
@@ -294,11 +268,11 @@ float4 ps(PS_INPUT input) : SV_TARGET
     }
 
     // Alpha compositing using Porter-Duff "Over" operation
-    float3 shadow_color = float3(0.2, 0.2, 0.2);
+    float3 shadow_color = float3(0.1, 0.1, 0.1);
     float3 composed_rgb_linear = base_alpha * base_linear + shadow_alpha * shadow_color * (1.0 - base_alpha);
     float composed_alpha = base_alpha + shadow_alpha * (1.0 - base_alpha);
 
-    // Convert back to sRGB and handle premultiplied alpha
-    float3 final_srgb = linearToSRGB(composed_rgb_linear / max(composed_alpha, 1e-6));
+    // Handle premultiplied alpha
+    float3 final_srgb = composed_rgb_linear / max(composed_alpha, 1e-6);
     return float4(final_srgb, composed_alpha);
 }

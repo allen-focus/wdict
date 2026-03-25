@@ -1,5 +1,6 @@
 #include "pch.h"  // IWYU pragma: keep
 #include "glyph_cache.h"
+#include "math.h"
 #include "shaders/d3d11_pshader.h"
 #include "shaders/d3d11_vshader.h"
 #include "utils.h"
@@ -12,15 +13,26 @@
 
 ///
 
-// NOTE: color uses u8 to save memory; scaled to 0.0-1.0 in the shader via R8G8B8A8_UNORM.
-// And we don't want rect to be scaled, so let them be f32.
 typedef struct
 {
-    f32 target_rect[4];
-    f32 texture_rect[4];
-    u8 color[4];
-    u8 border_color[4];
-    f32 style_params[4];
+    f32 r, g, b, a;
+} ColorF32;
+
+typedef struct
+{
+    f32 corner_radius;
+    f32 border_thickness;
+    f32 enable_shadow;
+    f32 is_text;
+} VertexStyle;
+
+typedef struct
+{
+    Rect target_rect;
+    Rect texture_rect;
+    ColorF32 color;
+    ColorF32 border_color;
+    VertexStyle style_params;
 } Vertex;
 
 typedef struct
@@ -75,7 +87,11 @@ void swapchain_resize(const u32 client_width, const u32 client_height)
     // Create render target view for new backbuffer texture
     ID3D11Texture2D* texture;
     IDXGISwapChain1_GetBuffer(s_renderer_state.swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
-    ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, NULL,
+    D3D11_RENDER_TARGET_VIEW_DESC desc = {
+        .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+        .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D
+    };
+    ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, &desc,
                                         &s_renderer_state.render_target_view);
     ID3D11Texture2D_Release(texture);
 }
@@ -155,7 +171,11 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
     {
         ID3D11Texture2D* texture;
         IDXGISwapChain1_GetBuffer(s_renderer_state.swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
-        ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, NULL,
+        D3D11_RENDER_TARGET_VIEW_DESC desc = {
+            .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+            .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D
+        };
+        ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, &desc,
                                             &s_renderer_state.render_target_view);
         ID3D11Texture2D_Release(texture);
     }
@@ -239,8 +259,8 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
             // SemanticName,      SemanticIndex, Format,                         InputSlot, AlignedByteOffset,                  InputSlotClass,                InstanceDataStepRate
             { "TARGET_RECT",      0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, target_rect),      D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "TEXTURE_RECT",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, texture_rect),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",            0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, color),            D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "BORDER_COLOR",     0,             DXGI_FORMAT_R8G8B8A8_UNORM,     0,         offsetof(Vertex, border_color),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",            0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, color),            D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "BORDER_COLOR",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, border_color),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "STYLE_PARAMS",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, style_params),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
         };
         // clang-format on
@@ -399,6 +419,27 @@ void renderer_deinit()
 }
 
 //
+// sRGB and linear
+//
+
+static f32 srgb_to_linear(f32 c)
+{
+    if (c <= 0.04045f) return c / 12.92f;
+    return powf((c + 0.055f) / 1.055f, 2.4f);
+}
+
+static ColorF32 color_srgb_to_linear(Color color_srgb)
+{
+    ColorF32 color_linear = {
+        .r = srgb_to_linear(color_srgb.r / 255.0f),
+        .g = srgb_to_linear(color_srgb.g / 255.0f),
+        .b = srgb_to_linear(color_srgb.b / 255.0f),
+        .a = color_srgb.a / 255.0f,
+    };
+    return color_linear;
+}
+
+//
 // rect push
 //
 
@@ -410,29 +451,29 @@ static void renderer_rect_push(const Rect target_rect, const Rect texture_rect, 
 
     // Update target rect
     {
-        vertex->target_rect[0] = target_rect.xmin;
-        vertex->target_rect[1] = target_rect.ymin;
-        vertex->target_rect[2] = target_rect.xmax;
-        vertex->target_rect[3] = target_rect.ymax;
+        vertex->target_rect.xmin = target_rect.xmin;
+        vertex->target_rect.ymin = target_rect.ymin;
+        vertex->target_rect.xmax = target_rect.xmax;
+        vertex->target_rect.ymax = target_rect.ymax;
     }
 
     // Update texture rect
     {
-        vertex->texture_rect[0] = texture_rect.xmin / (f32)GLYPH_ATLAS_WIDTH;
-        vertex->texture_rect[1] = texture_rect.ymin / (f32)GLYPH_ATLAS_HEIGHT;
-        vertex->texture_rect[2] = texture_rect.xmax / (f32)GLYPH_ATLAS_WIDTH;
-        vertex->texture_rect[3] = texture_rect.ymax / (f32)GLYPH_ATLAS_HEIGHT;
+        vertex->texture_rect.xmin = texture_rect.xmin / (f32)GLYPH_ATLAS_WIDTH;
+        vertex->texture_rect.ymin = texture_rect.ymin / (f32)GLYPH_ATLAS_HEIGHT;
+        vertex->texture_rect.xmax = texture_rect.xmax / (f32)GLYPH_ATLAS_WIDTH;
+        vertex->texture_rect.ymax = texture_rect.ymax / (f32)GLYPH_ATLAS_HEIGHT;
     }
 
     // Update color & border color
-    memcpy(vertex->color, &color, sizeof(color));
-    memcpy(vertex->border_color, style.border_color, sizeof(style.border_color));
+    vertex->color = color_srgb_to_linear(color);
+    vertex->border_color = color_srgb_to_linear(style.border_color);
 
     // Update style parameters
-    vertex->style_params[0] = style.corner_radius;
-    vertex->style_params[1] = style.border_thickness;
-    vertex->style_params[2] = (f32)style.enable_shadow;
-    vertex->style_params[3] = 0.0f; // is_text flag (0 = rect, 1 = text)
+    vertex->style_params.corner_radius = style.corner_radius;
+    vertex->style_params.border_thickness = style.border_thickness;
+    vertex->style_params.enable_shadow = (f32)style.enable_shadow;
+    vertex->style_params.is_text = 0.0f; // is_text flag (0 = rect, 1 = text)
 
     s_vertex_stack.count++;
 }
@@ -551,7 +592,7 @@ void renderer_draw_text(IDWriteFactory3* dwrite_factory, GlyphCache* glyph_cache
 
         // Mark this as text rendering by setting style_params[3]
         Vertex* vertex = &s_vertex_stack.data[s_vertex_stack.count - 1];
-        vertex->style_params[3] = 1.0f; // is_text flag
+        vertex->style_params.is_text = 1.0f; // is_text flag
 
         // Update x position for next char
         next_position_x += (f32)glyph->xadvance;
