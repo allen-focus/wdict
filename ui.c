@@ -151,11 +151,17 @@ UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const
                     isize end = start_codepoint < 127 ? ptr - text.data : next - text.data;
                     f32 word_width = ui_context->get_text_width(glyph_cache, str_slice(text, start, end), ui_context->dpi, text_box->data.text.font, text_box->data.text.font_size);
                     min_width = max(min_width, word_width);
+                    word_count++;
                 }
                 start = next - text.data;
             }
             ptr = next;
         }
+
+        // Handle last word
+        f32 word_width = ui_context->get_text_width(glyph_cache, str_slice(text, start, text.len), ui_context->dpi, text_box->data.text.font, text_box->data.text.font_size);
+        min_width = max(min_width, word_width);
+        word_count++;
 
         whole_text_width = ui_context->get_text_width(glyph_cache, text_box->data.text.content, ui_context->dpi, text_box->data.text.font, text_box->data.text.font_size);
         min_width = (min_width != 0) ? min_width : whole_text_width;
