@@ -328,14 +328,13 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
         {
             if (parent->config.direction == parent_ctx.main_direction)
             {
-                *parent_ctx.size += box->type == BOX_TYPE_TEXT ? *box_ctx.min_size : *box_ctx.size;
+                *parent_ctx.size += *box_ctx.size;
                 *parent_ctx.min_size += *box_ctx.min_size;
             }
             else
             {
                 f32 padding = parent_ctx.padding_start + parent_ctx.padding_end;
-                f32 box_size = box->type == BOX_TYPE_TEXT ? *box_ctx.min_size : *box_ctx.size;
-                *parent_ctx.size = max(box_size + padding, *parent_ctx.size);
+                *parent_ctx.size = max(*box_ctx.size + padding, *parent_ctx.size);
                 *parent_ctx.min_size = max(*box_ctx.min_size + padding, *parent_ctx.min_size);
             }
         }
