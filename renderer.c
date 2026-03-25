@@ -73,7 +73,7 @@ static VertexStack s_vertex_stack = { 0 };
 void swapchain_resize(const u32 client_width, const u32 client_height)
 {
     // Release old swapchain buffers
-    ID3D11DeviceContext_ClearState(s_renderer_state.context);
+    ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 0, NULL, NULL);
     ID3D11RenderTargetView_Release(s_renderer_state.render_target_view);
 
     // Resize swapchain
