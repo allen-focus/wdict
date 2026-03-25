@@ -66,12 +66,22 @@ typedef struct
 static RendererState s_renderer_state;
 static VertexStack s_vertex_stack = { 0 };
 
+void renderer_wait_for_last_submitted_frame()
+{
+    // TODO: Need investigate the input latency issue more
+    // https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains
+    // (1000 is the timeout fallback; should never trigger under normal rendering)
+    WaitForSingleObjectEx(s_renderer_state.frame_latency_waitable_object, 1000, True);
+}
+
 //
 // swapchain resize
 //
 
 void swapchain_resize(const u32 client_width, const u32 client_height)
 {
+    TracyCZone(ctx, 1);
+
     // Release old swapchain buffers
     ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 0, NULL, NULL);
     ID3D11RenderTargetView_Release(s_renderer_state.render_target_view);
@@ -94,6 +104,8 @@ void swapchain_resize(const u32 client_width, const u32 client_height)
     ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, &desc,
                                         &s_renderer_state.render_target_view);
     ID3D11Texture2D_Release(texture);
+
+    TracyCZoneEnd(ctx);
 }
 
 //
@@ -382,10 +394,6 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
     // clang-format on
 
     // Present
-    // TODO: Need investigate the input latency issue more
-    // https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains
-    // (1000 is the timeout fallback; should never trigger under normal rendering)
-    WaitForSingleObjectEx(s_renderer_state.frame_latency_waitable_object, 1000, True);
     b32 vsync = True;
     u32 flags = 0;
 #if !defined(NDEBUG) || defined(TRACY_ENABLE)

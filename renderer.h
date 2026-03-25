@@ -10,6 +10,7 @@ void swapchain_resize(const u32 client_width, const u32 client_height);
 
 void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas);
 void renderer_recreate_glyph_atlas_texture(const GlyphAtlas* glyph_atlas);
+void renderer_wait_for_last_submitted_frame();
 void renderer_flush_and_present(const u32 client_width, const u32 client_height);
 void renderer_deinit();
 

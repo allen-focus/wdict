@@ -30,6 +30,7 @@ typedef struct
     IDWriteFactory3* dwrite_factory;
     Font fonts[FONT_CAPACITY];
     GlyphCache glyph_cache;
+    u64 frame_count;
 } AppContext;
 
 ///
@@ -37,6 +38,9 @@ typedef struct
 static void process_frame(AppContext* app_context)
 {
     TracyCFrameMark;
+
+    if (app_context->frame_count > 0)
+        renderer_wait_for_last_submitted_frame();
 
     TracyCZone(ctx, 1);
 
@@ -700,6 +704,8 @@ static void process_frame(AppContext* app_context)
     u32 physical_client_height = (u32)(ui_context->client_height * dpi_scale);
     renderer_flush_and_present(physical_client_width, physical_client_height);
 
+    app_context->frame_count++;
+
     TracyCZoneEnd(ctx);
 }
 
@@ -852,7 +858,8 @@ i32 WinMainCRTStartup()
                 .next_y = 0,
                 .maxy = 0,
             }
-        }
+        },
+        .frame_count = 0,
     };
 
     // Create window
