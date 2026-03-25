@@ -17,7 +17,6 @@
 typedef struct
 {
     f32 target_rect[4];
-    f32 original_rect[4];
     f32 texture_rect[4];
     u8 color[4];
     u8 border_color[4];
