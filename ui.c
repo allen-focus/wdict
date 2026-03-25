@@ -131,6 +131,7 @@ UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const
     isize word_count = 0;
     {
         String text = text_box->data.text.content;
+        Assert(text.len == 0 || (text.data[0] != ' ' && text.data[text.len - 1] != ' '));
 
         isize start = 0;
         u32 start_codepoint = 0;
@@ -152,7 +153,6 @@ UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const
                     min_width = max(min_width, word_width);
                 }
                 start = next - text.data;
-                word_count++;
             }
             ptr = next;
         }
