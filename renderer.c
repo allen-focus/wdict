@@ -68,9 +68,6 @@ static VertexStack s_vertex_stack = { 0 };
 
 void renderer_wait_for_last_submitted_frame()
 {
-    // TODO: Need investigate the input latency issue more
-    // https://learn.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains
-    // (1000 is the timeout fallback; should never trigger under normal rendering)
     WaitForSingleObjectEx(s_renderer_state.frame_latency_waitable_object, 1000, True);
 }
 

@@ -37,8 +37,6 @@ typedef struct
 
 static void process_frame(AppContext* app_context)
 {
-    TracyCFrameMark;
-
     if (app_context->frame_count > 0)
         renderer_wait_for_last_submitted_frame();
 
@@ -738,36 +736,16 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     // Handle message
     switch (message)
     {
+
+#ifndef TRACY_ENABLE
         case WM_PAINT:
         {
             PAINTSTRUCT ps;
             BeginPaint(window, &ps);
-            {
-#if !defined(NDEBUG) || defined(TRACY_ENABLE)
-                LARGE_INTEGER starting_time, ending_time, elapsed_microseconds;
-                LARGE_INTEGER frequency;
-                QueryPerformanceFrequency(&frequency);
-                QueryPerformanceCounter(&starting_time);
-#endif
-                process_frame(app_context);
-#if !defined(NDEBUG) || defined(TRACY_ENABLE)
-                QueryPerformanceCounter(&ending_time);
-                elapsed_microseconds.QuadPart = ending_time.QuadPart - starting_time.QuadPart;
-                elapsed_microseconds.QuadPart *= 1000000;
-                elapsed_microseconds.QuadPart /= frequency.QuadPart;
-
-                // Set window title to show frame time
-                swprintf(app_context->title, MAX_TITLE_LENGTH, L"Frame Time: %lld μs", elapsed_microseconds.QuadPart);
-                SetWindowTextW(window, app_context->title);
-#endif
-            }
+            process_frame(app_context);
             EndPaint(window, &ps);
         } return 0;
-
-        case WM_MOUSEMOVE:
-        {
-            InvalidateRect(window, NULL, False);
-        } return 0;
+#endif
 
         case WM_KEYDOWN:
         {
@@ -908,11 +886,28 @@ i32 WinMainCRTStartup()
 
     // Run message loop
     MSG message;
+#ifdef TRACY_ENABLE
+    while(True)
+    {
+        if (PeekMessageW(&message, 0, 0, 0, PM_REMOVE))
+        {
+            if (message.message == WM_QUIT)
+                break;
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+            continue;
+        }
+
+        TracyCFrameMark;
+        process_frame(&app_context);
+    }
+#else
     while (GetMessageW(&message, NULL, 0, 0))
     {
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
+#endif
 
     // Clean
     renderer_deinit();
