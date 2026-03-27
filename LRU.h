@@ -4,8 +4,8 @@
 
 ///
 
-#define HASH_CHAIN_HEAD_CAPACITY 4
-#define ENTRY_CAPACITY 8
+#define HASH_CHAIN_HEAD_CAPACITY 1024 // must be power of two
+#define ENTRY_CAPACITY 4096 // must be power of two
 
 ///
 
@@ -46,7 +46,7 @@ typedef struct {
 
 ///
 
-void lru_cache_create(Arena* arena, LRUCache* lru_cache, isize hash_chain_head_capacity, isize entry_capacity,
-                      isize key_size, isize value_size, hash_fn hash, is_same_fn is_same);
+LRUCache lru_cache_create(Arena* arena, isize hash_chain_head_capacity, isize entry_capacity, isize key_size,
+                          isize value_size, hash_fn hash, is_same_fn is_same);
 void lru_cache_destroy(LRUCache* lru_cache);
-u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, void* value, b32* found);
+u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, b32* found);

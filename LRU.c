@@ -24,33 +24,34 @@
 //                       |                  | next_with_same_hash                                 |
 //                       +------------------+-----------------------------------------------------+
 //
-void lru_cache_create(Arena* arena, LRUCache* lru_cache, isize hash_chain_head_capacity, isize entry_capacity,
-                      isize key_size, isize value_size, hash_fn hash, is_same_fn is_same)
+LRUCache lru_cache_create(Arena* arena, isize hash_chain_head_capacity, isize entry_capacity, isize key_size,
+                          isize value_size, hash_fn hash, is_same_fn is_same)
 {
     Assert(hash_chain_head_capacity > 0);
     Assert(entry_capacity > 0);
+    LRUCache lru_cache = { 0 };
 
-    memset(lru_cache, 0, sizeof(*lru_cache));
-    lru_cache->hash_chain_heads = arena_push(arena, sizeof(isize), _Alignof(isize), hash_chain_head_capacity);
-    lru_cache->entries = arena_push(arena, sizeof(Entry), _Alignof(Entry), entry_capacity);
+    lru_cache.hash_chain_heads = arena_push(arena, sizeof(u32), _Alignof(u32), hash_chain_head_capacity);
+    lru_cache.entries = arena_push(arena, sizeof(Entry), _Alignof(Entry), entry_capacity);
 
     isize align = 16; // Hard-code align
-    lru_cache->keys_buf   = arena_push(arena, key_size,   align, entry_capacity);
-    lru_cache->values_buf = arena_push(arena, value_size, align, entry_capacity);
+    lru_cache.keys_buf   = arena_push(arena, key_size,   align, entry_capacity);
+    lru_cache.values_buf = arena_push(arena, value_size, align, entry_capacity);
 
     // NOTE: Before the entry list becomes full, `sentinel->next_with_same_hash` indicates the index of the next free
     // entry. After the entry list is full, `sentinel->next_with_same_hash` is always 0. In this state, consecutive LRU
     // pops are not allowed. A pop must be immediately followed by an insertion to keep the cache at full
-    Entry* sentinel = &lru_cache->entries[0];
+    Entry* sentinel = &lru_cache.entries[0];
     sentinel->next_with_same_hash = 1;
 
-    lru_cache->hash_chain_head_capacity = hash_chain_head_capacity;
-    lru_cache->entry_capacity = entry_capacity;
-    lru_cache->key_size = key_size;
-    lru_cache->value_size = value_size;
+    lru_cache.hash_chain_head_capacity = hash_chain_head_capacity;
+    lru_cache.entry_capacity = entry_capacity;
+    lru_cache.key_size = key_size;
+    lru_cache.value_size = value_size;
 
-    lru_cache->hash = hash;
-    lru_cache->is_same = is_same;
+    lru_cache.hash = hash;
+    lru_cache.is_same = is_same;
+    return lru_cache;
 }
 
 void lru_cache_destroy(LRUCache* lru_cache)
@@ -157,7 +158,8 @@ static u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
 //    |           |                                |               |     |           |          |
 //    +-----------+--------------------------------+               |     +-----------+----------+
 //
-u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, void* value, b32* found)
+// NOTE: User need to assign entry value using returned entry index
+u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, b32* found)
 {
     Entry* sentinel = &lru_cache->entries[0];
 
@@ -215,9 +217,7 @@ u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, void* value, b32* f
 
         // Assign value
         void* entry_key = (byte*)lru_cache->keys_buf + entry_index * lru_cache->key_size;
-        void* entry_value = (byte*)lru_cache->values_buf + entry_index * lru_cache->value_size;
         memcpy(entry_key, key, lru_cache->key_size);
-        memcpy(entry_value, value, lru_cache->value_size);
         entry->hash_chain_head_index = hash_chain_head_index;
 
         // Insert the new entry at the head of the hash chain
