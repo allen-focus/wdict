@@ -56,7 +56,7 @@ typedef struct
 typedef struct
 {
     UICommandBase base;
-    Font* font;
+    Font font;
     f32 font_size;
     String content;
     Color color;
@@ -143,7 +143,7 @@ typedef struct
 
 typedef struct
 {
-    Font* font;
+    Font font;
     f32 font_size;
     Color color;
     f32 line_height;
@@ -165,7 +165,7 @@ typedef struct
 
 typedef struct
 {
-    Font* font;
+    Font font;
     f32 font_size;
     String content;
     Color color;
@@ -205,8 +205,8 @@ typedef struct
     u32 client_width; // logic client width
     u32 client_height; // logic client height
     void (*on_resize)(const u32 client_width, const u32 client_height);
-    f32 (*get_text_width)(const GlyphCache* glyph_cache, const String text, const u32 dpi, Font* font, f32 font_size);
-    f32 (*get_text_height)(const GlyphCache* glyph_cache, const String text, const u32 dpi, Font* font, f32 font_size);
+    f32 (*get_text_width)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
+    f32 (*get_text_height)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
     Queue(UICommand, COMMAND_QUEUE_SIZE) command_queue;
 } UIContext;
 
@@ -217,7 +217,7 @@ UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
 UIBox* ui_box_get_root();
 
-void ui_calculate_layout(UIContext* ui_context, const GlyphCache* glyph_cache, UIBox* box);
+void ui_calculate_layout(UIContext* ui_context, GlyphCache* glyph_cache, UIBox* box);
 void ui_generate_render_commands(UIContext* ui_context, const UIBox* box);
 
-UIBox* ui_text(const UIContext* ui_context, const GlyphCache* glyph_cache, const String text, const TextConfig* text_config);
+UIBox* ui_text(const UIContext* ui_context, GlyphCache* glyph_cache, const String text, const TextConfig* text_config);

@@ -1,4 +1,5 @@
 #include "pch.h" // IWYU pragma: keep
+#include "LRU.h"
 #include "glyph_cache.h"
 #include "utils.h"
 
@@ -52,58 +53,63 @@ void font_unregister(Font* font)
 // atlas
 //
 
-void atlas_insert_glyph(GlyphAtlas* atlas, Glyph* glyph, byte* glyph_bitmap)
+void atlas_insert_glyph(GlyphAtlas* atlas, GlyphInfo* glyph_info, byte* glyph_bitmap)
 {
     // Update the position information of glyph and atlas
-    atlas->maxy = max(atlas->maxy, atlas->next_y + glyph->info.h);
+    atlas->maxy = max(atlas->maxy, atlas->next_y + glyph_info->h);
     Assert(atlas->maxy <= atlas->h);
-    if (atlas->next_x + glyph->info.w > atlas->w)
+    if (atlas->next_x + glyph_info->w > atlas->w)
     {
-        Assert(atlas->maxy + glyph->info.h <= atlas->h);
+        Assert(atlas->maxy + glyph_info->h <= atlas->h);
         atlas->next_y = atlas->maxy;
         atlas->next_x = 0;
     }
-    glyph->info.atlas_x = atlas->next_x;
-    glyph->info.atlas_y = atlas->next_y;
+    glyph_info->atlas_x = atlas->next_x;
+    glyph_info->atlas_y = atlas->next_y;
 
     // Insert glyph bitmap into atlas
-    for (u32 y = 0; y < glyph->info.h; y++)
-        for (u32 x = 0; x < glyph->info.w; x++)
+    for (u32 y = 0; y < glyph_info->h; y++)
+        for (u32 x = 0; x < glyph_info->w; x++)
         {
-            u8 grayscale = glyph_bitmap[glyph->info.w * y + x];
+            u8 grayscale = glyph_bitmap[glyph_info->w * y + x];
             atlas->bitmap[(atlas->next_y + y) * atlas->w + (atlas->next_x + x)] = grayscale;
         }
-    atlas->next_x += glyph->info.w;
+    atlas->next_x += glyph_info->w;
 }
 
 //
 // glyph cache
 //
-// NOTE: Currently, it lacks advanced features such as LRU (Least Recently Used) management or
-// other optimization techniques, serving merely as a straightforward storage mechanism for glyphs
-// and their associated atlas data.
-//
 
-void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length)
+static b32 is_same_glyph_key(const void* a, const void* b, isize size)
+{
+    return memcmp(a, b, size) == 0;
+}
+
+void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length, IDWriteFactory3* dwrite_factory)
 {
     GlyphAtlas* atlas = &glyph_cache->atlas;
     atlas->bitmap = arena_push(&glyph_cache->arena, sizeof(u8), _Alignof(u8), atlas->w * atlas->h);
-    glyph_cache->glyphs = arena_push(&glyph_cache->arena, sizeof(Glyph), _Alignof(Glyph), glyphs_length);
+    glyph_cache->lru_cache = lru_cache_create(&glyph_cache->arena, HASH_CHAIN_HEAD_CAPACITY, ENTRY_CAPACITY,
+                                              sizeof(GlyphKey), sizeof(GlyphInfo), fnv1a_hash, is_same_glyph_key);
+
 
     // Insert a 3x3 white region to bottom-right corner of glyph atlas
-    Glyph* white_glyph = &glyph_cache->glyphs[GLYPHS_LENGTH - 1];
-    white_glyph->info.atlas_x = GLYPH_ATLAS_WIDTH - 3;
-    white_glyph->info.atlas_y = GLYPH_ATLAS_HEIGHT - 3;
-    white_glyph->info.w = 3;
-    white_glyph->info.h = 3;
+    GlyphInfo* white_glyph = (GlyphInfo*)glyph_cache->lru_cache.values_buf;
+    white_glyph->atlas_x = GLYPH_ATLAS_WIDTH - 3;
+    white_glyph->atlas_y = GLYPH_ATLAS_HEIGHT - 3;
+    white_glyph->w = 3;
+    white_glyph->h = 3;
     for (isize y = 0; y < 3; y++)
         for (isize x = 0; x < 3; x++)
-            glyph_cache->atlas.bitmap[(white_glyph->info.atlas_y + y) * GLYPH_ATLAS_WIDTH + (white_glyph->info.atlas_x + x)] = 255;
+            glyph_cache->atlas.bitmap[(white_glyph->atlas_y + y) * GLYPH_ATLAS_WIDTH + (white_glyph->atlas_x + x)] = 255;
+
+    glyph_cache->dwrite_factory = dwrite_factory;
 }
 
 void glyph_cache_deinit(GlyphCache* glyph_cache)
 {
-    glyph_cache->glyphs = NULL;
+    memset(&glyph_cache->lru_cache, 0, sizeof(glyph_cache->lru_cache));
 
     GlyphAtlas* atlas = &glyph_cache->atlas;
     atlas->bitmap = NULL;
@@ -114,40 +120,33 @@ void glyph_cache_deinit(GlyphCache* glyph_cache)
     arena_pop_to(&glyph_cache->arena, 0);
 }
 
-u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, u32 codepoint, Glyph* glyph, Font* font,
-                    f32 font_size, const u32 dpi)
+u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* glyph_info, u32 codepoint,
+                    const Font font, const f32 font_size, const u32 dpi)
 {
-    glyph->info.valid = True;
-
-    glyph->key.font = font;
-    glyph->key.font_size = font_size;
-    glyph->key.codepoint = codepoint;
-
     // Get pixel size & scale, see: https://learn.microsoft.com/en-us/windows/win32/learnwin32/dpi-and-device-independent-pixels
     DWRITE_FONT_METRICS font_metrics = { 0 };
-    IDWriteFontFace_GetMetrics(font->face, &font_metrics);
+    IDWriteFontFace_GetMetrics(font.face, &font_metrics);
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     f32 physical_pixel_size = font_size * dpi_scale;
 
     // Get glyph indices
-    glyph->key.codepoint = codepoint;
-    u32 codepoints[1] = { glyph->key.codepoint };
+    u32 codepoints[1] = { codepoint };
     u16 glyph_indices[1] = { 0 };
-    IDWriteFontFace_GetGlyphIndices(font->face, codepoints, 1, glyph_indices);
+    IDWriteFontFace_GetGlyphIndices(font.face, codepoints, 1, glyph_indices);
 
     // Get glyph advances
     f32 metrics_scale = physical_pixel_size / (f32)font_metrics.capHeight;
     DWRITE_GLYPH_METRICS design_metrics[1] = { 0 };
-    IDWriteFontFace3_GetDesignGlyphMetrics(font->face3, glyph_indices, 1, design_metrics, False);
+    IDWriteFontFace3_GetDesignGlyphMetrics(font.face3, glyph_indices, 1, design_metrics, False);
     f32 glyph_advances[1] = { design_metrics[0].advanceWidth * metrics_scale };
-    glyph->info.xadvance = (u32)glyph_advances[0];
+    glyph_info->xadvance = (u32)glyph_advances[0];
 
     // Get glyph offsets
     DWRITE_GLYPH_OFFSET glyph_offsets[1] = { 0 };
 
     // Glyph run analysis
     DWRITE_GLYPH_RUN run = {
-        .fontFace = font->face,
+        .fontFace = font.face,
         .fontEmSize = (f32)font_metrics.designUnitsPerEm * metrics_scale,
         .glyphCount = 1,
         .glyphIndices = glyph_indices,
@@ -180,12 +179,12 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, u32 codepoint
         RECT bounds = { 0 };
         IDWriteGlyphRunAnalysis_GetAlphaTextureBounds(analysis, type, &bounds);
 
-        glyph->info.xoff = bounds.left;
-        glyph->info.yoff = bounds.top;
-        glyph->info.w = bounds.right - bounds.left;
-        glyph->info.h = bounds.bottom - bounds.top;
+        glyph_info->xoff = bounds.left;
+        glyph_info->yoff = bounds.top;
+        glyph_info->w = bounds.right - bounds.left;
+        glyph_info->h = bounds.bottom - bounds.top;
 
-        u32 bitmap_size = glyph->info.w * glyph->info.h;
+        u32 bitmap_size = glyph_info->w * glyph_info->h;
         glyph_bitmap = arena_push(arena, sizeof(u8), _Alignof(u8), bitmap_size);
         IDWriteGlyphRunAnalysis_CreateAlphaTexture(analysis, type, &bounds, glyph_bitmap, bitmap_size);
         IDWriteGlyphRunAnalysis_Release(analysis);
@@ -193,16 +192,10 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, u32 codepoint
     return glyph_bitmap;
 }
 
-Glyph* glyph_lookup(Glyph* glyphs, u32 codepoint, Font* font, f32 font_size)
+GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size, b32* found)
 {
     GlyphKey key = { font, font_size, codepoint };
-    isize idx = fnv1a_hash((void*)&key, sizeof(key)) & (GLYPHS_CP_LENGTH - 1);
-    for (isize i = 0; i < GLYPHS_CP_LENGTH; i++)
-    {
-        Glyph* glyph = &glyphs[idx];
-        if (!glyph->info.valid || glyph->key.codepoint == codepoint)
-            return glyph;
-        idx = (idx + 1) & (GLYPHS_CP_LENGTH - 1);
-    }
-    return NULL;
+    u32 entry_index = lru_cache_find_or_insert(&glyph_cache->lru_cache, &key, found);
+    GlyphInfo* glyph_info = (GlyphInfo*)((byte*)glyph_cache->lru_cache.values_buf + entry_index * glyph_cache->lru_cache.value_size);
+    return glyph_info;
 }

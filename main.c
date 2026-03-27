@@ -72,9 +72,9 @@ static void process_frame(AppContext* app_context)
     // Alias
     UIContext* ui_context = &app_context->ui;
     GlyphCache* glyph_cache = &app_context->glyph_cache;
-    Font* font_ui = &app_context->fonts[FONT_INDEX_UI];
-    Font* font_zh = &app_context->fonts[FONT_INDEX_ZH];
-    Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
+    Font font_ui = app_context->fonts[FONT_INDEX_UI];
+    Font font_zh = app_context->fonts[FONT_INDEX_ZH];
+    Font font_mono = app_context->fonts[FONT_INDEX_MONO];
 
     ///
 
@@ -688,7 +688,7 @@ static void process_frame(AppContext* app_context)
                 renderer_draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
                 break;
             case UI_COMMAND_TEXT:
-                renderer_draw_text(app_context->dwrite_factory, glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, ui_context->dpi, cmd->text.font, cmd->text.font_size);
+                renderer_draw_text(glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, cmd->text.font, cmd->text.font_size, ui_context->dpi);
                 break;
             default:
                 Assert(0);
@@ -773,7 +773,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ui_context->dpi = GetDpiForWindow(window);
             glyph_cache_deinit(glyph_cache);
-            glyph_cache_init(glyph_cache, GLYPHS_LENGTH);
+            glyph_cache_init(glyph_cache, GLYPHS_LENGTH, app_context->dwrite_factory);
             renderer_recreate_glyph_atlas_texture(&glyph_cache->atlas);
 
             // NOTE:
@@ -827,7 +827,6 @@ i32 WinMainCRTStartup()
         .fonts = NULL,
         .glyph_cache = {
             .arena = arena_new(MB(32)),
-            .glyphs = NULL,
             .atlas = {
                 .w = GLYPH_ATLAS_WIDTH,
                 .h = GLYPH_ATLAS_HEIGHT,
@@ -835,7 +834,8 @@ i32 WinMainCRTStartup()
                 .next_x = 0,
                 .next_y = 0,
                 .maxy = 0,
-            }
+            },
+            .lru_cache = { 0 }
         },
         .frame_count = 0,
     };
@@ -876,7 +876,7 @@ i32 WinMainCRTStartup()
     font_register(&app_context.fonts[FONT_INDEX_UI], app_context.dwrite_factory, L"Segoe UI");
     font_register(&app_context.fonts[FONT_INDEX_ZH], app_context.dwrite_factory, L"Microsoft YaHei");
     font_register(&app_context.fonts[FONT_INDEX_MONO], app_context.dwrite_factory, L"Consolas");
-    glyph_cache_init(&app_context.glyph_cache, GLYPHS_LENGTH);
+    glyph_cache_init(&app_context.glyph_cache, GLYPHS_LENGTH, app_context.dwrite_factory);
     renderer_init(window, &app_context.glyph_cache.atlas);
 
     // Render first frame before showing window

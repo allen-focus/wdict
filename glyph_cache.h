@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pch.h"  // IWYU pragma: keep
+#include "LRU.h"
 #include "utils.h"
 
 #define GLYPH_ATLAS_WIDTH  2048
@@ -18,10 +19,9 @@ typedef struct
     IDWriteFontFace3* face3;
 } Font;
 
-
 typedef struct
 {
-    Font* font;
+    Font font;
     f32 font_size; // Controls capital letter height in pixels
     u32 codepoint;
 } GlyphKey;
@@ -31,15 +31,7 @@ typedef struct
     u32 w, h, xadvance;
     i32 xoff, yoff;
     u16 atlas_x, atlas_y;
-    b32 valid;
 } GlyphInfo;
-
-// physical pixels, not logic
-typedef struct
-{
-    GlyphKey key;
-    GlyphInfo info;
-} Glyph;
 
 // physical pixels, not logic
 typedef struct
@@ -58,7 +50,8 @@ typedef struct
 {
     Arena arena;
     GlyphAtlas atlas;
-    Glyph* glyphs;
+    LRUCache lru_cache;
+    IDWriteFactory3* dwrite_factory;
 } GlyphCache;
 
 ///
@@ -66,10 +59,11 @@ typedef struct
 void font_register(Font* font, IDWriteFactory3* dwrite_factory, const wchar_t* font_name);
 void font_unregister(Font* font);
 
-void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length);
+void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length, IDWriteFactory3* dwrite_factory);
 void glyph_cache_deinit(GlyphCache* glyph_cache);
-u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, const u32 codepoint, Glyph* glyph,
-                    Font* font, f32 font_size, const u32 dpi);
-Glyph* glyph_lookup(Glyph* glyphs, u32 codepoint, Font* font, f32 font_size);
+u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* glyph_info, u32 codepoint,
+                    const Font font, const f32 font_size, const u32 dpi);
 
-void atlas_insert_glyph(GlyphAtlas* atlas, Glyph* glyph, byte* glyph_bitmap);
+GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size, b32* found);
+
+void atlas_insert_glyph(GlyphAtlas* atlas, GlyphInfo* glyph_info, byte* glyph_bitmap);
