@@ -157,7 +157,7 @@ static u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
 //    |           |                                |               |     |           |          |
 //    +-----------+--------------------------------+               |     +-----------+----------+
 //
-u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, void* value)
+u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, void* value, b32* found)
 {
     Entry* sentinel = &lru_cache->entries[0];
 
@@ -169,20 +169,20 @@ u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, void* value)
     u32 entry_index = *hash_chain_head;
 
     // Check whether the entry exsits
-    b32 existing = False;
+    *found = False;
     while (entry_index)
     {
         entry = &lru_cache->entries[entry_index];
         void* entry_key = (byte*)lru_cache->keys_buf + entry_index * lru_cache->key_size;
         if (lru_cache->is_same(entry_key, key, lru_cache->key_size))
         {
-            existing = True;
+            *found = True;
             break;
         }
         entry_index = entry->next_with_same_hash;
     }
 
-    if (existing)
+    if (*found)
     {
         // Found an existing entry, deattach from the entry linked list as a prepare
         Entry* prev_entry = &lru_cache->entries[entry->lru_prev];
