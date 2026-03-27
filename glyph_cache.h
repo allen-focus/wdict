@@ -3,11 +3,11 @@
 #include "pch.h"  // IWYU pragma: keep
 #include "utils.h"
 
-#define GLYPH_ATLAS_WIDTH  1024
-#define GLYPH_ATLAS_HEIGHT 1024
+#define GLYPH_ATLAS_WIDTH  2048
+#define GLYPH_ATLAS_HEIGHT 2048
 
-#define ASCII_START   32
-#define GLYPHS_CP_LENGTH 1024
+#define ASCII_START 32
+#define GLYPHS_CP_LENGTH 4096
 #define GLYPHS_LENGTH (GLYPHS_CP_LENGTH + 1) // Plus an additional white rectangle glyph
 
 ///
@@ -21,8 +21,6 @@ typedef struct
 // physical pixels, not logic
 typedef struct
 {
-    b32 valid;
-
     Font* font;
     f32 font_size; // Controls capital letter height in pixels
     u32 codepoint;
@@ -31,6 +29,8 @@ typedef struct
     i32 xoff, yoff;
 
     u16 atlas_x, atlas_y;
+
+    b32 valid;
 } Glyph;
 
 // physical pixels, not logic

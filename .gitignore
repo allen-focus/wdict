@@ -1,5 +1,8 @@
 /build/
 /shaders/
+
 /.cache/
-/.zed/
 /compile_commands.json
+
+/.zed/
+/.overseer.lua

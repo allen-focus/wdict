@@ -9,7 +9,7 @@
 
 ///
 
-#define VERTEX_SIZE 1024
+#define VERTEX_SIZE 8192
 
 ///
 
