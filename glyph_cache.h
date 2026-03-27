@@ -18,19 +18,27 @@ typedef struct
     IDWriteFontFace3* face3;
 } Font;
 
-// physical pixels, not logic
+
 typedef struct
 {
     Font* font;
     f32 font_size; // Controls capital letter height in pixels
     u32 codepoint;
+} GlyphKey;
 
+typedef struct
+{
     u32 w, h, xadvance;
     i32 xoff, yoff;
-
     u16 atlas_x, atlas_y;
-
     b32 valid;
+} GlyphInfo;
+
+// physical pixels, not logic
+typedef struct
+{
+    GlyphKey key;
+    GlyphInfo info;
 } Glyph;
 
 // physical pixels, not logic
@@ -62,6 +70,6 @@ void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length);
 void glyph_cache_deinit(GlyphCache* glyph_cache);
 u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, const u32 codepoint, Glyph* glyph,
                     Font* font, f32 font_size, const u32 dpi);
-Glyph* glyph_lookup(Glyph* glyphs, const u32 codepoint, const Font* font, const f32 font_size);
+Glyph* glyph_lookup(Glyph* glyphs, u32 codepoint, Font* font, f32 font_size);
 
 void atlas_insert_glyph(GlyphAtlas* atlas, Glyph* glyph, byte* glyph_bitmap);

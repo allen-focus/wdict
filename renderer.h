@@ -18,7 +18,6 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
 void renderer_draw_text(IDWriteFactory3* dwrite_factory, GlyphCache* glyph_cache, String text,
                         const Position position, const Color color, const u32 dpi, Font* font, const f32 font_size);
 
-f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi, const Font* font,
-                                    const f32 font_size);
-f32 renderer_get_text_height_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi, const Font* font,
-                                     const f32 font_size);
+
+f32 renderer_get_text_width_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi, Font* font, f32 font_size);
+f32 renderer_get_text_height_for_dpi(const GlyphCache* glyph_cache, const String text, const u32 dpi, Font* font, f32 font_size);
