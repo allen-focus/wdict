@@ -25,6 +25,7 @@
 
 typedef struct
 {
+    HWND window;
     wchar_t title[MAX_TITLE_LENGTH];
     UIContext ui;
     IDWriteFactory3* dwrite_factory;
@@ -34,6 +35,14 @@ typedef struct
 } AppContext;
 
 ///
+
+static void set_app_title(AppContext* app_context, const String title)
+{
+    i32 written = MultiByteToWideChar(CP_UTF8, 0, (const char*)title.data, (int)title.len, app_context->title,
+                                      MAX_TITLE_LENGTH - 1);
+    app_context->title[written] = L'\0';
+    SetWindowTextW(app_context->window, app_context->title);
+}
 
 static void process_frame(AppContext* app_context)
 {
@@ -52,8 +61,8 @@ static void process_frame(AppContext* app_context)
     Color grey  = { 209, 233, 229, 255 };
     Color white = { 255, 255, 255, 255 };
     Color red   = { 251, 147, 143, 255 };
-    Color green  = { 253, 216, 77,  255 };
-    Color blue = { 94,  203, 228, 255 };
+    Color green = { 253, 216, 77,  255 };
+    Color blue  = { 94,  203, 228, 255 };
 
     Padding padding_big     = { 30, 30, 30, 30 };
     Padding padding_medium  = { 20, 20, 20, 20 };
@@ -85,9 +94,9 @@ static void process_frame(AppContext* app_context)
                 if (ui_hovered(flags))
                     ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = red }) {}
                 if (ui_lclicked(flags))
-                    ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = green }) {}
+                    set_app_title(app_context, str("Left Click"));
                 if (ui_rclicked(flags))
-                    ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = blue }) {}
+                    set_app_title(app_context, str("Right Click"));
             }
         }
 
@@ -158,35 +167,21 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     // Handle message
     switch (message)
     {
-
-#ifndef TRACY_ENABLE
-        case WM_PAINT:
-        {
-            PAINTSTRUCT ps;
-            BeginPaint(window, &ps);
-            process_frame(app_context);
-            EndPaint(window, &ps);
-        } return 0;
-#endif
-
         case WM_MOUSEMOVE:
         {
             f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
             ui_context->mouse_pos.x = LOWORD(lparam) / dpi_scale;
             ui_context->mouse_pos.y = HIWORD(lparam) / dpi_scale;
-            InvalidateRect(window, NULL, False);
         } return 0;
 
         case WM_LBUTTONDOWN:
         {
             ui_context->mouse_lclick = True;
-            InvalidateRect(window, NULL, False);
         } return 0;
 
         case WM_RBUTTONDOWN:
         {
             ui_context->mouse_rclick = True;
-            InvalidateRect(window, NULL, False);
         } return 0;
 
         case WM_KEYDOWN:
@@ -204,11 +199,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_context->client_width = (u32)ceil(physical_client_width / dpi_scale);
             ui_context->client_height = (u32)ceil(physical_client_height / dpi_scale);
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
-            {
                 ui_context->on_resize(physical_client_width, physical_client_height);
-                // Force an immediate repaint of entire client area to ensure the updated content is rendered promptly
-                InvalidateRect(window, NULL, False);
-            }
         } return 0;
 
         case WM_DPICHANGED:
@@ -217,13 +208,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             glyph_cache_deinit(glyph_cache);
             glyph_cache_init(glyph_cache, GLYPHS_LENGTH, app_context->dwrite_factory);
             renderer_recreate_glyph_atlas_texture(&glyph_cache->atlas);
-
-            // NOTE:
-            //   After a DPI change, the first frame still uses the old glyphs, so the visual quality is poor;
-            //   the second frame renders correctly. To prevent the glitch we could capture the currently‑visible
-            //   glyphs, rasterize them into the new atlas, and update the texture. Because the effect is minor, we
-            //   keep the existing behavior.
-            process_frame(app_context); // Rasterize needed glyphs
 
             // Set new window
             RECT* const suggested_rect = (RECT*)lparam;
@@ -277,7 +261,6 @@ i32 WinMainCRTStartup()
                                           app_context.ui.box_cache_capacity);
 
     // Create window
-    HWND window;
     {
         f32 dpi_scale = (f32)app_context.ui.dpi / USER_DEFAULT_SCREEN_DPI;
         u32 physical_client_width = (u32)(app_context.ui.client_width * dpi_scale);
@@ -303,8 +286,9 @@ i32 WinMainCRTStartup()
         RegisterClassW(&wc);
 
         // Create window with user data
-        window = CreateWindowExW(0, wc.lpszClassName, app_context.title, window_style, rect.left, rect.top,
-                                 rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
+        app_context.window = CreateWindowExW(0, wc.lpszClassName, app_context.title, window_style, rect.left, rect.top,
+                                             rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance,
+                                             &app_context);
     }
 
     // Initialize dwrite factory, font, glyph cache and renderer
@@ -313,16 +297,15 @@ i32 WinMainCRTStartup()
     font_register(&app_context.fonts[FONT_INDEX_ZH], app_context.dwrite_factory, L"Microsoft YaHei");
     font_register(&app_context.fonts[FONT_INDEX_MONO], app_context.dwrite_factory, L"Consolas");
     glyph_cache_init(&app_context.glyph_cache, GLYPHS_LENGTH, app_context.dwrite_factory);
-    renderer_init(window, &app_context.glyph_cache.atlas);
+    renderer_init(app_context.window, &app_context.glyph_cache.atlas);
 
     // Render first frame before showing window
     process_frame(&app_context); // Rasterize needed glyphs
     process_frame(&app_context);
-    ShowWindow(window, SW_SHOWDEFAULT);
+    ShowWindow(app_context.window, SW_SHOWDEFAULT);
 
     // Run message loop
     MSG message;
-#ifdef TRACY_ENABLE
     while(True)
     {
         if (PeekMessageW(&message, 0, 0, 0, PM_REMOVE))
@@ -337,13 +320,6 @@ i32 WinMainCRTStartup()
         TracyCFrameMark;
         process_frame(&app_context);
     }
-#else
-    while (GetMessageW(&message, NULL, 0, 0))
-    {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
-    }
-#endif
 
     // Clean
     renderer_deinit();
