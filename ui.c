@@ -6,35 +6,36 @@
 
 #include <math.h>
 
-#define STACK_SIZE 16
 #define EPSILON 1e-4f
-#define QUEUE_SIZE 256
+
+#define STACK_CAPACITY     16
+#define QUEUE_CAPACITY     256
 
 typedef Slice(f32*) F32PtrSlice;
 
 ///
 
-static Queue(UIBox, QUEUE_SIZE) ui_box_queue = { 0 };
-static Stack(UIBox*, STACK_SIZE) ui_box_stack = { 0 };
-
-///
-
-// -----------------------------------------------------------------------------
-// Helper
-// -----------------------------------------------------------------------------
-
-static b32 axis_has_fit_attribute(const SizingMode mode)
-{
-    return mode == SIZING_MODE_FIT || mode == SIZING_MODE_FIT_GROW;
-}
+static Queue(UIBox, QUEUE_CAPACITY) ui_box_queue = { 0 };
+static Stack(UIBox*, STACK_CAPACITY) ui_box_stack = { 0 };
 
 // -----------------------------------------------------------------------------
 // Basic
 // -----------------------------------------------------------------------------
 
+void ui_reset(UIContext* ui_context)
+{
+    Assert(ui_box_stack.depth == 0);
+    memset(&ui_box_queue, 0, sizeof(ui_box_queue));
+    memset(&ui_context->command_queue, 0, sizeof(ui_context->command_queue));
+    ui_context->mouse_lclick = False;
+    ui_context->mouse_rclick = False;
+}
+
+///
+
 static UIBox* ui_box_new()
 {
-    Assert(ui_box_queue.count < QUEUE_SIZE);
+    Assert(ui_box_queue.count < QUEUE_CAPACITY);
     return &ui_box_queue.items[ui_box_queue.count++];
 }
 
@@ -51,8 +52,8 @@ UIBox* ui_box_get_root()
 
 UIBox* ui_box_start( const BoxConfig* config)
 {
-    Assert(ui_box_stack.depth <= STACK_SIZE);
-    Assert(ui_box_queue.count <= QUEUE_SIZE);
+    Assert(ui_box_stack.depth <= STACK_CAPACITY);
+    Assert(ui_box_queue.count <= QUEUE_CAPACITY);
 
     UIBox* box = ui_box_new();
     UIBox* parent = ui_box_get_parent();
@@ -89,13 +90,6 @@ UIBox* ui_box_start( const BoxConfig* config)
 void ui_box_end(UIBox* box)
 {
     ui_box_stack.items[ui_box_stack.depth--] = NULL;
-}
-
-void ui_reset(UIContext* ui_context)
-{
-    Assert(ui_box_stack.depth == 0);
-    memset(&ui_box_queue, 0, sizeof(ui_box_queue));
-    memset(&ui_context->command_queue, 0, sizeof(ui_context->command_queue));
 }
 
 ///
@@ -277,6 +271,11 @@ static AxisContext get_axis_context(UIBox* box, const Axis axis)
         ctx.main_direction = LAYOUT_TOP_TO_BOTTOM;
     }
     return ctx;
+}
+
+static b32 axis_has_fit_attribute(const SizingMode mode)
+{
+    return mode == SIZING_MODE_FIT || mode == SIZING_MODE_FIT_GROW;
 }
 
 // Recursively calculate sizes for boxes configured with 'fit' attribute
@@ -499,7 +498,7 @@ static void ui_box_grow_shrink_children_axis(UIContext* ui_context, UIBox* box, 
     }
 }
 
-static void ui_box_resolve_position(UIBox* box)
+static void ui_box_resolve_position(UIContext* ui_context, UIBox* box)
 {
     if (box->parent)
     {
@@ -544,9 +543,19 @@ static void ui_box_resolve_position(UIBox* box)
         UIBox* child = box->child_first;
         while (child)
         {
-            ui_box_resolve_position(child);
+            ui_box_resolve_position(ui_context, child);
             child = child->next;
         }
+    }
+
+    // Insert box to box cache if the box has a valid key
+    if (box->key)
+    {
+        isize box_cache_index = box->key & (ui_context->box_cache_capacity - 1);
+        UIBox* last_box = &ui_context->box_cache[box_cache_index];
+        last_box->size = box->size;
+        last_box->position = box->position;
+        last_box->key = box->key;
     }
 }
 
@@ -619,6 +628,61 @@ void ui_calculate_layout(UIContext* ui_context, GlyphCache* glyph_cache, UIBox* 
     ui_box_apply_text_wrapping(ui_context, glyph_cache, box);
     ui_box_calculate_fit_axis(box, HEIGHT);
     ui_box_grow_shrink_children_axis(ui_context, box, HEIGHT);
-    ui_box_resolve_position(box);
+    ui_box_resolve_position(ui_context, box);
     TracyCZoneEnd(ctx);
+}
+
+// -----------------------------------------------------------------------------
+// Widgets
+// -----------------------------------------------------------------------------
+
+static b32 rect_contains_point(Rect r, Position p)
+{
+    return p.x >= r.xmin && p.x < r.xmax && p.y >= r.ymin && p.y < r.ymax;
+}
+
+UISignalFlags ui_button(UIContext* ui_context, GlyphCache* glyph_cache, const String text, const Color background_color,
+                        const Color text_color, const Font font, const f32 font_size)
+{
+    TextConfig text_config = {
+        .font = font,
+        .font_size = font_size,
+        .color = text_color,
+        .line_height = font_size
+    };
+
+    u32 key = fnv1a_hash(text.data, sizeof(*text.data) * text.len);
+    ui_box({
+        .sizing = { fit({}), fit({}) },
+        .color = background_color,
+        .padding = { 6, 6, 6, 6 },
+        .alignment = { ALIGN_CENTER, ALIGN_CENTER }
+    })
+    {
+        UIBox* box = ui_box_get_parent();
+        box->key = key;
+        ui_text(ui_context, glyph_cache, text, &text_config);
+    }
+
+    isize box_cache_index = key & (ui_context->box_cache_capacity - 1);
+    UIBox* last_box = &ui_context->box_cache[box_cache_index];
+    UISignalFlags flags = UI_Signal_Flag_None;
+    if (last_box->key)
+    {
+        Rect last_box_rect = {
+            .xmin = last_box->position.x,
+            .ymin = last_box->position.y,
+            .xmax = last_box->position.x + last_box->size.width,
+            .ymax = last_box->position.y + last_box->size.height,
+        };
+        if (rect_contains_point(last_box_rect, ui_context->mouse_pos))
+        {
+            flags |= UI_Signal_Flag_Hovered;
+            if (ui_context->mouse_lclick)
+                flags |= UI_Signal_Flag_LClicked;
+            if (ui_context->mouse_rclick)
+                flags |= UI_Signal_Flag_RClicked;
+        }
+    }
+    return flags;
 }

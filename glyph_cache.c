@@ -34,7 +34,6 @@ void font_register(Font* font, IDWriteFactory3* dwrite_factory, const wchar_t* f
     IDWriteFontFace_QueryInterface(font->face, &IID_IDWriteFontFace3, (void**)&font->face3);
 }
 
-// TODO: Not used
 void font_unregister(Font* font)
 {
     if (font->face3)

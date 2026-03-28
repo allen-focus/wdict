@@ -25,11 +25,22 @@
 #define fit(...)      { __VA_ARGS__, SIZING_MODE_FIT }
 #define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }
 
-// TODO: Don't hard-code
-#define CHILDREN_SIZE      16
-#define COMMAND_QUEUE_SIZE 4096
+#define COMMAND_QUEUE_CAPACITY 4096
+#define BOX_CACHE_CAPACITY     1024 // must be power of two
 
 ///
+
+#define ui_hovered(signal_flags)  (signal_flags & UI_Signal_Flag_Hovered)
+#define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
+#define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
+
+typedef enum
+{
+    UI_Signal_Flag_None     = 0,
+    UI_Signal_Flag_Hovered  = (1<<0),
+    UI_Signal_Flag_LClicked = (1<<1),
+    UI_Signal_Flag_RClicked = (1<<2),
+} UISignalFlags;
 
 // Command -----------------------------
 
@@ -194,30 +205,51 @@ struct UIBox
     UIBox* next;
     UIBox* child_first;
     UIBox* child_last;
+
+    UIBox* box_cache_hash_prev;
+    UIBox* box_cache_hash_next;
+    u32 key;
 };
 
 // Context -----------------------------
 
+typedef void (*on_resize_fn)(const u32 client_width, const u32 client_height);
+typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
+typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
+
 typedef struct
 {
     Arena arena;
+
     u32 dpi;
     u32 client_width; // logic client width
     u32 client_height; // logic client height
-    void (*on_resize)(const u32 client_width, const u32 client_height);
-    f32 (*get_text_width)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
-    f32 (*get_text_height)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
-    Queue(UICommand, COMMAND_QUEUE_SIZE) command_queue;
+    Position mouse_pos;
+    b32 mouse_lclick;
+    b32 mouse_rclick;
+
+    UIBox* root;
+    isize box_cache_capacity;
+    UIBox* box_cache;
+
+    on_resize_fn on_resize;
+    get_text_width_fn get_text_width;
+    get_text_height_fn get_text_height;
+
+    Queue(UICommand, COMMAND_QUEUE_CAPACITY) command_queue;
 } UIContext;
 
 ///
 
 void ui_reset(UIContext* ui_context);
+
 UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
 UIBox* ui_box_get_root();
-
-void ui_calculate_layout(UIContext* ui_context, GlyphCache* glyph_cache, UIBox* box);
-void ui_generate_render_commands(UIContext* ui_context, const UIBox* box);
-
 UIBox* ui_text(const UIContext* ui_context, GlyphCache* glyph_cache, const String text, const TextConfig* text_config);
+void ui_generate_render_commands(UIContext* ui_context, const UIBox* box);
+void ui_calculate_layout(UIContext* ui_context, GlyphCache* glyph_cache, UIBox* box);
+
+// Widgets
+UISignalFlags ui_button(UIContext* ui_context, GlyphCache* glyph_cache, const String text, const Color background_color,
+                        const Color text_color, const Font font, const f32 font_size);
