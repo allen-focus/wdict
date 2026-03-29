@@ -1,5 +1,7 @@
-#include "pch.h"  // IWYU pragma: keep
 #include "utils.h"
+#include <string.h>
+#include <windows.h>
+
 
 // -----------------------------------------------------------------------------
 // hash

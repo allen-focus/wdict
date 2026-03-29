@@ -22,4 +22,3 @@ f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text,
 void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style);
 void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position position, const Color color,
                         const Font font, const f32 font_size, const u32 dpi);
-

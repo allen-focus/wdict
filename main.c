@@ -1,13 +1,13 @@
-#include "pch.h" // IWYU pragma: keep
 #include "glyph_cache.h"
 #include "renderer.h"
 #include "ui.h"
 #include "utils.h"
 
-#include "thirdparty/tracy/public/tracy/TracyC.h"
-
 #include <math.h>
 #include <wchar.h>
+#include <windows.h>
+
+#include "thirdparty/tracy/public/tracy/TracyC.h"
 
 ///
 

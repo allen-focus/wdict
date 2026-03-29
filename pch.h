@@ -8,12 +8,14 @@
 #pragma comment(lib, "d3dcompiler")
 #pragma comment(lib, "dwrite")
 
+// Win32
 #define COBJMACROS
+#include <windows.h>
 
+// DirectX
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <dxgi1_3.h>
 #include <dxgidebug.h>
-#include <windows.h>
 
 #include "cdwrite.h"  // IWYU pragma: keep

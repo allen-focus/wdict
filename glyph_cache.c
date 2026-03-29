@@ -1,7 +1,10 @@
-#include "pch.h" // IWYU pragma: keep
+#include "cdwrite.h"
 #include "LRU.h"
 #include "glyph_cache.h"
 #include "utils.h"
+
+#include <string.h>
+#include <wchar.h>
 
 //
 // font

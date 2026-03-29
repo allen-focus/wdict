@@ -59,6 +59,14 @@ typedef int32_t       b32; // bool
  */
 #define AlignUpPow2(x, b) (((x) + (b) - 1) & (~((b) - 1)))
 
+#ifndef min
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef max
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 // clang-format off
 #define Queue(type, size) struct { type items[size]; isize count; }
 #define Stack(type, size) struct { type items[size]; isize depth; }

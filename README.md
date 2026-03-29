@@ -1,14 +1,14 @@
-Build
-=====
+# Build
 
-To build the binary from source code, have Visual Studio installed, and run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File ./build.ps1 release
+```
+cmake -B build -G "Ninja Multi-Config"
+cmake --build build --config release
 ```
 
-License
-=======
+`--config` can be `release`, `debug`, or `profile`.
+
+
+# License
 
 **Project code**: Released under the Unlicense (public domain).
 

@@ -1,10 +1,10 @@
-#include "pch.h"  // IWYU pragma: keep
 #include "ui.h"
 #include "utils.h"
+#include <math.h>
+#include <string.h>
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
 
-#include <math.h>
 
 #define EPSILON 1e-4f
 
