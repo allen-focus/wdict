@@ -214,43 +214,64 @@ struct UIBox
 
 // Context -----------------------------
 
+typedef void (*flush_and_present_fn)(const u32 client_width, const u32 client_height);
 typedef void (*on_resize_fn)(const u32 client_width, const u32 client_height);
+typedef void (*wait_for_last_submitted_frame_fn)();
 typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
 typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
+typedef void (*draw_rect_fn)(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style);
+typedef void (*draw_text_fn)(GlyphCache* glyph_cache, String text, const Position position, const Color color,
+                          const Font font, const f32 font_size, const u32 dpi);
 
 typedef struct
 {
     Arena arena;
+    u64 frame_count;
 
+    // window
     u32 dpi;
     u32 client_width; // logic client width
     u32 client_height; // logic client height
+
+    // interaction
     Position mouse_pos;
     b32 mouse_lclick;
     b32 mouse_rclick;
 
+    // ui
     UIBox* root;
     isize box_cache_capacity;
     UIBox* box_cache;
 
+    // glyph
+    GlyphCache glyph_cache;
+
+    // render
+    flush_and_present_fn flush_and_present;
     on_resize_fn on_resize;
+    wait_for_last_submitted_frame_fn wait_for_last_submitted_frame;
     get_text_width_fn get_text_width;
     get_text_height_fn get_text_height;
-
+    draw_rect_fn draw_rect;
+    draw_text_fn draw_text;
     Queue(UICommand, COMMAND_QUEUE_CAPACITY) command_queue;
 } UIContext;
 
 ///
 
-void ui_reset(UIContext* ui_context);
+extern UIContext* g_ui_context;
+
+///
+
+void ui_reset();
 
 UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
-UIBox* ui_box_get_root();
-UIBox* ui_text(const UIContext* ui_context, GlyphCache* glyph_cache, const String text, const TextConfig* text_config);
-void ui_generate_render_commands(UIContext* ui_context, const UIBox* box);
-void ui_calculate_layout(UIContext* ui_context, GlyphCache* glyph_cache, UIBox* box);
+UIBox* ui_text(const String text, const TextConfig* text_config);
+
+isize ui_begin_frame(UIContext* ui_context);
+void ui_end_frame(isize arena_pos_backup);
 
 // Widgets
-UISignalFlags ui_button(UIContext* ui_context, GlyphCache* glyph_cache, const String text, const Color background_color,
-                        const Color text_color, const Font font, const f32 font_size);
+UISignalFlags ui_button(const String text, const Color background_color, const Color text_color, const Font font,
+                        const f32 font_size);

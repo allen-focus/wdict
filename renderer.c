@@ -72,38 +72,6 @@ void renderer_wait_for_last_submitted_frame()
 }
 
 //
-// swapchain resize
-//
-
-void swapchain_resize(const u32 client_width, const u32 client_height)
-{
-    TracyCZone(ctx, 1);
-
-    // Release old swapchain buffers
-    ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 0, NULL, NULL);
-    ID3D11RenderTargetView_Release(s_renderer_state.render_target_view);
-
-    // Resize swapchain
-    u32 flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
-#if !defined(NDEBUG) || defined(TRACY_ENABLE)
-    flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-#endif
-    IDXGISwapChain1_ResizeBuffers(s_renderer_state.swapchain, 0, client_width, client_height, DXGI_FORMAT_UNKNOWN,
-                                  flags);
-
-    // Create render target view for new backbuffer texture
-    ID3D11Texture2D* texture;
-    IDXGISwapChain1_GetBuffer(s_renderer_state.swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
-    D3D11_RENDER_TARGET_VIEW_DESC desc = { .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-                                           .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D };
-    ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, &desc,
-                                        &s_renderer_state.render_target_view);
-    ID3D11Texture2D_Release(texture);
-
-    TracyCZoneEnd(ctx);
-}
-
-//
 // renderer core
 //
 
@@ -417,6 +385,38 @@ void renderer_deinit()
     IDXGISwapChain1_Release(s_renderer_state.swapchain);
     ID3D11DeviceContext_Release(s_renderer_state.context);
     ID3D11Device_Release(s_renderer_state.device);
+}
+
+//
+// swapchain resize
+//
+
+void renderer_resize(const u32 client_width, const u32 client_height)
+{
+    TracyCZone(ctx, 1);
+
+    // Release old swapchain buffers
+    ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 0, NULL, NULL);
+    ID3D11RenderTargetView_Release(s_renderer_state.render_target_view);
+
+    // Resize swapchain
+    u32 flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+#if !defined(NDEBUG) || defined(TRACY_ENABLE)
+    flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+#endif
+    IDXGISwapChain1_ResizeBuffers(s_renderer_state.swapchain, 0, client_width, client_height, DXGI_FORMAT_UNKNOWN,
+                                  flags);
+
+    // Create render target view for new backbuffer texture
+    ID3D11Texture2D* texture;
+    IDXGISwapChain1_GetBuffer(s_renderer_state.swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
+    D3D11_RENDER_TARGET_VIEW_DESC desc = { .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+                                           .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D };
+    ID3D11Device_CreateRenderTargetView(s_renderer_state.device, (ID3D11Resource*)texture, &desc,
+                                        &s_renderer_state.render_target_view);
+    ID3D11Texture2D_Release(texture);
+
+    TracyCZoneEnd(ctx);
 }
 
 //
