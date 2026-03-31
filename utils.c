@@ -190,11 +190,11 @@ void slice_grow(Arena* arena, void* slice, isize size)
 String str_clone(Arena* arena, String s)
 {
     String s_clone = {
-        .data = (u8*)arena_push(arena, sizeof(u8), _Alignof(u8), s.len + 1),
+        .data = (u8*)arena_push(arena, sizeof(u8), _Alignof(u8), s.len),
         .len = s.len
     };
     Assert(s_clone.data);
-    memcpy(s_clone.data, s.data, s.len + 1);
+    memcpy(s_clone.data, s.data, s.len);
     return s_clone;
 }
 
