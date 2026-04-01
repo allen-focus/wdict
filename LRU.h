@@ -4,10 +4,11 @@
 
 ///
 
-#define HASH_CHAIN_HEAD_CAPACITY 1024 // must be power of two
-#define ENTRY_CAPACITY 4096 // must be power of two
-
-///
+typedef enum {
+    LRU_SIGNAL_TOEVICT,
+    LRU_SIGNAL_TOINSERT,
+    LRU_SIGNAL_FOUND,
+} LRUSignal;
 
 typedef struct Entry {
     u32 hash_chain_head_index; // 4 bytes
@@ -26,8 +27,8 @@ typedef b32 (*is_same_fn)(const void* a, const void* b, isize size);
 
 typedef struct {
     LRUCacheStats stats;
-    isize hash_chain_head_capacity; // must be power of two
-    isize entry_capacity; // must be power of two
+    isize hash_chain_head_capacity; // must be a power of two
+    isize entry_capacity; // must be a power of two
     u32* hash_chain_heads; // for quickly finding the entry using the hash index
     Entry* entries;
 
@@ -46,7 +47,13 @@ typedef struct {
 
 ///
 
+// NOTE: `hash_chain_head_capacity` must be a power of two
 LRUCache lru_cache_create(Arena* arena, isize hash_chain_head_capacity, isize entry_capacity, isize key_size,
                           isize value_size, hash_fn hash, is_same_fn is_same);
 void lru_cache_destroy(LRUCache* lru_cache);
-u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, b32* found);
+
+// NOTE: User need to assign entry value using returned entry index
+void lru_cache_remove_entry(LRUCache* lru_cache, u32 entry_index);
+u32 lru_cache_pop_lru_entry(LRUCache* lru_cache);
+u32 lru_cache_find(const LRUCache* lru_cache, const void* key, b32* found);
+u32 lru_cache_find_or_evict(LRUCache* lru_cache, const void* key, LRUSignal* signal);

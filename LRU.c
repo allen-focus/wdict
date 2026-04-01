@@ -32,25 +32,23 @@ LRUCache lru_cache_create(Arena* arena, isize hash_chain_head_capacity, isize en
     LRUCache lru_cache = { 0 };
 
     lru_cache.hash_chain_heads = arena_push(arena, sizeof(u32), _Alignof(u32), hash_chain_head_capacity);
+    lru_cache.hash_chain_head_capacity = hash_chain_head_capacity;
     lru_cache.entries = arena_push(arena, sizeof(Entry), _Alignof(Entry), entry_capacity);
+    lru_cache.entry_capacity = entry_capacity;
 
     isize align = 16; // Hard-code align
     lru_cache.keys_buf   = arena_push(arena, key_size,   align, entry_capacity);
     lru_cache.values_buf = arena_push(arena, value_size, align, entry_capacity);
-
-    // NOTE: Before the entry list becomes full, `sentinel->next_with_same_hash` indicates the index of the next free
-    // entry. After the entry list is full, `sentinel->next_with_same_hash` is always 0. In this state, consecutive LRU
-    // pops are not allowed. A pop must be immediately followed by an insertion to keep the cache at full
-    Entry* sentinel = &lru_cache.entries[0];
-    sentinel->next_with_same_hash = 1;
-
-    lru_cache.hash_chain_head_capacity = hash_chain_head_capacity;
-    lru_cache.entry_capacity = entry_capacity;
     lru_cache.key_size = key_size;
     lru_cache.value_size = value_size;
 
     lru_cache.hash = hash;
     lru_cache.is_same = is_same;
+
+    // NOTE: The first entry is "sentinel". Any entry has same hash with sentinel is considered to be an free entry
+    for (u32 i = 0; i < lru_cache.entry_capacity; i++)
+        lru_cache.entries[i].next_with_same_hash = (i + 1 < entry_capacity) ? (i + 1) : 0;
+
     return lru_cache;
 }
 
@@ -80,32 +78,40 @@ void lru_cache_destroy(LRUCache* lru_cache)
 //    |          |                             |              |
 //    +----------+-----------------------------+              |
 //
-static u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
+void lru_cache_remove_entry(LRUCache* lru_cache, u32 entry_index)
 {
     Entry* sentinel = &lru_cache->entries[0];
-    Assert(sentinel->next_with_same_hash == 0);
+    Entry* selected_entry = &lru_cache->entries[entry_index];
 
-    // Get the LRU entry (A LRU entry is the tail entry of the entry linked list)
-    u32 lru_entry_index = sentinel->lru_prev;
-    Entry* lru_entry = &lru_cache->entries[lru_entry_index];
-
-    // Unlink the current LRU entry from the hash chain by updating its predecessor's `next_with_same_hash`
-    u32* prev_hash_chain_entry_index = &lru_cache->hash_chain_heads[lru_entry->hash_chain_head_index];
-    while (*prev_hash_chain_entry_index != lru_entry_index)
+    // Unlink the selected entry from the hash chain by updating its predecessor's `next_with_same_hash`
+    u32* prev_hash_chain_entry_index = &lru_cache->hash_chain_heads[selected_entry->hash_chain_head_index];
+    while (*prev_hash_chain_entry_index != entry_index)
     {
         Entry* entry = &lru_cache->entries[*prev_hash_chain_entry_index];
         prev_hash_chain_entry_index = &entry->next_with_same_hash;
     }
-    *prev_hash_chain_entry_index = lru_entry->next_with_same_hash;
+    *prev_hash_chain_entry_index = selected_entry->next_with_same_hash;
 
-    // Update the new LRU entry
-    u32 new_lru_entry_index = lru_entry->lru_prev;
-    Entry* new_lru_entry = &lru_cache->entries[new_lru_entry_index];
-    new_lru_entry->lru_next = 0;
+    // Update near entries of the entry linked list
+    lru_cache->entries[selected_entry->lru_prev].lru_next = selected_entry->lru_next;
+    lru_cache->entries[selected_entry->lru_next].lru_prev = selected_entry->lru_prev;
+    selected_entry->lru_prev = 0;
+    selected_entry->lru_next = 0;
 
-    // Update sentinel
-    sentinel->lru_prev = new_lru_entry_index;
+    // Update free entry hash chain
+    u32 next_free_entry_index = sentinel->next_with_same_hash;
+    sentinel->next_with_same_hash = entry_index;
+    selected_entry->next_with_same_hash = next_free_entry_index;
+    selected_entry->hash_chain_head_index = 0;
+}
 
+u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
+{
+    // LRU entry is the tail entry of the entry linked list
+    Entry* sentinel = &lru_cache->entries[0];
+    u32 lru_entry_index = sentinel->lru_prev;
+    Assert(lru_entry_index);
+    lru_cache_remove_entry(lru_cache, lru_entry_index);
     return lru_entry_index;
 }
 
@@ -118,7 +124,7 @@ static u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
 //    |                                                       |    |     |                                                       v
 //    v         head                             head         V    |     v         head                                        head
 // +-----+      +---+      +---+      +---+      +---+      +---+  |  +-----+      +---+      +---+      +---+      +---+      +---+
-// | Sen | <--> | X | <--> | Y | <--> | Z | <--> | M | ---> | N |  |  | Sen | <--> | N | <--> | X | <--> | Y | <--> | Z | <--> | M |
+// | Sen | <--> | X | <--> | Y | <--> | Z | <--> | M | <--> | N |  |  | Sen | <--> | N | <--> | X | <--> | Y | <--> | Z | <--> | M |
 // +-----+      +---+      +---+      +---+      +---+      +---+  |  +-----+      +---+      +---+      +---+      +---+      +---+
 //    ^           |                                |               |     ^           |                                           |
 //    |           v                                v               |     |           v                                           v
@@ -143,7 +149,7 @@ static u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
 //    |                                                       |    |     |                                                                  |
 //    v         head                             head         V    |     v         head       head                                          V
 // +-----+      +---+      +---+      +---+      +---+      +---+  |  +-----+      +---+      +---+      +---+      +---+      +---+      +---+
-// | Sen | <--> | X | <--> | Y | <--> | Z | <--> | M | ---> | N |  |  | Sen | <--> | O | <--> | X | <--> | Y | <--> | Z | <--> | M | ---> | N |
+// | Sen | <--> | X | <--> | Y | <--> | Z | <--> | M | <--> | N |  |  | Sen | <--> | O | <--> | X | <--> | Y | <--> | Z | <--> | M | <--> | N |
 // +-----+      +---+      +---+      +---+      +---+      +---+  |  +-----+      +---+      +---+      +---+      +---+      +---+      +---+
 //    ^           |                                |               |     ^           |          |
 //    |           v                                v               |     |           v          v
@@ -158,33 +164,50 @@ static u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
 //    |           |                                |               |     |           |          |
 //    +-----------+--------------------------------+               |     +-----------+----------+
 //
-// NOTE: User need to assign entry value using returned entry index
-u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, b32* found)
+u32 lru_cache_find(const LRUCache* lru_cache, const void* key, b32* found)
 {
-    Entry* sentinel = &lru_cache->entries[0];
+    u32 hash_chain_head_index = lru_cache->hash(key, lru_cache->key_size) & (lru_cache->hash_chain_head_capacity - 1);
+    u32 entry_index = lru_cache->hash_chain_heads[hash_chain_head_index];
 
-    u32 hash_value = lru_cache->hash(key, lru_cache->key_size);
-    u32 hash_chain_head_index = hash_value & (lru_cache->hash_chain_head_capacity - 1);
-    u32* hash_chain_head = &lru_cache->hash_chain_heads[hash_chain_head_index];
-
-    Entry* entry = NULL;
-    u32 entry_index = *hash_chain_head;
-
-    // Check whether the entry exsits
     *found = False;
     while (entry_index)
     {
-        entry = &lru_cache->entries[entry_index];
         void* entry_key = (byte*)lru_cache->keys_buf + entry_index * lru_cache->key_size;
         if (lru_cache->is_same(entry_key, key, lru_cache->key_size))
         {
             *found = True;
             break;
         }
+        entry_index = lru_cache->entries[entry_index].next_with_same_hash;
+    }
+    return *found;
+}
+
+u32 lru_cache_find_or_evict(LRUCache* lru_cache, const void* key, LRUSignal* signal)
+{
+    Entry* sentinel = &lru_cache->entries[0];
+
+    u32 hash_chain_head_index = lru_cache->hash(key, lru_cache->key_size) & (lru_cache->hash_chain_head_capacity - 1);
+    u32* hash_chain_head = &lru_cache->hash_chain_heads[hash_chain_head_index];
+
+    u32 entry_index = *hash_chain_head;
+    Entry* entry = NULL;
+
+    // Check whether the entry exists
+    *signal = LRU_SIGNAL_TOINSERT;
+    while (entry_index)
+    {
+        entry = &lru_cache->entries[entry_index];
+        void* entry_key = (byte*)lru_cache->keys_buf + entry_index * lru_cache->key_size;
+        if (lru_cache->is_same(entry_key, key, lru_cache->key_size))
+        {
+            *signal = LRU_SIGNAL_FOUND;
+            break;
+        }
         entry_index = entry->next_with_same_hash;
     }
 
-    if (*found)
+    if (*signal == LRU_SIGNAL_FOUND)
     {
         // Found an existing entry, deattach from the entry linked list as a prepare
         Entry* prev_entry = &lru_cache->entries[entry->lru_prev];
@@ -196,24 +219,19 @@ u32 lru_cache_find_or_insert(LRUCache* lru_cache, void* key, b32* found)
     }
     else
     {
-        // Not found existing entry matched key, pop one
+        // If the cache is full, pop one; else insert one to next empty entry slot
         if (sentinel->next_with_same_hash == 0)
         {
-            // NOTE: `sentinel->next_with_same_hash` acts as a flag indicating whether the entry linked list is full.
-            // As we pop an entry and quickly insert a new one, we must reset this flag to 0.
-            sentinel->next_with_same_hash = 0;
+            *signal = LRU_SIGNAL_TOEVICT;
             entry_index = lru_cache_pop_lru_entry(lru_cache);
-            entry = &lru_cache->entries[entry_index];
         }
         else
         {
+            *signal = LRU_SIGNAL_TOINSERT;
             entry_index = sentinel->next_with_same_hash;
-            entry = &lru_cache->entries[entry_index];
-
-            sentinel->next_with_same_hash++;
-            if (sentinel->next_with_same_hash == lru_cache->entry_capacity)
-                sentinel->next_with_same_hash = 0;
         }
+        entry = &lru_cache->entries[entry_index];
+        sentinel->next_with_same_hash = entry->next_with_same_hash;
 
         // Assign value
         void* entry_key = (byte*)lru_cache->keys_buf + entry_index * lru_cache->key_size;

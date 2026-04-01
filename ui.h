@@ -26,14 +26,10 @@
 #define fit(...)      { __VA_ARGS__, SIZING_MODE_FIT }
 #define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }
 
-#define COMMAND_QUEUE_CAPACITY 4096
-#define BOX_CACHE_CAPACITY     1024 // must be power of two
+#define COMMAND_QUEUE_CAPACITY             4096
+#define HASH_STR_MAX_LENGTH                128
 
 ///
-
-#define ui_hovered(signal_flags)  (signal_flags & UI_Signal_Flag_Hovered)
-#define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
-#define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
 
 typedef enum
 {
@@ -42,6 +38,10 @@ typedef enum
     UI_Signal_Flag_LClicked = (1<<1),
     UI_Signal_Flag_RClicked = (1<<2),
 } UISignalFlags;
+
+#define ui_hovered(signal_flags)  (signal_flags & UI_Signal_Flag_Hovered)
+#define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
+#define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
 
 // Command -----------------------------
 
@@ -187,6 +187,12 @@ typedef struct
     f32 half_leading;
 } TextData;
 
+typedef struct
+{
+    u8 str[HASH_STR_MAX_LENGTH];
+    isize len;
+} BoxKey;
+
 typedef struct UIBox UIBox;
 struct UIBox
 {
@@ -196,20 +202,22 @@ struct UIBox
         TextData text;
     } data;
 
+    // info
     BoxType type;
     BoxConfig config;
     Position position;
     Size size;
 
+    // layout tree
     UIBox* parent;
     UIBox* prev;
     UIBox* next;
     UIBox* child_first;
     UIBox* child_last;
 
-    UIBox* box_cache_hash_prev;
-    UIBox* box_cache_hash_next;
-    u32 key;
+    // box cache
+    BoxKey key;
+    u64 last_frame_index;
 };
 
 // Context -----------------------------
@@ -221,12 +229,35 @@ typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, con
 typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
 typedef void (*draw_rect_fn)(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style);
 typedef void (*draw_text_fn)(GlyphCache* glyph_cache, String text, const Position position, const Color color,
-                          const Font font, const f32 font_size, const u32 dpi);
+                             const Font font, const f32 font_size, const u32 dpi);
+
+
+// NOTE:
+//   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
+//   insertion order (new entries appended to tail). This allows per-frame cleanup
+//   to traverse from the oldest until encountering an entry with a matching
+//   `last_frame_index`, avoiding a full scan of all entries.
+typedef struct
+{
+    Arena arena;
+    LRUCache lru_cache;
+} UIBoxCache;
+
+typedef struct
+{
+    flush_and_present_fn flush_and_present;
+    on_resize_fn on_resize;
+    wait_for_last_submitted_frame_fn wait_for_last_submitted_frame;
+    get_text_width_fn get_text_width;
+    get_text_height_fn get_text_height;
+    draw_rect_fn draw_rect;
+    draw_text_fn draw_text;
+} UIRenderFunc;
 
 typedef struct
 {
     Arena arena;
-    u64 frame_count;
+    u64 frame_index;
 
     // window
     u32 dpi;
@@ -240,20 +271,11 @@ typedef struct
 
     // ui
     UIBox* root;
-    isize box_cache_capacity;
-    UIBox* box_cache;
-
-    // glyph
-    GlyphCache glyph_cache;
+    UIBoxCache box_cache;
 
     // render
-    flush_and_present_fn flush_and_present;
-    on_resize_fn on_resize;
-    wait_for_last_submitted_frame_fn wait_for_last_submitted_frame;
-    get_text_width_fn get_text_width;
-    get_text_height_fn get_text_height;
-    draw_rect_fn draw_rect;
-    draw_text_fn draw_text;
+    GlyphCache glyph_cache;
+    UIRenderFunc render_fn;
     Queue(UICommand, COMMAND_QUEUE_CAPACITY) command_queue;
 } UIContext;
 
@@ -263,8 +285,9 @@ extern UIContext* g_ui_context;
 
 ///
 
-void ui_reset();
+void ui_init(UIContext* ui_context, u32 width, u32 height, u32 dpi, IDWriteFactory3* dwrite_factory, UIRenderFunc render_fn);
 
+void ui_reset();
 UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
 UIBox* ui_text(const String text, const TextConfig* text_config);

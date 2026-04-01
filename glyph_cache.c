@@ -6,6 +6,10 @@
 #include <string.h>
 #include <wchar.h>
 
+///
+
+#define GLYPH_CAHCE_ARENA_CAPACITY MB(32)
+
 //
 // font
 //
@@ -90,11 +94,14 @@ static b32 is_same_glyph_key(const void* a, const void* b, isize size)
 
 void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length, IDWriteFactory3* dwrite_factory)
 {
+    glyph_cache->arena = arena_new(GLYPH_CAHCE_ARENA_CAPACITY);
+    glyph_cache->atlas.w = GLYPH_ATLAS_WIDTH;
+    glyph_cache->atlas.h = GLYPH_ATLAS_HEIGHT;
     GlyphAtlas* atlas = &glyph_cache->atlas;
     atlas->bitmap = arena_push(&glyph_cache->arena, sizeof(u8), _Alignof(u8), atlas->w * atlas->h);
-    glyph_cache->lru_cache = lru_cache_create(&glyph_cache->arena, HASH_CHAIN_HEAD_CAPACITY, ENTRY_CAPACITY,
-                                              sizeof(GlyphKey), sizeof(GlyphInfo), fnv1a_hash, is_same_glyph_key);
 
+    glyph_cache->lru_cache = lru_cache_create(&glyph_cache->arena, ((glyphs_length - 1) >> 1), glyphs_length,
+                                              sizeof(GlyphKey), sizeof(GlyphInfo), fnv1a_hash, is_same_glyph_key);
 
     // Insert a 3x3 white region to bottom-right corner of glyph atlas
     GlyphInfo* white_glyph = (GlyphInfo*)glyph_cache->lru_cache.values_buf;
@@ -111,15 +118,8 @@ void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length, IDWrit
 
 void glyph_cache_deinit(GlyphCache* glyph_cache)
 {
-    memset(&glyph_cache->lru_cache, 0, sizeof(glyph_cache->lru_cache));
-
-    GlyphAtlas* atlas = &glyph_cache->atlas;
-    atlas->bitmap = NULL;
-    atlas->maxy = 0;
-    atlas->next_x = 0;
-    atlas->next_y = 0;
-
-    arena_pop_to(&glyph_cache->arena, 0);
+    arena_release(&glyph_cache->arena);
+    memset(glyph_cache, 0, sizeof(*glyph_cache));
 }
 
 u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* glyph_info, u32 codepoint,
@@ -194,10 +194,10 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* gl
     return glyph_bitmap;
 }
 
-GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size, b32* found)
+GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size, LRUSignal* signal)
 {
     GlyphKey key = { font, font_size, codepoint };
-    u32 entry_index = lru_cache_find_or_insert(&glyph_cache->lru_cache, &key, found);
+    u32 entry_index = lru_cache_find_or_evict(&glyph_cache->lru_cache, &key, signal);
     GlyphInfo* glyph_info = (GlyphInfo*)((byte*)glyph_cache->lru_cache.values_buf + entry_index * glyph_cache->lru_cache.value_size);
     return glyph_info;
 }

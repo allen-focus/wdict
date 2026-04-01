@@ -4,11 +4,10 @@
 #include "LRU.h"
 #include "utils.h"
 
-#define GLYPH_ATLAS_WIDTH  2048
-#define GLYPH_ATLAS_HEIGHT 2048
+#define GLYPH_ATLAS_WIDTH          2048
+#define GLYPH_ATLAS_HEIGHT         2048
 
-#define ASCII_START 32
-#define GLYPHS_CP_LENGTH 4096
+#define GLYPHS_CP_LENGTH 4096 // must be a power of two
 #define GLYPHS_LENGTH (GLYPHS_CP_LENGTH + 1) // Plus an additional white rectangle glyph
 
 ///
@@ -59,11 +58,12 @@ typedef struct
 void font_register(Font* font, IDWriteFactory3* dwrite_factory, const wchar_t* font_name);
 void font_unregister(Font* font);
 
+// `glyph_length` muse be a power of two plus 1. (e.g. 4096 + 1)
 void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length, IDWriteFactory3* dwrite_factory);
 void glyph_cache_deinit(GlyphCache* glyph_cache);
 u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* glyph_info, u32 codepoint,
                     const Font font, const f32 font_size, const u32 dpi);
 
-GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size, b32* found);
+GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size, LRUSignal* signal);
 
 void atlas_insert_glyph(GlyphAtlas* atlas, GlyphInfo* glyph_info, byte* glyph_bitmap);

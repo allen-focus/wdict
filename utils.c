@@ -52,7 +52,7 @@ byte* utf8_decode(byte* str, u32* codepoint)
 // NOTE:
 //   1. No check for the string buffer’s capacity.
 //   2. Does not support multi‑codepoint sequences.
-isize utf8_encode(byte* str, u32 codepoint)
+isize utf8_encode(byte* str, const u32 codepoint)
 {
     isize length = 0;
     if (codepoint < (1 << 8))
@@ -92,7 +92,7 @@ isize utf8_encode(byte* str, u32 codepoint)
 // arena
 // -----------------------------------------------------------------------------
 
-Arena arena_new(isize size)
+Arena arena_new(const isize size)
 {
     Arena arena = { 0 };
     arena.base = VirtualAlloc(0, size, MEM_RESERVE, PAGE_READWRITE);
@@ -110,7 +110,7 @@ void arena_release(Arena* arena)
     memset(arena, 0, sizeof(*arena));
 }
 
-void* arena_push(Arena* arena, isize size, isize align, isize count)
+void* arena_push(Arena* arena, const isize size, const isize align, const isize count)
 {
     void* p = arena->base + arena->pos;
     isize padding = (0 - (uintptr_t)p) & (align - 1);
@@ -133,7 +133,7 @@ void* arena_push(Arena* arena, isize size, isize align, isize count)
     return memset(p_aligned, 0, count * size);
 }
 
-void arena_pop_to(Arena* arena, isize pos)
+void arena_pop_to(Arena* arena, const isize pos)
 {
     Assert(pos >= 0);
 
@@ -148,7 +148,7 @@ void arena_pop_to(Arena* arena, isize pos)
     arena->pos = pos;
 }
 
-void arena_pop(Arena* arena, isize size, isize count)
+void arena_pop(Arena* arena, const isize size, const isize count)
 {
     isize need_pop = size * count;
     if (need_pop > arena->pos)
@@ -160,7 +160,7 @@ void arena_pop(Arena* arena, isize size, isize count)
 // slice
 // -----------------------------------------------------------------------------
 
-void slice_grow(Arena* arena, void* slice, isize size)
+void slice_grow(Arena* arena, void* slice, const isize size)
 {
     struct {
         void* data;
@@ -198,10 +198,26 @@ String str_clone(Arena* arena, String s)
     return s_clone;
 }
 
-String str_slice(String s, isize start, isize end)
+String str_slice(String s, const isize start, const isize end)
 {
     String slice = s;
     slice.data = s.data + start;
     slice.len = end - start;
     return slice;
+}
+
+b32 str_compare(const String a, const String b)
+{
+    if (a.len != b.len)
+        return False;
+    return memcmp(a.data, b.data, a.len) == 0;
+}
+
+String str_concat(Arena* arena, const String a, const String b)
+{
+    String c = { .len = a.len + b.len };
+    c.data = arena_push(arena, sizeof(u8), _Alignof(u8), c.len);
+    memcpy(c.data, a.data, a.len);
+    memcpy(c.data + a.len, b.data, b.len);
+    return c;
 }

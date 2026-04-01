@@ -6,11 +6,12 @@
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
 
-
-#define EPSILON 1e-4f
-
-#define STACK_CAPACITY     16
-#define QUEUE_CAPACITY     256
+#define EPSILON                   1e-4f
+#define UI_CONTEXT_ARENA_CAPACITY MB(16)
+#define BOX_CACHE_ARENA_CAPACITY  MB(8)
+#define BOX_CACHE_CAPACITY        1024 // must be a power of two
+#define STACK_CAPACITY            16
+#define QUEUE_CAPACITY            2048
 
 typedef Slice(f32*) F32PtrSlice;
 
@@ -20,6 +21,112 @@ static Queue(UIBox, QUEUE_CAPACITY) ui_box_queue = { 0 };
 static Stack(UIBox*, STACK_CAPACITY) ui_box_stack = { 0 };
 
 UIContext* g_ui_context = NULL;
+
+///
+
+// -----------------------------------------------------------------------------
+// Context
+// -----------------------------------------------------------------------------
+
+static b32 is_same_box_key(const void* a, const void* b, isize size)
+{
+    Assert(size == (sizeof(u8) * HASH_STR_MAX_LENGTH + sizeof(isize)));
+    String str_a = {
+        .data = (u8*)a,
+        .len = *(isize*)((u8*)a + HASH_STR_MAX_LENGTH)
+    };
+    String str_b = {
+        .data = (u8*)b,
+        .len = *(isize*)((u8*)b + HASH_STR_MAX_LENGTH)
+    };
+    return str_compare(str_a, str_b);
+}
+
+static void box_cache_init(UIBoxCache* box_cache)
+{
+    box_cache->arena = arena_new(BOX_CACHE_ARENA_CAPACITY);
+    box_cache->lru_cache = lru_cache_create(&box_cache->arena, (BOX_CACHE_CAPACITY >> 1), BOX_CACHE_CAPACITY,
+                                            sizeof(BoxKey), sizeof(UIBox), fnv1a_hash, is_same_box_key);
+}
+
+static void box_cache_deinit(UIBoxCache* box_cache)
+{
+    arena_release(&box_cache->arena);
+    memset(box_cache, 0, sizeof(*box_cache));
+}
+
+void ui_init(UIContext* ui_context, u32 width, u32 height, u32 dpi, IDWriteFactory3* dwrite_factory, UIRenderFunc render_fn)
+{
+    ui_context->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
+    glyph_cache_init(&ui_context->glyph_cache, GLYPHS_LENGTH, dwrite_factory);
+    box_cache_init(&ui_context->box_cache);
+    ui_context->client_width = width;
+    ui_context->client_height = height;
+    ui_context->dpi = dpi;
+    ui_context->render_fn = render_fn;
+    ui_context->frame_index = 0;
+}
+
+void ui_deinit(UIContext* ui_context)
+{
+    box_cache_deinit(&ui_context->box_cache);
+    glyph_cache_deinit(&ui_context->glyph_cache);
+    arena_release(&ui_context->arena);
+    memset(ui_context, 0, sizeof(*ui_context));
+}
+
+// -----------------------------------------------------------------------------
+// Box cache
+// -----------------------------------------------------------------------------
+
+static UIBox* find_or_insert_last_box_with_same_hash_str(const String hash_str, b32* found)
+{
+    UIBoxCache* box_cache = &g_ui_context->box_cache;
+    BoxKey key = { .len = hash_str.len };
+    memcpy(key.str, hash_str.data, hash_str.len);
+
+    LRUSignal signal;
+    u32 entry_index = lru_cache_find_or_evict(&box_cache->lru_cache, &key, &signal);
+    UIBox* last_box = (UIBox*)((byte*)box_cache->lru_cache.values_buf + entry_index * box_cache->lru_cache.value_size);
+
+    switch (signal)
+    {
+        case LRU_SIGNAL_FOUND:
+            // Detect duplicate box key
+            if (g_ui_context->frame_index != 0)
+                if (last_box->last_frame_index == g_ui_context->frame_index)
+                    Assert(0);
+            *found = True;
+            break;
+        case LRU_SIGNAL_TOINSERT:
+            memcpy(&last_box->key, &key, sizeof(key));
+            *found = False;
+            break;
+        case LRU_SIGNAL_TOEVICT:
+        default:
+            // NOTE:
+            //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
+            //   insertion order (new entries appended to tail). And LRU eviction is disabled;
+            //   unused boxes are explicitly dropped per frame.
+            Assert(0);
+    }
+
+    return last_box;
+}
+
+static void box_cache_remove_unused()
+{
+    LRUCache* lru_cache = &g_ui_context->box_cache.lru_cache;
+    u32 lru_entry_index = lru_cache->entries[0].lru_prev;
+    UIBox* lru_box = (UIBox*)((byte*)lru_cache->values_buf + lru_entry_index * lru_cache->value_size);
+    while (lru_box->last_frame_index < g_ui_context->frame_index && lru_entry_index > 0)
+    {
+        lru_entry_index = lru_cache->entries[lru_entry_index].lru_prev;
+        lru_cache_pop_lru_entry(lru_cache);
+        memset(lru_box, 0, sizeof(*lru_box));
+        lru_box = (UIBox*)((byte*)lru_cache->values_buf + lru_entry_index * lru_cache->value_size);
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Basic
@@ -99,10 +206,14 @@ void ui_box_end(UIBox* box)
 
 UIBox* ui_text(const String text, const TextConfig* text_config)
 {
-    GlyphCache* glyph_cache = &g_ui_context->glyph_cache; u32 dpi = g_ui_context->dpi;
-    f32 base_line_height = g_ui_context->get_text_height(glyph_cache, text, text_config->font, text_config->font_size, dpi);
+    GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
+    u32 dpi = g_ui_context->dpi;
+    get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
+    get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
+
+    f32 base_line_height = get_text_height(glyph_cache, text, text_config->font, text_config->font_size, dpi);
     f32 line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
-    f32 fixed_width = g_ui_context->get_text_width(glyph_cache, text, text_config->font, text_config->font_size, dpi);
+    f32 fixed_width = get_text_width(glyph_cache, text, text_config->font, text_config->font_size, dpi);
     BoxConfig box_config = { .sizing = { .width = { { fixed_width, fixed_width }, SIZING_MODE_FIXED },
                                          .height = { { line_height, line_height }, SIZING_MODE_FIXED } } };
 
@@ -148,7 +259,7 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
                     // For ASCII: measure up to current position (word boundary before delimiter).
                     // For non-ASCII: include this character itself, treating it as a single-word unit.
                     isize end = start_codepoint < 127 ? ptr - text.data : next - text.data;
-                    f32 word_width = g_ui_context->get_text_width(glyph_cache, str_slice(text, start, end), text_box->data.text.font, text_box->data.text.font_size, dpi);
+                    f32 word_width = get_text_width(glyph_cache, str_slice(text, start, end), text_box->data.text.font, text_box->data.text.font_size, dpi);
                     min_width = max(min_width, word_width);
                     word_count++;
                 }
@@ -158,11 +269,11 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
         }
 
         // Handle last word
-        f32 word_width = g_ui_context->get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font, text_box->data.text.font_size, dpi);
+        f32 word_width = get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font, text_box->data.text.font_size, dpi);
         min_width = max(min_width, word_width);
         word_count++;
 
-        whole_text_width = g_ui_context->get_text_width(glyph_cache, text_box->data.text.content, text_box->data.text.font, text_box->data.text.font_size, dpi);
+        whole_text_width = get_text_width(glyph_cache, text_box->data.text.content, text_box->data.text.font, text_box->data.text.font_size, dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
     text_box->config.sizing.width.min_max.min = min_width;
@@ -552,24 +663,38 @@ static void ui_box_resolve_position(UIBox* box)
         }
     }
 
-    // Insert box to box cache if the box has a valid key
-    if (box->key)
+    // Update the box size and position in box cache if the box has a hash string
+    if (box->key.len)
     {
-        isize box_cache_index = box->key & (g_ui_context->box_cache_capacity - 1);
-        UIBox* last_box = &g_ui_context->box_cache[box_cache_index];
+        b32 found;
+        String box_hash_str = { box->key.str, box->key.len };
+        UIBox* last_box = find_or_insert_last_box_with_same_hash_str(box_hash_str, &found);
         last_box->size = box->size;
         last_box->position = box->position;
-        last_box->key = box->key;
+
+        // NOTE:
+        //   Update `last_frame_index` here because this is the final box that will be used for the current frame.
+        //   This enables duplicate detection: during lookup, if a box is already marked with the current frame index,
+        //   it indicates a duplicate key (panic condition).
+        last_box->last_frame_index = g_ui_context->frame_index;
     }
 }
 
 static void perform_text_wrapping(UIBox* text_box)
 {
+    // Alias
+    u32 dpi = g_ui_context->dpi;
+    GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
+    get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
+
+    Font font = text_box->data.text.font;
+    f32 font_size = text_box->data.text.font_size;
     String text = text_box->data.text.content;
     f32 max_width = text_box->size.width;
-    GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
 
-    if (g_ui_context->get_text_width(glyph_cache, text, text_box->data.text.font, text_box->data.text.font_size, g_ui_context->dpi) <= max_width)
+    ///
+
+    if (get_text_width(glyph_cache, text, font, font_size, dpi) <= max_width)
         return;
 
     isize line_start = 0;
@@ -583,7 +708,7 @@ static void perform_text_wrapping(UIBox* text_box)
         isize distance = ptr - text.data;
 
         // Check width
-        f32 width = g_ui_context->get_text_width(glyph_cache, str_slice(text, line_start, distance), text_box->data.text.font, text_box->data.text.font_size, g_ui_context->dpi);
+        f32 width = get_text_width(glyph_cache, str_slice(text, line_start, distance), font, font_size, dpi);
         if (width > max_width && last_break > line_start)
         {
             *slice_push(&text_box->data.text.wrapped_lines, &g_ui_context->arena) = str_slice(text, line_start, last_break);
@@ -644,8 +769,8 @@ static void ui_calculate_layout(UIBox* box)
 isize ui_begin_frame(UIContext* ui_context)
 {
     g_ui_context = ui_context;
-    if (g_ui_context->frame_count > 0)
-        g_ui_context->wait_for_last_submitted_frame();
+    if (g_ui_context->frame_index > 0)
+        g_ui_context->render_fn.wait_for_last_submitted_frame();
 
     return g_ui_context->arena.pos;
 }
@@ -663,10 +788,10 @@ void ui_end_frame(isize arena_pos_backup)
         switch (cmd->type)
         {
             case UI_COMMAND_RECT:
-                g_ui_context->draw_rect(&g_ui_context->glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
+                g_ui_context->render_fn.draw_rect(&g_ui_context->glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
                 break;
             case UI_COMMAND_TEXT:
-                g_ui_context->draw_text(&g_ui_context->glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, cmd->text.font, cmd->text.font_size, g_ui_context->dpi);
+                g_ui_context->render_fn.draw_text(&g_ui_context->glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, cmd->text.font, cmd->text.font_size, g_ui_context->dpi);
                 break;
             default:
                 Assert(0);
@@ -677,10 +802,11 @@ void ui_end_frame(isize arena_pos_backup)
     f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
     u32 physical_client_width = (u32)(g_ui_context->client_width * dpi_scale);
     u32 physical_client_height = (u32)(g_ui_context->client_height * dpi_scale);
-    g_ui_context->flush_and_present(physical_client_width, physical_client_height);
+    g_ui_context->render_fn.flush_and_present(physical_client_width, physical_client_height);
 
     ui_reset();
-    g_ui_context->frame_count++;
+    box_cache_remove_unused();
+    g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
 }
@@ -694,6 +820,37 @@ static b32 rect_contains_point(Rect r, Position p)
     return p.x >= r.xmin && p.x < r.xmax && p.y >= r.ymin && p.y < r.ymax;
 }
 
+static String init_and_return_hash_str(UIBox* box, const String text)
+{
+    String hash_str;
+    for (isize i = 0; i < text.len; i++)
+        if (text.data[i] == '#')
+            if (text.len > i + 1)
+                if (text.data[i + 1] == '#')
+                {
+                    if (text.len > i + 2)
+                        if (text.data[i + 2] == '#')
+                        {
+                            String temp = str_slice(text, i + 3, text.len);
+                            hash_str = str_clone(&g_ui_context->arena, temp);
+                            break;
+                        }
+                    String str_left = { text.data, i };
+                    String str_right = { text.data + i + 2, text.len - (i + 2) };
+                    hash_str = str_concat(&g_ui_context->arena, str_left, str_right);
+                    break;
+                }
+
+    if (!hash_str.len || hash_str.len > HASH_STR_MAX_LENGTH)
+        Assert(0);
+
+    // Update box's key. This will be used for find the same box in the box cache.
+    memcpy(box->key.str, hash_str.data, hash_str.len);
+    box->key.len = hash_str.len;
+
+    return hash_str;
+}
+
 UISignalFlags ui_button(const String text, const Color background_color, const Color text_color,
                         const Font font, const f32 font_size)
 {
@@ -704,7 +861,7 @@ UISignalFlags ui_button(const String text, const Color background_color, const C
         .line_height = font_size
     };
 
-    u32 key = fnv1a_hash(text.data, sizeof(*text.data) * text.len);
+    String hash_str;
     ui_box({
         .sizing = { fit({}), fit({}) },
         .color = background_color,
@@ -712,30 +869,33 @@ UISignalFlags ui_button(const String text, const Color background_color, const C
         .alignment = { ALIGN_CENTER, ALIGN_CENTER }
     })
     {
-        UIBox* box = ui_box_get_parent();
-        box->key = key;
         ui_text(text, &text_config);
+
+        UIBox* box = ui_box_get_parent();
+        hash_str = init_and_return_hash_str(box, text);
     }
 
-    isize box_cache_index = key & (g_ui_context->box_cache_capacity - 1);
-    UIBox* last_box = &g_ui_context->box_cache[box_cache_index];
     UISignalFlags flags = UI_Signal_Flag_None;
-    if (last_box->key)
-    {
-        Rect last_box_rect = {
-            .xmin = last_box->position.x,
-            .ymin = last_box->position.y,
-            .xmax = last_box->position.x + last_box->size.width,
-            .ymax = last_box->position.y + last_box->size.height,
-        };
-        if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
+    b32 found;
+    UIBox* last_box = find_or_insert_last_box_with_same_hash_str(hash_str, &found);
+    if (found)
+        if (last_box->key.len)
         {
-            flags |= UI_Signal_Flag_Hovered;
-            if (g_ui_context->mouse_lclick)
-                flags |= UI_Signal_Flag_LClicked;
-            if (g_ui_context->mouse_rclick)
-                flags |= UI_Signal_Flag_RClicked;
+            Rect last_box_rect = {
+                .xmin = last_box->position.x,
+                .ymin = last_box->position.y,
+                .xmax = last_box->position.x + last_box->size.width,
+                .ymax = last_box->position.y + last_box->size.height,
+            };
+            if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
+            {
+                flags |= UI_Signal_Flag_Hovered;
+                if (g_ui_context->mouse_lclick)
+                    flags |= UI_Signal_Flag_LClicked;
+                if (g_ui_context->mouse_rclick)
+                    flags |= UI_Signal_Flag_RClicked;
+            }
         }
-    }
+
     return flags;
 }

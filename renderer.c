@@ -507,9 +507,9 @@ f32 renderer_get_text_width_for_dpi(GlyphCache* glyph_cache, const String text, 
     {
         p = utf8_decode(p, &codepoint);
 
-        b32 found = False;
-        GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &found);
-        if (!found)
+        LRUSignal signal;
+        GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &signal);
+        if (signal == LRU_SIGNAL_TOINSERT || signal == LRU_SIGNAL_TOEVICT)
             renderer_update_glyph(glyph_cache, glyph_info, font, font_size, codepoint, dpi);
 
         text_width += glyph_info->xadvance;
@@ -527,9 +527,9 @@ f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text,
     utf8_decode(text.data, &codepoint); // Get first glyph codepoint of the text
     Assert(codepoint);
 
-    b32 found = False;
-    GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &found);
-    if (!found)
+    LRUSignal signal;
+    GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &signal);
+    if (signal == LRU_SIGNAL_TOINSERT || signal == LRU_SIGNAL_TOEVICT)
         renderer_update_glyph(glyph_cache, glyph_info, font, font_size, codepoint, dpi);
 
     // TODO: Should we just return `font_size`?
@@ -587,9 +587,9 @@ void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position pos
     {
         p = utf8_decode(p, &codepoint);
 
-        b32 found = False;
-        GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &found);
-        if (!found)
+        LRUSignal signal;
+        GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &signal);
+        if (signal == LRU_SIGNAL_TOINSERT || signal == LRU_SIGNAL_TOEVICT)
             renderer_update_glyph(glyph_cache, glyph_info, font, font_size, codepoint, dpi);
 
         Rect target_rect = {

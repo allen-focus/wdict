@@ -100,13 +100,17 @@ static void process_frame(AppContext* app_context)
                      .child_gap = s_child_gap_medium,
                      .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                UISignalFlags flags = ui_button(str("hello"), s_blue, s_black, font_zh, 12);
+                ui_button(str("hello##1"), s_blue, s_black, font_zh, 12);
+
+                UISignalFlags flags = ui_button(str("hello##world"), s_blue, s_black, font_zh, 12);
                 if (ui_hovered(flags))
                     ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_red }) {}
                 if (ui_lclicked(flags))
                     set_app_title(app_context, str("Left Click"));
                 if (ui_rclicked(flags))
                     set_app_title(app_context, str("Right Click"));
+
+                ui_button(str("hello###world"), s_blue, s_black, font_zh, 12);
             }
         }
     }
@@ -175,7 +179,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_context->client_width = (u32)ceil(physical_client_width / dpi_scale);
             ui_context->client_height = (u32)ceil(physical_client_height / dpi_scale);
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
-                ui_context->on_resize(physical_client_width, physical_client_height);
+                ui_context->render_fn.on_resize(physical_client_width, physical_client_height);
             process_frame(app_context);
         } return 0;
 
@@ -218,32 +222,21 @@ i32 WinMainCRTStartup()
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     // Init context
-    AppContext app_context = {
-        .title = L"App Title",
-        .ui = {
-            .arena = arena_new(MB(16)),
-            .dpi = GetDpiForSystem(),
-            .client_width = CLIENT_WIDTH,
-            .client_height = CLIENT_HEIGHT,
-            .box_cache_capacity = BOX_CACHE_CAPACITY,
-            .glyph_cache = {
-                .arena = arena_new(MB(32)),
-                .atlas = {
-                    .w = GLYPH_ATLAS_WIDTH,
-                    .h = GLYPH_ATLAS_HEIGHT,
-                },
-            },
-            .flush_and_present = renderer_flush_and_present,
-            .on_resize = renderer_resize,
-            .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
-            .get_text_width = renderer_get_text_width_for_dpi,
-            .get_text_height = renderer_get_text_height_for_dpi,
-            .draw_rect = renderer_draw_rect,
-            .draw_text = renderer_draw_text,
-        },
+    AppContext app_context = { .title = L"App Title" };
+    UIRenderFunc render_fn = {
+        .flush_and_present = renderer_flush_and_present,
+        .on_resize = renderer_resize,
+        .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
+        .get_text_width = renderer_get_text_width_for_dpi,
+        .get_text_height = renderer_get_text_height_for_dpi,
+        .draw_rect = renderer_draw_rect,
+        .draw_text = renderer_draw_text,
     };
-    app_context.ui.box_cache = arena_push(&app_context.ui.arena, sizeof(*app_context.ui.box_cache), _Alignof(UIBox),
-                                          app_context.ui.box_cache_capacity);
+    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (void**)&app_context.dwrite_factory);
+    font_register(&app_context.fonts[FONT_INDEX_UI], app_context.dwrite_factory, L"Segoe UI");
+    font_register(&app_context.fonts[FONT_INDEX_ZH], app_context.dwrite_factory, L"Microsoft YaHei");
+    font_register(&app_context.fonts[FONT_INDEX_MONO], app_context.dwrite_factory, L"Consolas");
+    ui_init(&app_context.ui, CLIENT_WIDTH, CLIENT_HEIGHT, GetDpiForSystem(), app_context.dwrite_factory, render_fn);
 
     // Create window
     RECT rect = get_screen_center_rect(app_context.ui.client_width, app_context.ui.client_height, app_context.ui.dpi);
@@ -259,12 +252,7 @@ i32 WinMainCRTStartup()
         CreateWindowExW(0, wc.lpszClassName, app_context.title, window_style, rect.left, rect.top,
                         rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
 
-    // Initialize dwrite factory, font, glyph cache and renderer
-    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (void**)&app_context.dwrite_factory);
-    font_register(&app_context.fonts[FONT_INDEX_UI], app_context.dwrite_factory, L"Segoe UI");
-    font_register(&app_context.fonts[FONT_INDEX_ZH], app_context.dwrite_factory, L"Microsoft YaHei");
-    font_register(&app_context.fonts[FONT_INDEX_MONO], app_context.dwrite_factory, L"Consolas");
-    glyph_cache_init(&app_context.ui.glyph_cache, GLYPHS_LENGTH, app_context.dwrite_factory);
+    // Initialize renderer
     renderer_init(app_context.window, &app_context.ui.glyph_cache.atlas);
 
     // Render first frame before showing window
@@ -291,14 +279,10 @@ i32 WinMainCRTStartup()
 
     // Clean
     renderer_deinit();
-    glyph_cache_deinit(&app_context.ui.glyph_cache);
     font_unregister(&app_context.fonts[FONT_INDEX_UI]);
     font_unregister(&app_context.fonts[FONT_INDEX_ZH]);
     font_unregister(&app_context.fonts[FONT_INDEX_MONO]);
     IDWriteFactory3_Release(app_context.dwrite_factory);
-
-    arena_release(&app_context.ui.arena);
-    arena_release(&app_context.ui.glyph_cache.arena);
 
     return 0;
 }

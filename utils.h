@@ -54,7 +54,7 @@ typedef int32_t       b32; // bool
  *   20 & (~7) = 16 (0b10000)
  *
  * @param x Value to align (should be unsigned integer)
- * @param b Alignment boundary (must be power of two)
+ * @param b Alignment boundary (must be a power of two)
  * @return Smallest multiple of b that is >= x
  */
 #define AlignUpPow2(x, b) (((x) + (b) - 1) & (~((b) - 1)))
@@ -108,7 +108,7 @@ u32 fnv1a_hash(const void* data, isize size);
 //
 
 byte* utf8_decode(byte* str, u32* codepoint);
-isize utf8_encode(byte* str, u32 codepoint);
+isize utf8_encode(byte* str, const u32 codepoint);
 
 //
 // arena
@@ -128,9 +128,9 @@ typedef struct {
 
 Arena arena_new(isize capacity);
 void arena_release(Arena* arena);
-void* arena_push(Arena* arena, isize size, isize align, isize count);
-void arena_pop_to(Arena* arena, isize pos);
-void arena_pop(Arena* arena, isize size, isize count);
+void* arena_push(Arena* arena, const isize size, const isize align, const isize count);
+void arena_pop_to(Arena* arena, const isize pos);
+void arena_pop(Arena* arena, const isize size, const isize count);
 
 //
 // slice
@@ -142,7 +142,7 @@ void arena_pop(Arena* arena, isize size, isize count);
         (s)->data + (s)->len++ \
         : (s)->data + (s)->len++)
 
-void slice_grow(Arena* arena, void* slice, isize size);
+void slice_grow(Arena* arena, void* slice, const isize size);
 
 //
 // string
@@ -157,4 +157,6 @@ typedef struct
 } String;
 
 String str_clone(Arena* arena, String s);
-String str_slice(String s, isize start, isize end);
+String str_slice(String s, const isize start, const isize end);
+b32 str_compare(const String a, const String b);
+String str_concat(Arena* arena, const String a, const String b);
