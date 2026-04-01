@@ -851,21 +851,20 @@ static String init_and_return_hash_str(UIBox* box, const String text)
     return hash_str;
 }
 
-UISignalFlags ui_button(const String text, const Color background_color, const Color text_color,
-                        const Font font, const f32 font_size)
+UISignalFlags ui_button(const String text, const Font font)
 {
     TextConfig text_config = {
-        .font = font,
-        .font_size = font_size,
-        .color = text_color,
-        .line_height = font_size
+        .font        = font,
+        .font_size   = 12,
+        .color       = { 0, 0, 0, 255 },
+        .line_height = 12
     };
 
     String hash_str;
     ui_box({
-        .sizing = { fit({}), fit({}) },
-        .color = background_color,
-        .padding = { 6, 6, 6, 6 },
+        .sizing    = { fit({}), fit({}) },
+        .color     = { 94, 203, 228, 255 },
+        .padding   = { 6, 6, 6, 6 },
         .alignment = { ALIGN_CENTER, ALIGN_CENTER }
     })
     {
@@ -892,6 +891,53 @@ UISignalFlags ui_button(const String text, const Color background_color, const C
                 flags |= UI_Signal_Flag_Hovered;
                 if (g_ui_context->mouse_lclick)
                     flags |= UI_Signal_Flag_LClicked;
+                if (g_ui_context->mouse_rclick)
+                    flags |= UI_Signal_Flag_RClicked;
+            }
+        }
+
+    return flags;
+}
+
+UISignalFlags ui_checkbox(const String text, b32* check)
+{
+    String hash_str;
+    AlignPosition inner_box_x_align = *check ? ALIGN_END : ALIGN_START;
+    ui_box({
+        .sizing    = { fixed(60), fixed(30) },
+        .color     = { 94, 203, 228, 255 },
+        .padding   = { 4, 4, 4, 4 },
+        .alignment = { inner_box_x_align, ALIGN_CENTER }
+    })
+    {
+        ui_box({
+            .sizing = { fixed(22), fit_grow({}) },
+            .color = { 251, 147, 143, 255 },
+        }) {}
+        UIBox* box = ui_box_get_parent();
+        hash_str = init_and_return_hash_str(box, text);
+    }
+
+    UISignalFlags flags = UI_Signal_Flag_None;
+    b32 found;
+    UIBox* last_box = find_or_insert_last_box_with_same_hash_str(hash_str, &found);
+    if (found)
+        if (last_box->key.len)
+        {
+            Rect last_box_rect = {
+                .xmin = last_box->position.x,
+                .ymin = last_box->position.y,
+                .xmax = last_box->position.x + last_box->size.width,
+                .ymax = last_box->position.y + last_box->size.height,
+            };
+            if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
+            {
+                flags |= UI_Signal_Flag_Hovered;
+                if (g_ui_context->mouse_lclick)
+                {
+                    *check = !(*check);
+                    flags |= UI_Signal_Flag_LClicked;
+                }
                 if (g_ui_context->mouse_rclick)
                     flags |= UI_Signal_Flag_RClicked;
             }

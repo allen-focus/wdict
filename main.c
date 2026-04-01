@@ -100,9 +100,7 @@ static void process_frame(AppContext* app_context)
                      .child_gap = s_child_gap_medium,
                      .direction = LAYOUT_TOP_TO_BOTTOM })
             {
-                ui_button(str("hello##1"), s_blue, s_black, font_zh, 12);
-
-                UISignalFlags flags = ui_button(str("hello##world"), s_blue, s_black, font_zh, 12);
+                UISignalFlags flags = ui_button(str("hello##world"), font_zh);
                 if (ui_hovered(flags))
                     ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_red }) {}
                 if (ui_lclicked(flags))
@@ -110,7 +108,10 @@ static void process_frame(AppContext* app_context)
                 if (ui_rclicked(flags))
                     set_app_title(app_context, str("Right Click"));
 
-                ui_button(str("hello###world"), s_blue, s_black, font_zh, 12);
+                static b32 check = False;
+                flags = ui_checkbox(str("good##bye"), &check);
+                if (check)
+                    ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_green }) {}
             }
         }
     }

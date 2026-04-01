@@ -296,5 +296,5 @@ isize ui_begin_frame(UIContext* ui_context);
 void ui_end_frame(isize arena_pos_backup);
 
 // Widgets
-UISignalFlags ui_button(const String text, const Color background_color, const Color text_color, const Font font,
-                        const f32 font_size);
+UISignalFlags ui_button(const String text, const Font font);
+UISignalFlags ui_checkbox(const String text, b32* check);
