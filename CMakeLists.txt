@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(ui C CXX)
 
-# ---------------------------------------------------------------------------
+#
 # Compiler / platform guard
-# ---------------------------------------------------------------------------
+#
 
 if(NOT MSVC)
     message(FATAL_ERROR "This project currently targets MSVC only.")
@@ -13,13 +13,13 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "Only x64 builds are supported.")
 endif()
 
-# ---------------------------------------------------------------------------
+#
 # Build configurations
 #
 #   Debug   – fast iteration, debugger-friendly   (/Od /Zi /RTC1)
 #   Profile – optimised + Tracy                   (/O2 /Zi + TRACY_ENABLE)
 #   Release – ship build, zero overhead           (/O2 /GS- + linker opts)
-# ---------------------------------------------------------------------------
+#
 
 set(CMAKE_CONFIGURATION_TYPES "Debug;Profile;Release" CACHE STRING "" FORCE)
 
@@ -27,23 +27,23 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_GENERATOR MATCHES "Visual Studio")
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
 endif()
 
-# ---------------------------------------------------------------------------
+#
 # Sources
-# ---------------------------------------------------------------------------
+#
 
 file(GLOB C_SOURCES CONFIGURE_DEPENDS "*.c")
 
 add_executable(${PROJECT_NAME} ${C_SOURCES})
 
-# ---------------------------------------------------------------------------
+#
 # Precompiled header  (CMake 3.16+)
-# ---------------------------------------------------------------------------
+#
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE pch.h)
 
-# ---------------------------------------------------------------------------
+#
 # Compile options
-# ---------------------------------------------------------------------------
+#
 
 target_compile_options(${PROJECT_NAME} PRIVATE
     /W3 /WX /MP /utf-8
@@ -53,9 +53,9 @@ target_compile_options(${PROJECT_NAME} PRIVATE
     $<$<CONFIG:Release>:/O2 /GS- /DNDEBUG>
 )
 
-# ---------------------------------------------------------------------------
+#
 # Linker options
-# ---------------------------------------------------------------------------
+#
 
 target_link_options(${PROJECT_NAME} PRIVATE
     $<$<CONFIG:Debug>:/SUBSYSTEM:WINDOWS>
@@ -63,7 +63,7 @@ target_link_options(${PROJECT_NAME} PRIVATE
     $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS /FIXED /INCREMENTAL:NO /OPT:ICF /OPT:REF>
 )
 
-# ---------------------------------------------------------------------------
+#
 # Tracy  (Profile only)
 #
 # TracyClient.cpp is a C++ TU compiled as a separate static library so it
@@ -73,7 +73,7 @@ target_link_options(${PROJECT_NAME} PRIVATE
 # overridden in that scope without affecting the rest of the build.
 # (set_target_properties COMPILE_OPTIONS cannot remove flags that come from
 #  CMAKE_CXX_FLAGS_DEBUG — those are injected at a lower layer.)
-# ---------------------------------------------------------------------------
+#
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/tracy/public/TracyClient.cpp")
     add_subdirectory(thirdparty/tracy)
@@ -83,9 +83,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/tracy/public/TracyClient.cpp")
     )
 endif()
 
-# ---------------------------------------------------------------------------
+#
 # Manifest  (embedded, optional)
-# ---------------------------------------------------------------------------
+#
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.manifest")
     target_link_options(${PROJECT_NAME} PRIVATE
@@ -94,9 +94,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.manifest")
     )
 endif()
 
-# ---------------------------------------------------------------------------
+#
 # Shaders  (fxc baked into headers, not linked as resources)
-# ---------------------------------------------------------------------------
+#
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
     set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
@@ -126,9 +126,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
     add_dependencies(${PROJECT_NAME} shaders)
 endif()
 
-# ---------------------------------------------------------------------------
+#
 # Output directory  (mirrors the original build/ layout)
-# ---------------------------------------------------------------------------
+#
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY         "${CMAKE_CURRENT_SOURCE_DIR}/build"

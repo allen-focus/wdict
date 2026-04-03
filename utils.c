@@ -2,10 +2,9 @@
 #include <string.h>
 #include <windows.h>
 
-
-// -----------------------------------------------------------------------------
+//
 // hash
-// -----------------------------------------------------------------------------
+//
 
 u32 fnv1a_hash(const void* data, isize size)
 {
@@ -16,9 +15,9 @@ u32 fnv1a_hash(const void* data, isize size)
     return hash;
 }
 
-// -----------------------------------------------------------------------------
+//
 // unicode
-// -----------------------------------------------------------------------------
+//
 
 // NOTE:
 //   1. No check for the string buffer’s capacity.
@@ -26,6 +25,7 @@ u32 fnv1a_hash(const void* data, isize size)
 //   3. Does not support multi‑codepoint sequences.
 byte* utf8_decode(byte* str, u32* codepoint)
 {
+    // clang-format off
     u8 length_table[] = {
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  // 0xxxx
         0, 0, 0, 0, 0, 0, 0, 0,                          // 10xxx
@@ -47,6 +47,7 @@ byte* utf8_decode(byte* str, u32* codepoint)
         default: *codepoint >>= shift[length];
     }
     return str + length;
+    // clang-format on
 }
 
 // NOTE:
@@ -88,9 +89,9 @@ isize utf8_encode(byte* str, const u32 codepoint)
     return length;
 }
 
-// -----------------------------------------------------------------------------
+//
 // arena
-// -----------------------------------------------------------------------------
+//
 
 Arena arena_new(const isize size)
 {
@@ -156,13 +157,14 @@ void arena_pop(Arena* arena, const isize size, const isize count)
     arena_pop_to(arena, arena->pos - need_pop);
 }
 
-// -----------------------------------------------------------------------------
+//
 // slice
-// -----------------------------------------------------------------------------
+//
 
 void slice_grow(Arena* arena, void* slice, const isize size)
 {
-    struct {
+    struct
+    {
         void* data;
         isize len;
         isize capacity;
@@ -183,16 +185,13 @@ void slice_grow(Arena* arena, void* slice, const isize size)
     memcpy(slice, &replica, sizeof(replica));
 }
 
-// -----------------------------------------------------------------------------
+//
 // string
-// -----------------------------------------------------------------------------
+//
 
 String str_clone(Arena* arena, String s)
 {
-    String s_clone = {
-        .data = (u8*)arena_push(arena, sizeof(u8), _Alignof(u8), s.len),
-        .len = s.len
-    };
+    String s_clone = { .data = (u8*)arena_push(arena, sizeof(u8), _Alignof(u8), s.len), .len = s.len };
     Assert(s_clone.data);
     memcpy(s_clone.data, s.data, s.len);
     return s_clone;

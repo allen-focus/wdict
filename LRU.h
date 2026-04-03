@@ -2,22 +2,23 @@
 
 #include "utils.h"
 
-///
-
-typedef enum {
+typedef enum
+{
     LRU_SIGNAL_TOEVICT,
     LRU_SIGNAL_TOINSERT,
     LRU_SIGNAL_FOUND,
 } LRUSignal;
 
-typedef struct Entry {
+typedef struct Entry
+{
     u32 hash_chain_head_index; // 4 bytes
-    u32 next_with_same_hash;   // 4 bytes
-    u32 lru_prev;              // 4 bytes
-    u32 lru_next;              // 4 bytes
+    u32 next_with_same_hash; // 4 bytes
+    u32 lru_prev; // 4 bytes
+    u32 lru_next; // 4 bytes
 } Entry; // 16 bytes (L1 cache)
 
-typedef struct {
+typedef struct
+{
     isize hit_count;
     isize miss_count;
 } LRUCacheStats;
@@ -25,7 +26,8 @@ typedef struct {
 typedef u32 (*hash_fn)(const void* data, isize size);
 typedef b32 (*is_same_fn)(const void* a, const void* b, isize size);
 
-typedef struct {
+typedef struct
+{
     LRUCacheStats stats;
     isize hash_chain_head_capacity; // must be a power of two
     isize entry_capacity; // must be a power of two

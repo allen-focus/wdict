@@ -249,12 +249,12 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
 static void renderer_upload_glyph(const GlyphAtlas* atlas, const GlyphInfo* glyph_info)
 {
     D3D11_BOX box = {
-        .left   = glyph_info->atlas_x,
-        .top    = glyph_info->atlas_y,
-        .front  = 0,
-        .right  = glyph_info->atlas_x + glyph_info->w,
+        .left = glyph_info->atlas_x,
+        .top = glyph_info->atlas_y,
+        .front = 0,
+        .right = glyph_info->atlas_x + glyph_info->w,
         .bottom = glyph_info->atlas_y + glyph_info->h,
-        .back   = 1,
+        .back = 1,
     };
     const u8* src = atlas->bitmap + glyph_info->atlas_y * atlas->w + glyph_info->atlas_x;
     ID3D11DeviceContext_UpdateSubresource(
@@ -336,8 +336,8 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
     FLOAT color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     ID3D11DeviceContext_ClearRenderTargetView(s_renderer_state.context, s_renderer_state.render_target_view, color);
 
-    // IA-VS-RS-PS-OM, Draw
     // clang-format off
+    // IA-VS-RS-PS-OM, Draw
     u32 stride = sizeof(Vertex);
     u32 offset = 0;
     ID3D11DeviceContext_IASetInputLayout(s_renderer_state.context, s_renderer_state.layout);
@@ -485,11 +485,12 @@ static void renderer_rect_push(const Rect target_rect, const Rect texture_rect, 
 // text width & height
 //
 
-static void renderer_update_glyph(GlyphCache* glyph_cache, GlyphInfo* glyph_info, const Font font, const f32 font_size, const u32 codepoint, const u32 dpi)
+static void renderer_update_glyph(GlyphCache* glyph_cache, GlyphInfo* glyph_info, const Font font, const f32 font_size,
+                                  const u32 codepoint, const u32 dpi)
 {
     GlyphAtlas* atlas = &glyph_cache->atlas;
-    u8* glyph_bitmap = glyph_rasterize(&glyph_cache->arena, glyph_cache->dwrite_factory, glyph_info, codepoint, font,
-                                       font_size, dpi);
+    u8* glyph_bitmap =
+        glyph_rasterize(&glyph_cache->arena, glyph_cache->dwrite_factory, glyph_info, codepoint, font, font_size, dpi);
     if (codepoint != ' ')
     {
         atlas_insert_glyph(atlas, glyph_info, glyph_bitmap);

@@ -4,9 +4,9 @@
 #include "glyph_cache.h"
 
 // clang-format off
-#define ui_box(...) \
-    for (UIBox* box = ui_box_start(&(BoxConfig)__VA_ARGS__); \
-         box != NULL; \
+#define ui_box(...)                                                                                                    \
+    for (UIBox* box = ui_box_start(&(BoxConfig)__VA_ARGS__);                                                           \
+         box != NULL;                                                                                                  \
          ui_box_end(box), box = NULL)
 // clang-format on
 
@@ -26,24 +26,28 @@
 #define fit(...)      { __VA_ARGS__, SIZING_MODE_FIT }
 #define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }
 
-#define COMMAND_QUEUE_CAPACITY             4096
-#define HASH_STR_MAX_LENGTH                128
+#define COMMAND_QUEUE_CAPACITY 4096
+#define HASH_STR_MAX_LENGTH    128
 
 ///
 
+// clang-format off
 typedef enum
 {
     UI_Signal_Flag_None     = 0,
-    UI_Signal_Flag_Hovered  = (1<<0),
-    UI_Signal_Flag_LClicked = (1<<1),
-    UI_Signal_Flag_RClicked = (1<<2),
+    UI_Signal_Flag_Hovered  = (1 << 0),
+    UI_Signal_Flag_LClicked = (1 << 1),
+    UI_Signal_Flag_RClicked = (1 << 2),
 } UISignalFlags;
+// clang-format on
 
 #define ui_hovered(signal_flags)  (signal_flags & UI_Signal_Flag_Hovered)
 #define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
 #define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
 
-// Command -----------------------------
+//
+// Command
+//
 
 typedef enum
 {
@@ -83,7 +87,9 @@ typedef union
     UICommandText text;
 } UICommand;
 
-// Sizing ------------------------------
+//
+// Sizing
+//
 
 typedef struct
 {
@@ -116,7 +122,9 @@ typedef struct
     SizingAxis height;
 } Sizing;
 
-// Box ------------------------------
+//
+// Box
+//
 
 typedef enum
 {
@@ -220,17 +228,20 @@ struct UIBox
     u64 last_frame_index;
 };
 
-// Context -----------------------------
+//
+// Context
+//
 
 typedef void (*flush_and_present_fn)(const u32 client_width, const u32 client_height);
 typedef void (*on_resize_fn)(const u32 client_width, const u32 client_height);
 typedef void (*wait_for_last_submitted_frame_fn)();
-typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
-typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size, const u32 dpi);
+typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
+                                 const u32 dpi);
+typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
+                                  const u32 dpi);
 typedef void (*draw_rect_fn)(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style);
 typedef void (*draw_text_fn)(GlyphCache* glyph_cache, String text, const Position position, const Color color,
                              const Font font, const f32 font_size, const u32 dpi);
-
 
 // NOTE:
 //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
@@ -285,7 +296,8 @@ extern UIContext* g_ui_context;
 
 ///
 
-void ui_init(UIContext* ui_context, u32 width, u32 height, u32 dpi, IDWriteFactory3* dwrite_factory, UIRenderFunc render_fn);
+void ui_init(UIContext* ui_context, u32 width, u32 height, u32 dpi, IDWriteFactory3* dwrite_factory,
+             UIRenderFunc render_fn);
 
 void ui_reset();
 UIBox* ui_box_start(const BoxConfig* config);
@@ -295,6 +307,5 @@ UIBox* ui_text(const String text, const TextConfig* text_config);
 isize ui_begin_frame(UIContext* ui_context);
 void ui_end_frame(isize arena_pos_backup);
 
-// Widgets
 UISignalFlags ui_button(const String text, const Font font);
 UISignalFlags ui_checkbox(const String text, b32* check);

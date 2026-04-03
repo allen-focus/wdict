@@ -4,6 +4,7 @@
 
 ///
 
+// clang-format off
 typedef uint8_t   u8;
 typedef uint16_t  u16;
 typedef uint32_t  u32;
@@ -21,6 +22,7 @@ typedef unsigned char byte;
 typedef ptrdiff_t     isize;
 typedef size_t        usize;
 typedef int32_t       b32; // bool
+// clang-format off
 
 ///
 
@@ -115,10 +117,11 @@ isize utf8_encode(byte* str, const u32 codepoint);
 //
 
 #if !defined(MEM_COMMIT_BLOCK_SIZE)
-    #define MEM_COMMIT_BLOCK_SIZE MB(8) // NOTE: Must be a power of two
+#    define MEM_COMMIT_BLOCK_SIZE MB(8) // NOTE: Must be a power of two
 #endif
 
-typedef struct {
+typedef struct
+{
     byte* base;
     isize pos;
     isize reserve_end;
@@ -136,11 +139,9 @@ void arena_pop(Arena* arena, const isize size, const isize count);
 // slice
 //
 
-#define slice_push(s, arena) \
-    ((s)->len >= (s)->capacity \
-        ? slice_grow(arena, s, sizeof(*(s)->data)), \
-        (s)->data + (s)->len++ \
-        : (s)->data + (s)->len++)
+#define slice_push(s, arena)                                                                                           \
+    ((s)->len >= (s)->capacity ? slice_grow(arena, s, sizeof(*(s)->data)),                                             \
+     (s)->data + (s)->len++    : (s)->data + (s)->len++)
 
 void slice_grow(Arena* arena, void* slice, const isize size);
 
@@ -152,7 +153,7 @@ void slice_grow(Arena* arena, void* slice, const isize size);
 
 typedef struct
 {
-    u8 *data;
+    u8* data;
     isize len;
 } String;
 

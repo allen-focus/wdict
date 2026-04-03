@@ -32,6 +32,7 @@ typedef struct
     Font fonts[FONT_CAPACITY];
 } AppContext;
 
+// clang-format off
 static Color s_black = { 0,   0,   0,   255 };
 static Color s_grey  = { 209, 233, 229, 255 };
 static Color s_white = { 255, 255, 255, 255 };
@@ -46,10 +47,11 @@ static Padding s_padding_small  = { 10, 10, 10, 10 };
 static f32 s_child_gap_big    = 20;
 static f32 s_child_gap_medium = 10;
 static f32 s_child_gap_small  = 5;
+// clang-format on
 
-// -----------------------------------------------------------------------------
+//
 // Helper
-// -----------------------------------------------------------------------------
+//
 
 static RECT get_screen_center_rect(u32 width, u32 height, u32 dpi)
 {
@@ -73,9 +75,9 @@ static void set_app_title(AppContext* app_context, const String title)
     SetWindowTextW(app_context->window, app_context->title);
 }
 
-// -----------------------------------------------------------------------------
+//
 // Process frame
-// -----------------------------------------------------------------------------
+//
 
 static void process_frame(AppContext* app_context)
 {
@@ -94,24 +96,34 @@ static void process_frame(AppContext* app_context)
             .alignment = { ALIGN_CENTER, ALIGN_CENTER },
         })
         {
-            ui_box({ .sizing = { fixed(200), fixed(300) },
-                     .color = s_grey,
-                     .padding = s_padding_medium,
-                     .child_gap = s_child_gap_medium,
-                     .direction = LAYOUT_TOP_TO_BOTTOM })
+            ui_box({ .sizing = { fixed(300), fixed(200) }, .color = s_blue, .padding = s_padding_medium })
             {
-                UISignalFlags flags = ui_button(str("hello##world"), font_zh);
-                if (ui_hovered(flags))
-                    ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_red }) {}
-                if (ui_lclicked(flags))
-                    set_app_title(app_context, str("Left Click"));
-                if (ui_rclicked(flags))
-                    set_app_title(app_context, str("Right Click"));
+                ui_box({ .sizing = { fixed(200), fixed(300) },
+                         .color = s_grey,
+                         .padding = s_padding_small,
+                         .child_gap = s_child_gap_medium,
+                         .direction = LAYOUT_TOP_TO_BOTTOM })
+                {
+                    ui_box({ .sizing = { fit({}), fit({}) }, .child_gap = s_child_gap_small })
+                    {
+                        UISignalFlags flags = ui_button(str("hello##world"), font_zh);
+                        if (ui_hovered(flags))
+                            ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = s_red })
+                            {
+                            }
+                        if (ui_lclicked(flags))
+                            set_app_title(app_context, str("Left Click"));
+                        if (ui_rclicked(flags))
+                            set_app_title(app_context, str("Right Click"));
+                    }
 
-                static b32 check = False;
-                flags = ui_checkbox(str("good##bye"), &check);
-                if (check)
-                    ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_green }) {}
+                    static b32 check = False;
+                    ui_checkbox(str("good##bye"), &check);
+                    if (check)
+                        ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_green })
+                        {
+                        }
+                }
             }
         }
     }
@@ -119,9 +131,9 @@ static void process_frame(AppContext* app_context)
     TracyCZoneEnd(ctx);
 }
 
-// -----------------------------------------------------------------------------
+//
 // Window procedure
-// -----------------------------------------------------------------------------
+//
 
 static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
 {
@@ -153,23 +165,27 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
             ui_context->mouse_pos.x = LOWORD(lparam) / dpi_scale;
             ui_context->mouse_pos.y = HIWORD(lparam) / dpi_scale;
-        } return 0;
+            return 0;
+        }
 
         case WM_LBUTTONDOWN:
         {
             ui_context->mouse_lclick = True;
-        } return 0;
+            return 0;
+        }
 
         case WM_RBUTTONDOWN:
         {
             ui_context->mouse_rclick = True;
-        } return 0;
+            return 0;
+        }
 
         case WM_KEYDOWN:
         {
             if (wparam == VK_ESCAPE)
                 DestroyWindow(window);
-        } return 0;
+            return 0;
+        }
 
         case WM_SIZE:
         {
@@ -182,7 +198,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
                 ui_context->render_fn.on_resize(physical_client_width, physical_client_height);
             process_frame(app_context);
-        } return 0;
+            return 0;
+        }
 
         case WM_DPICHANGED:
         {
@@ -196,20 +213,22 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             SetWindowPos(window, NULL, suggested_rect->left, suggested_rect->top,
                          suggested_rect->right - suggested_rect->left, suggested_rect->bottom - suggested_rect->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
-        } return 0;
+            return 0;
+        }
 
         case WM_DESTROY:
         {
             PostQuitMessage(0);
-        } return 0;
+            return 0;
+        }
     }
 
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
-// -----------------------------------------------------------------------------
+//
 // Main
-// -----------------------------------------------------------------------------
+//
 
 #if !defined(NDEBUG) || defined(TRACY_ENABLE)
 i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, i32 nShowCmd)

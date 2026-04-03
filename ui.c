@@ -15,30 +15,20 @@
 
 typedef Slice(f32*) F32PtrSlice;
 
-///
-
 static Queue(UIBox, QUEUE_CAPACITY) ui_box_queue = { 0 };
 static Stack(UIBox*, STACK_CAPACITY) ui_box_stack = { 0 };
 
 UIContext* g_ui_context = NULL;
 
-///
-
-// -----------------------------------------------------------------------------
+//
 // Context
-// -----------------------------------------------------------------------------
+//
 
 static b32 is_same_box_key(const void* a, const void* b, isize size)
 {
     Assert(size == (sizeof(u8) * HASH_STR_MAX_LENGTH + sizeof(isize)));
-    String str_a = {
-        .data = (u8*)a,
-        .len = *(isize*)((u8*)a + HASH_STR_MAX_LENGTH)
-    };
-    String str_b = {
-        .data = (u8*)b,
-        .len = *(isize*)((u8*)b + HASH_STR_MAX_LENGTH)
-    };
+    String str_a = { .data = (u8*)a, .len = *(isize*)((u8*)a + HASH_STR_MAX_LENGTH) };
+    String str_b = { .data = (u8*)b, .len = *(isize*)((u8*)b + HASH_STR_MAX_LENGTH) };
     return str_compare(str_a, str_b);
 }
 
@@ -55,7 +45,8 @@ static void box_cache_deinit(UIBoxCache* box_cache)
     memset(box_cache, 0, sizeof(*box_cache));
 }
 
-void ui_init(UIContext* ui_context, u32 width, u32 height, u32 dpi, IDWriteFactory3* dwrite_factory, UIRenderFunc render_fn)
+void ui_init(UIContext* ui_context, u32 width, u32 height, u32 dpi, IDWriteFactory3* dwrite_factory,
+             UIRenderFunc render_fn)
 {
     ui_context->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
     glyph_cache_init(&ui_context->glyph_cache, GLYPHS_LENGTH, dwrite_factory);
@@ -75,9 +66,9 @@ void ui_deinit(UIContext* ui_context)
     memset(ui_context, 0, sizeof(*ui_context));
 }
 
-// -----------------------------------------------------------------------------
+//
 // Box cache
-// -----------------------------------------------------------------------------
+//
 
 static UIBox* find_or_insert_last_box_with_same_hash_str(const String hash_str, b32* found)
 {
@@ -89,6 +80,10 @@ static UIBox* find_or_insert_last_box_with_same_hash_str(const String hash_str, 
     u32 entry_index = lru_cache_find_or_evict(&box_cache->lru_cache, &key, &signal);
     UIBox* last_box = (UIBox*)((byte*)box_cache->lru_cache.values_buf + entry_index * box_cache->lru_cache.value_size);
 
+    // NOTE:
+    //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
+    //   insertion order (new entries appended to tail). And LRU eviction is disabled;
+    //   unused boxes are explicitly dropped per frame.
     switch (signal)
     {
         case LRU_SIGNAL_FOUND:
@@ -104,10 +99,6 @@ static UIBox* find_or_insert_last_box_with_same_hash_str(const String hash_str, 
             break;
         case LRU_SIGNAL_TOEVICT:
         default:
-            // NOTE:
-            //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
-            //   insertion order (new entries appended to tail). And LRU eviction is disabled;
-            //   unused boxes are explicitly dropped per frame.
             Assert(0);
     }
 
@@ -128,9 +119,9 @@ static void box_cache_remove_unused()
     }
 }
 
-// -----------------------------------------------------------------------------
+//
 // Basic
-// -----------------------------------------------------------------------------
+//
 
 void ui_reset()
 {
@@ -140,8 +131,6 @@ void ui_reset()
     g_ui_context->mouse_lclick = False;
     g_ui_context->mouse_rclick = False;
 }
-
-///
 
 static UIBox* ui_box_new()
 {
@@ -160,7 +149,7 @@ static UIBox* ui_box_get_root()
     return &ui_box_queue.items[0];
 }
 
-UIBox* ui_box_start( const BoxConfig* config)
+UIBox* ui_box_start(const BoxConfig* config)
 {
     Assert(ui_box_stack.depth <= STACK_CAPACITY);
     Assert(ui_box_queue.count <= QUEUE_CAPACITY);
@@ -201,8 +190,6 @@ void ui_box_end(UIBox* box)
 {
     ui_box_stack.items[ui_box_stack.depth--] = NULL;
 }
-
-///
 
 UIBox* ui_text(const String text, const TextConfig* text_config)
 {
@@ -259,7 +246,8 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
                     // For ASCII: measure up to current position (word boundary before delimiter).
                     // For non-ASCII: include this character itself, treating it as a single-word unit.
                     isize end = start_codepoint < 127 ? ptr - text.data : next - text.data;
-                    f32 word_width = get_text_width(glyph_cache, str_slice(text, start, end), text_box->data.text.font, text_box->data.text.font_size, dpi);
+                    f32 word_width = get_text_width(glyph_cache, str_slice(text, start, end), text_box->data.text.font,
+                                                    text_box->data.text.font_size, dpi);
                     min_width = max(min_width, word_width);
                     word_count++;
                 }
@@ -269,11 +257,13 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
         }
 
         // Handle last word
-        f32 word_width = get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font, text_box->data.text.font_size, dpi);
+        f32 word_width = get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font,
+                                        text_box->data.text.font_size, dpi);
         min_width = max(min_width, word_width);
         word_count++;
 
-        whole_text_width = get_text_width(glyph_cache, text_box->data.text.content, text_box->data.text.font, text_box->data.text.font_size, dpi);
+        whole_text_width = get_text_width(glyph_cache, text_box->data.text.content, text_box->data.text.font,
+                                          text_box->data.text.font_size, dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
     text_box->config.sizing.width.min_max.min = min_width;
@@ -285,62 +275,9 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
     return text_box;
 }
 
-///
-
-static void ui_generate_render_commands(const UIBox* box)
-{
-    f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
-
-    switch (box->type)
-    {
-        case BOX_TYPE_CONTAINER:
-        {
-            UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
-            cmd->rect.base.type = UI_COMMAND_RECT;
-            cmd->rect.base.size = sizeof(UICommandRect);
-            cmd->rect.rect = (Rect){
-                box->position.x * dpi_scale,
-                box->position.y * dpi_scale,
-                (box->position.x + box->size.width) * dpi_scale,
-                (box->position.y + box->size.height) * dpi_scale
-            };
-            cmd->rect.color = box->config.color;
-            cmd->rect.style = box->config.rect_style;
-        }
-        break;
-        case BOX_TYPE_TEXT:
-        {
-            isize i = 0;
-            do {
-                UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
-                cmd->text.base.type = UI_COMMAND_TEXT;
-                cmd->text.base.size = sizeof(UICommandText);
-                cmd->text.font.face = box->data.text.font.face;
-                cmd->text.font.face3 = box->data.text.font.face3;
-                cmd->text.font_size = box->data.text.font_size;
-                cmd->text.content = box->data.text.wrapped_lines.len ? *(box->data.text.wrapped_lines.data + i) : box->data.text.content;
-                cmd->text.color = box->data.text.color;
-                cmd->text.position.x = box->position.x * dpi_scale;
-                cmd->text.position.y = (box->position.y + box->data.text.half_leading + i * box->data.text.line_height) * dpi_scale;
-            } while (++i < box->data.text.wrapped_lines.len);
-        }
-        break;
-    }
-
-    if (box->type == BOX_TYPE_CONTAINER)
-    {
-        UIBox* child = box->child_first;
-        while (child)
-        {
-            ui_generate_render_commands(child);
-            child = child->next;
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
+//
 // Layout
-// -----------------------------------------------------------------------------
+//
 
 // Axis-specific helper structure to eliminate code duplication
 typedef enum
@@ -349,7 +286,8 @@ typedef enum
     HEIGHT
 } Axis;
 
-typedef struct {
+typedef struct
+{
     f32* size;
     f32* min_size;
     f32* max_size;
@@ -531,7 +469,6 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
     if (box->type != BOX_TYPE_CONTAINER)
         return;
 
-
     isize arena_pos_backup = g_ui_context->arena.pos;
     {
         isize children_count = box->data.container.child_count;
@@ -682,7 +619,6 @@ static void ui_box_resolve_position(UIBox* box)
 
 static void perform_text_wrapping(UIBox* text_box)
 {
-    // Alias
     u32 dpi = g_ui_context->dpi;
     GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
     get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
@@ -691,8 +627,6 @@ static void perform_text_wrapping(UIBox* text_box)
     f32 font_size = text_box->data.text.font_size;
     String text = text_box->data.text.content;
     f32 max_width = text_box->size.width;
-
-    ///
 
     if (get_text_width(glyph_cache, text, font, font_size, dpi) <= max_width)
         return;
@@ -711,7 +645,8 @@ static void perform_text_wrapping(UIBox* text_box)
         f32 width = get_text_width(glyph_cache, str_slice(text, line_start, distance), font, font_size, dpi);
         if (width > max_width && last_break > line_start)
         {
-            *slice_push(&text_box->data.text.wrapped_lines, &g_ui_context->arena) = str_slice(text, line_start, last_break);
+            *slice_push(&text_box->data.text.wrapped_lines, &g_ui_context->arena) =
+                str_slice(text, line_start, last_break);
 
             // Skip space if needed
             line_start = (text.data[last_break] == ' ') ? last_break + 1 : last_break;
@@ -762,9 +697,9 @@ static void ui_calculate_layout(UIBox* box)
     TracyCZoneEnd(ctx);
 }
 
-// -----------------------------------------------------------------------------
+//
 // Frame
-// -----------------------------------------------------------------------------
+//
 
 isize ui_begin_frame(UIContext* ui_context)
 {
@@ -775,6 +710,57 @@ isize ui_begin_frame(UIContext* ui_context)
     return g_ui_context->arena.pos;
 }
 
+static void ui_generate_render_commands(const UIBox* box)
+{
+    f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+
+    switch (box->type)
+    {
+        case BOX_TYPE_CONTAINER:
+        {
+            UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
+            cmd->rect.base.type = UI_COMMAND_RECT;
+            cmd->rect.base.size = sizeof(UICommandRect);
+            cmd->rect.rect = (Rect){ box->position.x * dpi_scale, box->position.y * dpi_scale,
+                                     (box->position.x + box->size.width) * dpi_scale,
+                                     (box->position.y + box->size.height) * dpi_scale };
+            cmd->rect.color = box->config.color;
+            cmd->rect.style = box->config.rect_style;
+        }
+        break;
+        case BOX_TYPE_TEXT:
+        {
+            isize i = 0;
+            do
+            {
+                UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
+                cmd->text.base.type = UI_COMMAND_TEXT;
+                cmd->text.base.size = sizeof(UICommandText);
+                cmd->text.font.face = box->data.text.font.face;
+                cmd->text.font.face3 = box->data.text.font.face3;
+                cmd->text.font_size = box->data.text.font_size;
+                cmd->text.content = box->data.text.wrapped_lines.len ? *(box->data.text.wrapped_lines.data + i)
+                                                                     : box->data.text.content;
+                cmd->text.color = box->data.text.color;
+                cmd->text.position.x = box->position.x * dpi_scale;
+                cmd->text.position.y =
+                    (box->position.y + box->data.text.half_leading + i * box->data.text.line_height) * dpi_scale;
+            } while (++i < box->data.text.wrapped_lines.len);
+        }
+        break;
+    }
+
+    if (box->type == BOX_TYPE_CONTAINER)
+    {
+        UIBox* child = box->child_first;
+        while (child)
+        {
+            ui_generate_render_commands(child);
+            child = child->next;
+        }
+    }
+}
+
 void ui_end_frame(isize arena_pos_backup)
 {
     g_ui_context->root = ui_box_get_root();
@@ -782,16 +768,19 @@ void ui_end_frame(isize arena_pos_backup)
     ui_generate_render_commands(g_ui_context->root);
 
     // Draw
+    GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
+    UIRenderFunc* render_fn = &g_ui_context->render_fn;
     for (isize i = 0; i < g_ui_context->command_queue.count; i++)
     {
         UICommand* cmd = &g_ui_context->command_queue.items[i];
         switch (cmd->type)
         {
             case UI_COMMAND_RECT:
-                g_ui_context->render_fn.draw_rect(&g_ui_context->glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
+                render_fn->draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
                 break;
             case UI_COMMAND_TEXT:
-                g_ui_context->render_fn.draw_text(&g_ui_context->glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color, cmd->text.font, cmd->text.font_size, g_ui_context->dpi);
+                render_fn->draw_text(glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color,
+                                     cmd->text.font, cmd->text.font_size, g_ui_context->dpi);
                 break;
             default:
                 Assert(0);
@@ -811,9 +800,9 @@ void ui_end_frame(isize arena_pos_backup)
     g_ui_context = NULL;
 }
 
-// -----------------------------------------------------------------------------
+//
 // Widgets
-// -----------------------------------------------------------------------------
+//
 
 static b32 rect_contains_point(Rect r, Position p)
 {
@@ -853,20 +842,13 @@ static String init_and_return_hash_str(UIBox* box, const String text)
 
 UISignalFlags ui_button(const String text, const Font font)
 {
-    TextConfig text_config = {
-        .font        = font,
-        .font_size   = 12,
-        .color       = { 0, 0, 0, 255 },
-        .line_height = 12
-    };
+    TextConfig text_config = { .font = font, .font_size = 12, .color = { 0, 0, 0, 255 }, .line_height = 12 };
 
     String hash_str;
-    ui_box({
-        .sizing    = { fit({}), fit({}) },
-        .color     = { 94, 203, 228, 255 },
-        .padding   = { 6, 6, 6, 6 },
-        .alignment = { ALIGN_CENTER, ALIGN_CENTER }
-    })
+    ui_box({ .sizing = { fit({}), fit({}) },
+             .color = { 94, 203, 228, 255 },
+             .padding = { 6, 6, 6, 6 },
+             .alignment = { ALIGN_CENTER, ALIGN_CENTER } })
     {
         ui_text(text, &text_config);
 
@@ -903,17 +885,17 @@ UISignalFlags ui_checkbox(const String text, b32* check)
 {
     String hash_str;
     AlignPosition inner_box_x_align = *check ? ALIGN_END : ALIGN_START;
-    ui_box({
-        .sizing    = { fixed(60), fixed(30) },
-        .color     = { 94, 203, 228, 255 },
-        .padding   = { 4, 4, 4, 4 },
-        .alignment = { inner_box_x_align, ALIGN_CENTER }
-    })
+    ui_box({ .sizing = { fixed(60), fixed(30) },
+             .color = { 94, 203, 228, 255 },
+             .padding = { 4, 4, 4, 4 },
+             .alignment = { inner_box_x_align, ALIGN_CENTER } })
     {
         ui_box({
             .sizing = { fixed(22), fit_grow({}) },
             .color = { 251, 147, 143, 255 },
-        }) {}
+        })
+        {
+        }
         UIBox* box = ui_box_get_parent();
         hash_str = init_and_return_hash_str(box, text);
     }

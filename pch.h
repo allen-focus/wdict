@@ -18,4 +18,4 @@
 #include <dxgi1_3.h>
 #include <dxgidebug.h>
 
-#include "cdwrite.h"  // IWYU pragma: keep
+#include "cdwrite.h" // IWYU pragma: keep

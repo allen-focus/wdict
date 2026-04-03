@@ -2,8 +2,7 @@
 #include "utils.h"
 #include <string.h>
 
-
-//
+// clang-format off
 //                       +------------------------------------------------------------------------------------------+
 //                       |                                                                                          |
 //                       v           hash chain head                                       hash chain head          v
@@ -23,7 +22,7 @@
 //                       |             +---------+                                                |
 //                       |                  | next_with_same_hash                                 |
 //                       +------------------+-----------------------------------------------------+
-//
+// clang-format on
 LRUCache lru_cache_create(Arena* arena, isize hash_chain_head_capacity, isize entry_capacity, isize key_size,
                           isize value_size, hash_fn hash, is_same_fn is_same)
 {
@@ -37,7 +36,7 @@ LRUCache lru_cache_create(Arena* arena, isize hash_chain_head_capacity, isize en
     lru_cache.entry_capacity = entry_capacity;
 
     isize align = 16; // Hard-code align
-    lru_cache.keys_buf   = arena_push(arena, key_size,   align, entry_capacity);
+    lru_cache.keys_buf = arena_push(arena, key_size, align, entry_capacity);
     lru_cache.values_buf = arena_push(arena, value_size, align, entry_capacity);
     lru_cache.key_size = key_size;
     lru_cache.value_size = value_size;
@@ -57,6 +56,7 @@ void lru_cache_destroy(LRUCache* lru_cache)
     memset(lru_cache, 0, sizeof(LRUCache));
 }
 
+// clang-format off
 // Before popped:                                             |  After popped:
 //                                                            |
 //    +--------------------------------------------------+    |     +----------------------------------------+
@@ -77,7 +77,7 @@ void lru_cache_destroy(LRUCache* lru_cache)
 //    |        +---+                           |              |
 //    |          |                             |              |
 //    +----------+-----------------------------+              |
-//
+// clang-format on
 void lru_cache_remove_entry(LRUCache* lru_cache, u32 entry_index)
 {
     Entry* sentinel = &lru_cache->entries[0];
@@ -115,6 +115,7 @@ u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
     return lru_entry_index;
 }
 
+// clang-format off
 // Situation 1 - Found existing entry N
 // ====================================
 //                                                                 |
@@ -163,7 +164,7 @@ u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
 //    |         +---+                              |               |     |         +---+      +---+
 //    |           |                                |               |     |           |          |
 //    +-----------+--------------------------------+               |     +-----------+----------+
-//
+// clang-format on
 u32 lru_cache_find(const LRUCache* lru_cache, const void* key, b32* found)
 {
     u32 hash_chain_head_index = lru_cache->hash(key, lru_cache->key_size) & (lru_cache->hash_chain_head_capacity - 1);

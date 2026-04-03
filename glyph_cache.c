@@ -111,7 +111,7 @@ void glyph_cache_init(GlyphCache* glyph_cache, const isize glyphs_length, IDWrit
     white_glyph->h = 3;
     for (isize y = 0; y < 3; y++)
         for (isize x = 0; x < 3; x++)
-            glyph_cache->atlas.bitmap[(white_glyph->atlas_y + y) * GLYPH_ATLAS_WIDTH + (white_glyph->atlas_x + x)] = 255;
+            atlas->bitmap[(white_glyph->atlas_y + y) * GLYPH_ATLAS_WIDTH + (white_glyph->atlas_x + x)] = 255;
 
     glyph_cache->dwrite_factory = dwrite_factory;
 }
@@ -125,7 +125,8 @@ void glyph_cache_deinit(GlyphCache* glyph_cache)
 u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* glyph_info, u32 codepoint,
                     const Font font, const f32 font_size, const u32 dpi)
 {
-    // Get pixel size & scale, see: https://learn.microsoft.com/en-us/windows/win32/learnwin32/dpi-and-device-independent-pixels
+    // Get pixel size & scale, see:
+    // https://learn.microsoft.com/en-us/windows/win32/learnwin32/dpi-and-device-independent-pixels
     DWRITE_FONT_METRICS font_metrics = { 0 };
     IDWriteFontFace_GetMetrics(font.face, &font_metrics);
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
@@ -175,7 +176,7 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* gl
     // Create glyph bitmap
     u8* glyph_bitmap;
     {
-        // DWRITE_TEXTURE_ALIASED_1x1 is a misnomer, It actually outputs grayscale if we set up the analysis with AA enabled
+        // DWRITE_TEXTURE_ALIASED_1x1 is a misnomer, It actually outputs grayscale if we set up the analysis with AA
         const DWRITE_TEXTURE_TYPE type = DWRITE_TEXTURE_ALIASED_1x1;
 
         RECT bounds = { 0 };
@@ -194,10 +195,12 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* gl
     return glyph_bitmap;
 }
 
-GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size, LRUSignal* signal)
+GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size,
+                                LRUSignal* signal)
 {
     GlyphKey key = { font, font_size, codepoint };
     u32 entry_index = lru_cache_find_or_evict(&glyph_cache->lru_cache, &key, signal);
-    GlyphInfo* glyph_info = (GlyphInfo*)((byte*)glyph_cache->lru_cache.values_buf + entry_index * glyph_cache->lru_cache.value_size);
+    GlyphInfo* glyph_info =
+        (GlyphInfo*)((byte*)glyph_cache->lru_cache.values_buf + entry_index * glyph_cache->lru_cache.value_size);
     return glyph_info;
 }

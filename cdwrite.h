@@ -6,6 +6,8 @@
 #include <dcommon.h>
 #include <initguid.h>
 
+// clang-format off
+
 //
 // enum
 //
@@ -180,3 +182,5 @@ static inline UINT32                            IDWriteFontFace3_Release        
 static inline UINT32                            IDWriteFontFace_Release                                      (IDWriteFontFace* this) { return ((UINT32 (WINAPI*)(IDWriteFontFace*))this->v->tbl[2])(this); }
 static inline UINT32                            IDWriteGlyphRunAnalysis_Release                              (IDWriteGlyphRunAnalysis* this) { return ((UINT32 (WINAPI*)(IDWriteGlyphRunAnalysis*))this->v->tbl[2])(this); }
 #pragma clang diagnostic pop
+
+// clang-format on
