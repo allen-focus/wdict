@@ -10,13 +10,21 @@
 #define UI_CONTEXT_ARENA_CAPACITY MB(16)
 #define BOX_CACHE_ARENA_CAPACITY  MB(8)
 #define BOX_CACHE_CAPACITY        1024 // must be a power of two
-#define STACK_CAPACITY            16
-#define QUEUE_CAPACITY            2048
+#define BOX_STACK_CAPACITY        16
+#define BOX_QUEUE_CAPACITY        2048
 
 typedef Slice(f32*) F32PtrSlice;
 
-static Queue(UIBox, QUEUE_CAPACITY) ui_box_queue = { 0 };
-static Stack(UIBox*, STACK_CAPACITY) ui_box_stack = { 0 };
+static Queue(UIBox, BOX_QUEUE_CAPACITY) ui_box_queue = { 0 };
+static Stack(UIBox*, BOX_STACK_CAPACITY) ui_box_stack = { 0 };
+static Stack(Rect, BOX_STACK_CAPACITY) ui_clip_stack = { 0 };
+
+typedef enum
+{
+    UI_CLIP_NONE,
+    UI_CLIP_PART,
+    UI_CLIP_ALL
+} UI_CLIP_TYPE;
 
 UIContext* g_ui_context = NULL;
 
@@ -120,6 +128,60 @@ static void box_cache_remove_unused()
 }
 
 //
+// Clip
+//
+
+static Rect intersect_rects(Rect r1, Rect r2)
+{
+    f32 xmin = max(r1.xmin, r2.xmin);
+    f32 ymin = max(r1.ymin, r2.ymin);
+    f32 xmax = min(r1.xmax, r2.xmax);
+    f32 ymax = min(r1.ymax, r2.ymax);
+
+    // If there is no intersection, return a rectangle whose width and height are both zero
+    if (xmax < xmin)
+        xmax = xmin;
+    if (ymax < ymin)
+        ymax = ymin;
+
+    return (Rect){ xmin, ymin, xmax, ymax };
+}
+
+static Rect ui_clip_get(b32* success)
+{
+    if (ui_clip_stack.depth > 0)
+    {
+        *success = True;
+        return ui_clip_stack.items[ui_clip_stack.depth - 1];
+    }
+    *success = False;
+    return (Rect){ 0, 0, 0, 0 };
+}
+
+static void ui_clip_pop()
+{
+    Assert(ui_clip_stack.depth > 0);
+    ui_clip_stack.depth--;
+    memset(&ui_clip_stack.items[ui_clip_stack.depth], 0, sizeof(ui_clip_stack.items[0]));
+}
+
+static void ui_clip_push(Rect rect)
+{
+    b32 success;
+    Rect last = ui_clip_get(&success);
+    if (success)
+    {
+        Rect inter = intersect_rects(rect, last);
+        ui_clip_stack.items[ui_clip_stack.depth] = inter;
+    }
+    else
+    {
+        ui_clip_stack.items[ui_clip_stack.depth] = rect;
+    }
+    ui_clip_stack.depth++;
+}
+
+//
 // Basic
 //
 
@@ -134,7 +196,7 @@ void ui_reset()
 
 static UIBox* ui_box_new()
 {
-    Assert(ui_box_queue.count < QUEUE_CAPACITY);
+    Assert(ui_box_queue.count < BOX_QUEUE_CAPACITY);
     return &ui_box_queue.items[ui_box_queue.count++];
 }
 
@@ -151,8 +213,8 @@ static UIBox* ui_box_get_root()
 
 UIBox* ui_box_start(const BoxConfig* config)
 {
-    Assert(ui_box_stack.depth <= STACK_CAPACITY);
-    Assert(ui_box_queue.count <= QUEUE_CAPACITY);
+    Assert(ui_box_stack.depth <= BOX_STACK_CAPACITY);
+    Assert(ui_box_queue.count <= BOX_QUEUE_CAPACITY);
 
     UIBox* box = ui_box_new();
     UIBox* parent = ui_box_get_parent();
@@ -713,7 +775,29 @@ isize ui_begin_frame(UIContext* ui_context)
 static void ui_generate_render_commands(const UIBox* box)
 {
     f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+    Rect box_rect = (Rect){
+        box->position.x * dpi_scale,
+        box->position.y * dpi_scale,
+        (box->position.x + box->size.width) * dpi_scale,
+        (box->position.y + box->size.height) * dpi_scale,
+    };
 
+    // If clip is enabled, push a clip
+    if (box->config.enable_clip)
+    {
+        b32 success;
+        Rect last_clip_rect = ui_clip_get(&success);
+        Rect new_clip_rect = success ? intersect_rects(last_clip_rect, box_rect) : box_rect;
+        ui_clip_push(new_clip_rect);
+
+        UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
+        cmd->clip.base.type = UI_COMMAND_CLIP;
+        cmd->clip.base.size = sizeof(UICommandClip);
+        cmd->clip.rect = new_clip_rect;
+        cmd->clip.type = CLIP_SET;
+    }
+
+    // Draw box rect/text
     switch (box->type)
     {
         case BOX_TYPE_CONTAINER:
@@ -721,9 +805,7 @@ static void ui_generate_render_commands(const UIBox* box)
             UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
             cmd->rect.base.type = UI_COMMAND_RECT;
             cmd->rect.base.size = sizeof(UICommandRect);
-            cmd->rect.rect = (Rect){ box->position.x * dpi_scale, box->position.y * dpi_scale,
-                                     (box->position.x + box->size.width) * dpi_scale,
-                                     (box->position.y + box->size.height) * dpi_scale };
+            cmd->rect.rect = box_rect;
             cmd->rect.color = box->config.color;
             cmd->rect.style = box->config.rect_style;
         }
@@ -750,6 +832,7 @@ static void ui_generate_render_commands(const UIBox* box)
         break;
     }
 
+    // Recursive child boxes
     if (box->type == BOX_TYPE_CONTAINER)
     {
         UIBox* child = box->child_first;
@@ -759,36 +842,67 @@ static void ui_generate_render_commands(const UIBox* box)
             child = child->next;
         }
     }
+
+    // Pop the clip if it has been pushed
+    if (box->config.enable_clip)
+    {
+        ui_clip_pop();
+
+        b32 success;
+        Rect last_clip_rect = ui_clip_get(&success);
+        if (success)
+        {
+            UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
+            cmd->clip.base.type = UI_COMMAND_CLIP;
+            cmd->clip.base.size = sizeof(UICommandClip);
+            cmd->clip.rect = last_clip_rect;
+            cmd->clip.type = CLIP_SET;
+        }
+        else
+        {
+            UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
+            cmd->clip.base.type = UI_COMMAND_CLIP;
+            cmd->clip.base.size = sizeof(UICommandClip);
+            cmd->clip.type = CLIP_CLEAR;
+        }
+    }
 }
 
 void ui_end_frame(isize arena_pos_backup)
 {
+    GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
+    u32 dpi = g_ui_context->dpi;
+    UIRenderFunc* render_fn = &g_ui_context->render_fn;
+
     g_ui_context->root = ui_box_get_root();
     ui_calculate_layout(g_ui_context->root);
     ui_generate_render_commands(g_ui_context->root);
 
     // Draw
-    GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
-    UIRenderFunc* render_fn = &g_ui_context->render_fn;
     for (isize i = 0; i < g_ui_context->command_queue.count; i++)
     {
         UICommand* cmd = &g_ui_context->command_queue.items[i];
+        // clang-format off
         switch (cmd->type)
         {
             case UI_COMMAND_RECT:
                 render_fn->draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
                 break;
             case UI_COMMAND_TEXT:
-                render_fn->draw_text(glyph_cache, cmd->text.content, cmd->text.position, cmd->text.color,
-                                     cmd->text.font, cmd->text.font_size, g_ui_context->dpi);
+                UICommandText* text = &cmd->text;
+                render_fn->draw_text(glyph_cache, text->content, text->position, text->color, text->font, text->font_size, dpi);
+                break;
+            case UI_COMMAND_CLIP:
+                render_fn->set_clip(cmd->clip.type == CLIP_SET ? &cmd->clip.rect : NULL);
                 break;
             default:
                 Assert(0);
         }
+        // clang-format on
     }
 
     // Present
-    f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     u32 physical_client_width = (u32)(g_ui_context->client_width * dpi_scale);
     u32 physical_client_height = (u32)(g_ui_context->client_height * dpi_scale);
     g_ui_context->render_fn.flush_and_present(physical_client_width, physical_client_height);
@@ -888,12 +1002,10 @@ UISignalFlags ui_checkbox(const String text, b32* check)
     ui_box({ .sizing = { fixed(60), fixed(30) },
              .color = { 94, 203, 228, 255 },
              .padding = { 4, 4, 4, 4 },
-             .alignment = { inner_box_x_align, ALIGN_CENTER } })
+             .alignment = { inner_box_x_align, ALIGN_CENTER },
+             .enable_clip = True })
     {
-        ui_box({
-            .sizing = { fixed(22), fit_grow({}) },
-            .color = { 251, 147, 143, 255 },
-        })
+        ui_box({ .sizing = { fixed(22), fit_grow({}) }, .color = { 251, 147, 143, 255 } })
         {
         }
         UIBox* box = ui_box_get_parent();

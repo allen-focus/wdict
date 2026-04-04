@@ -40,6 +40,8 @@ static Color s_red   = { 251, 147, 143, 255 };
 static Color s_green = { 253, 216, 77,  255 };
 static Color s_blue  = { 94,  203, 228, 255 };
 
+static RectStyle s_round_border_shadow = { .border_color = { 253, 216, 77,  255 }, .corner_radius = 16, .border_thickness = 8, .enable_shadow = True };
+
 static Padding s_padding_big    = { 30, 30, 30, 30 };
 static Padding s_padding_medium = { 20, 20, 20, 20 };
 static Padding s_padding_small  = { 10, 10, 10, 10 };
@@ -96,7 +98,10 @@ static void process_frame(AppContext* app_context)
             .alignment = { ALIGN_CENTER, ALIGN_CENTER },
         })
         {
-            ui_box({ .sizing = { fixed(300), fixed(200) }, .color = s_blue, .padding = s_padding_medium })
+            ui_box({ .sizing = { fixed(300), fixed(200) },
+                     .color = s_blue,
+                     .padding = s_padding_medium,
+                     .enable_clip = True })
             {
                 ui_box({ .sizing = { fixed(200), fixed(300) },
                          .color = s_grey,
@@ -123,6 +128,11 @@ static void process_frame(AppContext* app_context)
                         ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_green })
                         {
                         }
+
+                    ui_box(
+                        { .sizing = { fixed(300), fixed(500) }, .color = s_black, .rect_style = s_round_border_shadow })
+                    {
+                    }
                 }
             }
         }
@@ -247,6 +257,7 @@ i32 WinMainCRTStartup()
         .flush_and_present = renderer_flush_and_present,
         .on_resize = renderer_resize,
         .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
+        .set_clip = renderer_set_clip_rect,
         .get_text_width = renderer_get_text_width_for_dpi,
         .get_text_height = renderer_get_text_height_for_dpi,
         .draw_rect = renderer_draw_rect,

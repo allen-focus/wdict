@@ -52,7 +52,8 @@ typedef enum
 typedef enum
 {
     UI_COMMAND_RECT,
-    UI_COMMAND_TEXT
+    UI_COMMAND_TEXT,
+    UI_COMMAND_CLIP
 } Command;
 
 typedef struct
@@ -79,12 +80,26 @@ typedef struct
     Position position;
 } UICommandText;
 
+typedef enum
+{
+    CLIP_CLEAR,
+    CLIP_SET
+} ClipCommandType;
+
+typedef struct
+{
+    UICommandBase base;
+    Rect rect;
+    ClipCommandType type;
+} UICommandClip;
+
 typedef union
 {
     Command type;
     UICommandBase base;
     UICommandRect rect;
     UICommandText text;
+    UICommandClip clip;
 } UICommand;
 
 //
@@ -159,6 +174,7 @@ typedef struct
     f32 child_gap;
     Alignment alignment;
     LayoutDirection direction;
+    b32 enable_clip;
 } BoxConfig;
 
 typedef struct
@@ -235,6 +251,7 @@ struct UIBox
 typedef void (*flush_and_present_fn)(const u32 client_width, const u32 client_height);
 typedef void (*on_resize_fn)(const u32 client_width, const u32 client_height);
 typedef void (*wait_for_last_submitted_frame_fn)();
+typedef void (*set_clip_fn)(Rect* rect);
 typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
                                  const u32 dpi);
 typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
@@ -259,6 +276,7 @@ typedef struct
     flush_and_present_fn flush_and_present;
     on_resize_fn on_resize;
     wait_for_last_submitted_frame_fn wait_for_last_submitted_frame;
+    set_clip_fn set_clip;
     get_text_width_fn get_text_width;
     get_text_height_fn get_text_height;
     draw_rect_fn draw_rect;

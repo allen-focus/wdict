@@ -1,9 +1,16 @@
+#define CLIP_QUEUE_CAPACITY 256 // 1. must matches C header's define; 2. must be a power of two
+
 Texture2D glyph_atlas_texture : register(t0);
 SamplerState mysampler : register(s0);
 
-cbuffer cbuffer0 : register(b0)
+cbuffer mvp_buffer : register(b0)
 {
     float4x4 projection_matrix;
+};
+
+cbuffer clip_rect_buffer : register(b1)
+{
+    float4 clip_rects[CLIP_QUEUE_CAPACITY];
 };
 
 //
@@ -17,6 +24,7 @@ struct VS_Input
     float4 color : COLOR;
     float4 border_color : BORDER_COLOR;
     float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: enable_shadow, w: is_text
+    int clip_index : CLIP_INDEX;
     uint vertex_id : SV_VertexID;
 };
 
@@ -35,6 +43,7 @@ struct PS_INPUT
     float shadow_sigma : SHADOW_SIGMA;
     float2 shadow_offset : SHADOW_OFFSET;
     float is_text : IS_TEXT;
+    int clip_index : CLIP_INDEX;
 };
 
 //
@@ -112,6 +121,7 @@ PS_INPUT vs(VS_Input input)
     output.shadow_sigma = shadow_sigma;
     output.shadow_offset = shadow_offset;
     output.is_text = input.style_params.w;
+    output.clip_index = input.clip_index;
     return output;
 }
 
@@ -200,6 +210,16 @@ float roundedBoxShadow(float2 lower, float2 upper, float2 pixel, float sigma, fl
 
 float4 ps(PS_INPUT input) : SV_TARGET
 {
+    if (input.clip_index >= 0)
+    {
+        int idx = input.clip_index;
+        float2 pos = input.position.xy;
+        float2 clip_min = float2(clip_rects[idx].x, clip_rects[idx].y);
+        float2 clip_max = float2(clip_rects[idx].z, clip_rects[idx].w);
+        if (pos.x < clip_min.x || pos.x > clip_max.x || pos.y < clip_min.y || pos.y > clip_max.y)
+            return float4(0, 0, 0, 0);
+    }
+
     float glyph_texture_grayscale_ratio = glyph_atlas_texture.Sample(mysampler, input.uv).r;
 
     // Text rendering: texture already contains shape, just apply color

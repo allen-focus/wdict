@@ -9,7 +9,11 @@
 
 ///
 
-#define VERTEX_SIZE 8192
+#define VERTEX_CAPACITY    8192
+#define VERTEX_IS_TEXT     1.0f
+#define VERTEX_IS_NOT_TEXT 0.0f
+#define CLIP_RECT_CAPACITY 256 // 1. must matches shader's define; 2. must be a power of two
+#define CLIP_INDEX_SKIP    -1
 
 ///
 
@@ -33,38 +37,49 @@ typedef struct
     ColorF32 color;
     ColorF32 border_color;
     VertexStyle style_params;
+    i32 clip_rect_index;
 } Vertex;
 
 typedef struct
 {
-    Vertex data[VERTEX_SIZE];
-    u16 count;
-} VertexStack;
+    Vertex data[VERTEX_CAPACITY];
+    u32 count;
+} VertexCache;
 
 typedef struct
 {
-    ID3D11Device* device;
-    ID3D11DeviceContext* context;
-    IDXGISwapChain1* swapchain;
-    ID3D11SamplerState* sampler_state;
-    ID3D11BlendState* blend_state;
-    ID3D11Texture2D* glyph_atlas_texture;
+    Rect rects[CLIP_RECT_CAPACITY];
+    u32 current_index;
+    u32 count;
+} ClipCache;
+
+// clang-format off
+typedef struct
+{
+    ID3D11Device*             device;
+    ID3D11DeviceContext*      context;
+    IDXGISwapChain1*          swapchain;
+    ID3D11SamplerState*       sampler_state;
+    ID3D11BlendState*         blend_state;
+    ID3D11Texture2D*          glyph_atlas_texture;
     ID3D11ShaderResourceView* glyph_atlas_shader_resource_view;
-    ID3D11Buffer* vertex_buffer;
-    ID3D11Buffer* constant_buffer;
-    ID3D11InputLayout* layout;
-    ID3D11VertexShader* vertex_shader;
-    ID3D11PixelShader* pixel_shader;
-    ID3D11RenderTargetView* render_target_view;
-    // For mitigating the input latency issue
-    IDXGISwapChain2* swapchain2;
-    HANDLE frame_latency_waitable_object;
+    ID3D11Buffer*             vertex_buffer;
+    ID3D11Buffer*             mvp_buffer;
+    ID3D11Buffer*             clip_rect_buffer;
+    ID3D11InputLayout*        layout;
+    ID3D11VertexShader*       vertex_shader;
+    ID3D11PixelShader*        pixel_shader;
+    ID3D11RenderTargetView*   render_target_view;
+    IDXGISwapChain2*          swapchain2;
+    HANDLE                    frame_latency_waitable_object;
 } RendererState;
+// clang-format on
 
 ///
 
 static RendererState s_renderer_state;
-static VertexStack s_vertex_stack = { 0 };
+static VertexCache s_vertex_cache = { 0 };
+static ClipCache s_clip_cache = { 0 };
 
 void renderer_wait_for_last_submitted_frame()
 {
@@ -205,12 +220,12 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
     // Create vertex buffer
     {
         D3D11_BUFFER_DESC desc = {
-            .ByteWidth = sizeof(s_vertex_stack.data),
+            .ByteWidth = sizeof(s_vertex_cache.data),
             .Usage = D3D11_USAGE_DYNAMIC,
             .BindFlags = D3D11_BIND_VERTEX_BUFFER,
             .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
         };
-        D3D11_SUBRESOURCE_DATA initial = { .pSysMem = s_vertex_stack.data };
+        D3D11_SUBRESOURCE_DATA initial = { .pSysMem = s_vertex_cache.data };
         ID3D11Device_CreateBuffer(s_renderer_state.device, &desc, &initial, &s_renderer_state.vertex_buffer);
     }
 
@@ -222,19 +237,31 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
             .BindFlags = D3D11_BIND_CONSTANT_BUFFER,
             .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
         };
-        ID3D11Device_CreateBuffer(s_renderer_state.device, &desc, NULL, &s_renderer_state.constant_buffer);
+        ID3D11Device_CreateBuffer(s_renderer_state.device, &desc, NULL, &s_renderer_state.mvp_buffer);
+    }
+
+    // Create constant buffer for clipping
+    {
+        D3D11_BUFFER_DESC desc = {
+            .ByteWidth = sizeof(s_clip_cache.rects),
+            .Usage = D3D11_USAGE_DYNAMIC,
+            .BindFlags = D3D11_BIND_CONSTANT_BUFFER,
+            .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
+        };
+        ID3D11Device_CreateBuffer(s_renderer_state.device, &desc, NULL, &s_renderer_state.clip_rect_buffer);
     }
 
     // Create input layout, vertex shader, pixel shader
     {
         // clang-format off
         D3D11_INPUT_ELEMENT_DESC desc[] = {
-            // SemanticName,      SemanticIndex, Format,                         InputSlot, AlignedByteOffset,                  InputSlotClass,                InstanceDataStepRate
-            { "TARGET_RECT",      0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, target_rect),      D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "TEXTURE_RECT",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, texture_rect),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",            0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, color),            D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "BORDER_COLOR",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, border_color),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "STYLE_PARAMS",     0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, style_params),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            // SemanticName,  SemanticIndex, Format,                         InputSlot, AlignedByteOffset,                 InputSlotClass,                InstanceDataStepRate
+            { "TARGET_RECT",  0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, target_rect),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TEXTURE_RECT", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, texture_rect),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",        0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, color),           D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "BORDER_COLOR", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, border_color),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "STYLE_PARAMS", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, style_params),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "CLIP_INDEX",   0,             DXGI_FORMAT_R32_SINT,           0,         offsetof(Vertex, clip_rect_index), D3D11_INPUT_PER_INSTANCE_DATA, 1 }
         };
         // clang-format on
         ID3D11Device_CreateVertexShader(s_renderer_state.device, d3d11_vshader, sizeof(d3d11_vshader), NULL,
@@ -289,38 +316,54 @@ void renderer_recreate_glyph_atlas_texture(const GlyphAtlas* glyph_atlas)
                                           &s_renderer_state.glyph_atlas_shader_resource_view);
 }
 
-void renderer_flush_and_present(const u32 client_width, const u32 client_height)
+static void map_vertex_buffer()
 {
-    TracyCZone(ctx, 1);
-    // Map vertex buffer
-    {
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0,
-                                D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-        memcpy(mapped.pData, s_vertex_stack.data, sizeof(Vertex) * s_vertex_stack.count);
-        ID3D11DeviceContext_Unmap(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0);
-    }
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0,
+                            D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    memcpy(mapped.pData, s_vertex_cache.data, sizeof(Vertex) * s_vertex_cache.count);
+    ID3D11DeviceContext_Unmap(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.vertex_buffer, 0);
+}
 
-    // Map orthographic projection matrix to cbuffer
-    {
-        f32 L = 0.f;
-        f32 R = (f32)client_width;
-        f32 T = 0.f;
-        f32 B = (f32)client_height;
-        // clang-format off
+static void map_clip_rects_to_cbuffer()
+{
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.clip_rect_buffer, 0,
+                            D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    memcpy(mapped.pData, s_clip_cache.rects, sizeof(Rect) * CLIP_RECT_CAPACITY);
+    ID3D11DeviceContext_Unmap(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.clip_rect_buffer, 0);
+}
+
+// Map orthographic projection matrix to cbuffer
+static void map_mvp_to_cbuffer(const u32 client_width, const u32 client_height)
+{
+    f32 L = 0.f;
+    f32 R = (f32)client_width;
+    f32 T = 0.f;
+    f32 B = (f32)client_height;
+    // clang-format off
         f32 mvp[4][4] = {
             { 2.0f / (R - L),    0.0f,              0.0f, 0.0f },
             { 0.0f,              2.0f / (T - B),    0.0f, 0.0f },
             { 0.0f,              0.0f,              0.5f, 0.0f },
             { (R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f },
         };
-        // clang-format on
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.constant_buffer, 0,
-                                D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-        memcpy(mapped.pData, mvp, sizeof(mvp));
-        ID3D11DeviceContext_Unmap(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.constant_buffer, 0);
-    }
+    // clang-format on
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    ID3D11DeviceContext_Map(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.mvp_buffer, 0,
+                            D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    memcpy(mapped.pData, mvp, sizeof(mvp));
+    ID3D11DeviceContext_Unmap(s_renderer_state.context, (ID3D11Resource*)s_renderer_state.mvp_buffer, 0);
+}
+
+void renderer_flush_and_present(const u32 client_width, const u32 client_height)
+{
+    TracyCZone(ctx, 1);
+
+    // Map buffer
+    map_vertex_buffer();
+    map_clip_rects_to_cbuffer();
+    map_mvp_to_cbuffer(client_width, client_height);
 
     // Set viewport
     D3D11_VIEWPORT viewport = {
@@ -343,15 +386,17 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
     ID3D11DeviceContext_IASetInputLayout(s_renderer_state.context, s_renderer_state.layout);
     ID3D11DeviceContext_IASetPrimitiveTopology(s_renderer_state.context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     ID3D11DeviceContext_IASetVertexBuffers(s_renderer_state.context, 0, 1, &s_renderer_state.vertex_buffer, &stride, &offset);
-    ID3D11DeviceContext_VSSetConstantBuffers(s_renderer_state.context, 0, 1, &s_renderer_state.constant_buffer);
+    ID3D11DeviceContext_IASetVertexBuffers(s_renderer_state.context, 0, 1, &s_renderer_state.vertex_buffer, &stride, &offset);
+    ID3D11DeviceContext_VSSetConstantBuffers(s_renderer_state.context, 0, 1, &s_renderer_state.mvp_buffer);
     ID3D11DeviceContext_VSSetShader(s_renderer_state.context, s_renderer_state.vertex_shader, NULL, 0);
+    ID3D11DeviceContext_PSSetConstantBuffers(s_renderer_state.context, 1, 1, &s_renderer_state.clip_rect_buffer);
     ID3D11DeviceContext_RSSetViewports(s_renderer_state.context, 1, &viewport);
     ID3D11DeviceContext_PSSetShader(s_renderer_state.context, s_renderer_state.pixel_shader, NULL, 0);
     ID3D11DeviceContext_PSSetShaderResources(s_renderer_state.context, 0, 1, &s_renderer_state.glyph_atlas_shader_resource_view);
     ID3D11DeviceContext_PSSetSamplers(s_renderer_state.context, 0, 1, &s_renderer_state.sampler_state);
     ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 1, &s_renderer_state.render_target_view, NULL);
     ID3D11DeviceContext_OMSetBlendState(s_renderer_state.context, s_renderer_state.blend_state, NULL, 0xffffffff);
-    ID3D11DeviceContext_DrawInstanced(s_renderer_state.context, 4, s_vertex_stack.count, 0, 0);
+    ID3D11DeviceContext_DrawInstanced(s_renderer_state.context, 4, s_vertex_cache.count, 0, 0);
     // clang-format on
 
     // Present
@@ -363,8 +408,9 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
 #endif
     IDXGISwapChain1_Present(s_renderer_state.swapchain, vsync, flags);
 
-    // Reset vertex stack
-    s_vertex_stack.count = 0;
+    // Reset vertex stack & clip rect cache
+    memset(&s_vertex_cache, 0, sizeof(s_vertex_cache));
+    memset(&s_clip_cache, 0, sizeof(s_clip_cache));
 
     TracyCZoneEnd(ctx);
 }
@@ -373,7 +419,8 @@ void renderer_deinit()
 {
     ID3D11RenderTargetView_Release(s_renderer_state.render_target_view);
     ID3D11Buffer_Release(s_renderer_state.vertex_buffer);
-    ID3D11Buffer_Release(s_renderer_state.constant_buffer);
+    ID3D11Buffer_Release(s_renderer_state.mvp_buffer);
+    ID3D11Buffer_Release(s_renderer_state.clip_rect_buffer);
     ID3D11InputLayout_Release(s_renderer_state.layout);
     ID3D11VertexShader_Release(s_renderer_state.vertex_shader);
     ID3D11PixelShader_Release(s_renderer_state.pixel_shader);
@@ -445,12 +492,12 @@ static ColorF32 color_srgb_to_linear(Color color_srgb)
 // rect push
 //
 
-static void renderer_rect_push(const Rect target_rect, const Rect texture_rect, const Color color,
+static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, const Color color,
                                const RectStyle style)
 {
-    Assert(s_vertex_stack.count != VERTEX_SIZE);
+    Assert(s_vertex_cache.count != VERTEX_CAPACITY);
 
-    Vertex* vertex = &s_vertex_stack.data[s_vertex_stack.count];
+    Vertex* vertex = &s_vertex_cache.data[s_vertex_cache.count];
 
     // Update target rect
     {
@@ -476,9 +523,53 @@ static void renderer_rect_push(const Rect target_rect, const Rect texture_rect, 
     vertex->style_params.corner_radius = style.corner_radius;
     vertex->style_params.border_thickness = style.border_thickness;
     vertex->style_params.enable_shadow = (f32)style.enable_shadow;
-    vertex->style_params.is_text = 0.0f; // is_text flag (0 = rect, 1 = text)
+    vertex->style_params.is_text = VERTEX_IS_NOT_TEXT;
 
-    s_vertex_stack.count++;
+    // Update clip rect index
+    vertex->clip_rect_index = s_clip_cache.count > 0 ? s_clip_cache.current_index : CLIP_INDEX_SKIP;
+
+    s_vertex_cache.count++;
+}
+
+//
+// clip
+//
+
+void renderer_set_clip_rect(Rect* rect)
+{
+    // Skip clip if rect is null
+    if (rect == NULL)
+    {
+        s_clip_cache.current_index = CLIP_INDEX_SKIP;
+        return;
+    }
+
+    u32 start_index = fnv1a_hash(rect, sizeof(*rect)) & (CLIP_RECT_CAPACITY - 1);
+
+    u32 clip_rect_index = start_index;
+    Rect void_rect = { 0, 0, 0, 0 };
+
+    // Open addressing
+    while (memcmp(&s_clip_cache.rects[clip_rect_index], &void_rect, sizeof(void_rect)) != 0)
+    {
+        if (memcmp(&s_clip_cache.rects[clip_rect_index], rect, sizeof(*rect)) == 0)
+        {
+            s_clip_cache.current_index = clip_rect_index;
+            s_clip_cache.count++;
+            return;
+        }
+
+        clip_rect_index++;
+
+        if (clip_rect_index >= CLIP_RECT_CAPACITY)
+            clip_rect_index = 0;
+        if (clip_rect_index == start_index)
+            Assert(0); // hash table is full
+    }
+
+    memcpy(&s_clip_cache.rects[clip_rect_index], rect, sizeof(*rect));
+    s_clip_cache.current_index = clip_rect_index;
+    s_clip_cache.count++;
 }
 
 //
@@ -570,7 +661,7 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         .xmax = (f32)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (f32)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_rect_push(expanded_rect, glyph_white_rect, color, style);
+    renderer_push_rect(expanded_rect, glyph_white_rect, color, style);
 }
 
 void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position position, const Color color,
@@ -606,11 +697,11 @@ void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position pos
             .ymax = (f32)(glyph_info->atlas_y + glyph_info->h),
         };
         RectStyle rect_style = { 0 };
-        renderer_rect_push(target_rect, texture_rect, color, rect_style);
+        renderer_push_rect(target_rect, texture_rect, color, rect_style);
 
         // Mark this as text rendering by setting style_params[3]
-        Vertex* vertex = &s_vertex_stack.data[s_vertex_stack.count - 1];
-        vertex->style_params.is_text = 1.0f; // is_text flag
+        Vertex* vertex = &s_vertex_cache.data[s_vertex_cache.count - 1];
+        vertex->style_params.is_text = VERTEX_IS_TEXT;
 
         // Update x position for next char
         next_position_x += (f32)glyph_info->xadvance;

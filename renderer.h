@@ -14,6 +14,8 @@ void renderer_wait_for_last_submitted_frame();
 void renderer_flush_and_present(const u32 client_width, const u32 client_height);
 void renderer_deinit();
 
+void renderer_set_clip_rect(Rect* rect);
+
 f32 renderer_get_text_width_for_dpi(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
                                     const u32 dpi);
 f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
