@@ -101,11 +101,13 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
     set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
     set(FXC_FLAGS /nologo /O3 /WX /Zpc /Ges /Qstrip_reflect /Qstrip_debug /Qstrip_priv)
+    set(SHADER_STAMP "${SHADER_DIR}/shader_compile.stamp")
 
     add_custom_command(
         OUTPUT
             "${SHADER_DIR}/d3d11_vshader.h"
             "${SHADER_DIR}/d3d11_pshader.h"
+            "${SHADER_STAMP}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_DIR}"
         COMMAND fxc.exe ${FXC_FLAGS} /T vs_5_0 /E vs
                 /Fh "${SHADER_DIR}/d3d11_vshader.h" /Vn d3d11_vshader
@@ -113,15 +115,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
         COMMAND fxc.exe ${FXC_FLAGS} /T ps_5_0 /E ps
                 /Fh "${SHADER_DIR}/d3d11_pshader.h" /Vn d3d11_pshader
                 "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl"
+        COMMAND ${CMAKE_COMMAND} -E touch "${SHADER_STAMP}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl"
         COMMENT "Compiling HLSL shaders"
         VERBATIM
     )
 
-    add_custom_target(shaders DEPENDS
-        "${SHADER_DIR}/d3d11_vshader.h"
-        "${SHADER_DIR}/d3d11_pshader.h"
-    )
+    add_custom_target(shaders DEPENDS "${SHADER_STAMP}")
+    foreach(source ${C_SOURCES})
+        set_source_files_properties(${source} PROPERTIES OBJECT_DEPENDS "${SHADER_STAMP}")
+    endforeach()
 
     add_dependencies(${PROJECT_NAME} shaders)
 endif()
