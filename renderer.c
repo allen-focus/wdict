@@ -492,10 +492,48 @@ static ColorF32 color_srgb_to_linear(Color color_srgb)
 // rect push
 //
 
+static void renderer_set_clip_rect(const Rect* clip)
+{
+    u32 start_index = fnv1a_hash(clip, sizeof(*clip)) & (CLIP_RECT_CAPACITY - 1);
+
+    u32 clip_rect_index = start_index;
+    Rect void_rect = { 0, 0, 0, 0 };
+
+    // Open addressing
+    while (memcmp(&s_clip_cache.rects[clip_rect_index], &void_rect, sizeof(void_rect)) != 0)
+    {
+        if (memcmp(&s_clip_cache.rects[clip_rect_index], clip, sizeof(*clip)) == 0)
+        {
+            s_clip_cache.current_index = clip_rect_index;
+            s_clip_cache.count++;
+            return;
+        }
+
+        clip_rect_index++;
+
+        if (clip_rect_index >= CLIP_RECT_CAPACITY)
+            clip_rect_index = 0;
+        if (clip_rect_index == start_index)
+            Assert(0); // hash table is full
+    }
+
+    memcpy(&s_clip_cache.rects[clip_rect_index], clip, sizeof(*clip));
+    s_clip_cache.current_index = clip_rect_index;
+    s_clip_cache.count++;
+}
+
 static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, const Color color,
-                               const RectStyle style)
+                               const RectStyle style, const Rect* clip)
 {
     Assert(s_vertex_cache.count != VERTEX_CAPACITY);
+
+    // Set clip
+    if (clip)
+    {
+        b32 use_last_clip = memcmp(&s_clip_cache.rects[s_clip_cache.current_index], clip, sizeof(*clip)) != 0;
+        if (s_clip_cache.count == 0 || !use_last_clip)
+            renderer_set_clip_rect(clip);
+    }
 
     Vertex* vertex = &s_vertex_cache.data[s_vertex_cache.count];
 
@@ -526,50 +564,9 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
     vertex->style_params.is_text = VERTEX_IS_NOT_TEXT;
 
     // Update clip rect index
-    vertex->clip_rect_index = s_clip_cache.count > 0 ? s_clip_cache.current_index : CLIP_INDEX_SKIP;
+    vertex->clip_rect_index = clip ? s_clip_cache.current_index : CLIP_INDEX_SKIP;
 
     s_vertex_cache.count++;
-}
-
-//
-// clip
-//
-
-void renderer_set_clip_rect(Rect* rect)
-{
-    // Skip clip if rect is null
-    if (rect == NULL)
-    {
-        s_clip_cache.current_index = CLIP_INDEX_SKIP;
-        return;
-    }
-
-    u32 start_index = fnv1a_hash(rect, sizeof(*rect)) & (CLIP_RECT_CAPACITY - 1);
-
-    u32 clip_rect_index = start_index;
-    Rect void_rect = { 0, 0, 0, 0 };
-
-    // Open addressing
-    while (memcmp(&s_clip_cache.rects[clip_rect_index], &void_rect, sizeof(void_rect)) != 0)
-    {
-        if (memcmp(&s_clip_cache.rects[clip_rect_index], rect, sizeof(*rect)) == 0)
-        {
-            s_clip_cache.current_index = clip_rect_index;
-            s_clip_cache.count++;
-            return;
-        }
-
-        clip_rect_index++;
-
-        if (clip_rect_index >= CLIP_RECT_CAPACITY)
-            clip_rect_index = 0;
-        if (clip_rect_index == start_index)
-            Assert(0); // hash table is full
-    }
-
-    memcpy(&s_clip_cache.rects[clip_rect_index], rect, sizeof(*rect));
-    s_clip_cache.current_index = clip_rect_index;
-    s_clip_cache.count++;
 }
 
 //
@@ -632,7 +629,8 @@ f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text,
 // draw
 //
 
-void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style)
+void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style,
+                        const Rect* clip)
 {
     // Calculate expanded rect
     Rect expanded_rect = rect;
@@ -661,11 +659,11 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
         .xmax = (f32)(glyph_white->atlas_x + glyph_white->w),
         .ymax = (f32)(glyph_white->atlas_y + glyph_white->h),
     };
-    renderer_push_rect(expanded_rect, glyph_white_rect, color, style);
+    renderer_push_rect(expanded_rect, glyph_white_rect, color, style, clip);
 }
 
 void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position position, const Color color,
-                        const Font font, const f32 font_size, const u32 dpi)
+                        const Font font, const f32 font_size, const u32 dpi, const Rect* clip)
 {
     f32 next_position_x = position.x;
 
@@ -697,7 +695,7 @@ void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position pos
             .ymax = (f32)(glyph_info->atlas_y + glyph_info->h),
         };
         RectStyle rect_style = { 0 };
-        renderer_push_rect(target_rect, texture_rect, color, rect_style);
+        renderer_push_rect(target_rect, texture_rect, color, rect_style, clip);
 
         // Mark this as text rendering by setting style_params[3]
         Vertex* vertex = &s_vertex_cache.data[s_vertex_cache.count - 1];

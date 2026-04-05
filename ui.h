@@ -52,8 +52,7 @@ typedef enum
 typedef enum
 {
     UI_COMMAND_RECT,
-    UI_COMMAND_TEXT,
-    UI_COMMAND_CLIP
+    UI_COMMAND_TEXT
 } Command;
 
 typedef struct
@@ -68,6 +67,7 @@ typedef struct
     Rect rect;
     Color color;
     RectStyle style;
+    Rect clip;
 } UICommandRect;
 
 typedef struct
@@ -78,20 +78,8 @@ typedef struct
     String content;
     Color color;
     Position position;
+    Rect clip;
 } UICommandText;
-
-typedef enum
-{
-    CLIP_CLEAR,
-    CLIP_SET
-} ClipCommandType;
-
-typedef struct
-{
-    UICommandBase base;
-    Rect rect;
-    ClipCommandType type;
-} UICommandClip;
 
 typedef union
 {
@@ -99,7 +87,6 @@ typedef union
     UICommandBase base;
     UICommandRect rect;
     UICommandText text;
-    UICommandClip clip;
 } UICommand;
 
 //
@@ -251,14 +238,14 @@ struct UIBox
 typedef void (*flush_and_present_fn)(const u32 client_width, const u32 client_height);
 typedef void (*on_resize_fn)(const u32 client_width, const u32 client_height);
 typedef void (*wait_for_last_submitted_frame_fn)();
-typedef void (*set_clip_fn)(Rect* rect);
 typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
                                  const u32 dpi);
 typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
                                   const u32 dpi);
-typedef void (*draw_rect_fn)(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style);
+typedef void (*draw_rect_fn)(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style,
+                             const Rect* clip);
 typedef void (*draw_text_fn)(GlyphCache* glyph_cache, String text, const Position position, const Color color,
-                             const Font font, const f32 font_size, const u32 dpi);
+                             const Font font, const f32 font_size, const u32 dpi, const Rect* clip);
 
 // NOTE:
 //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
@@ -276,7 +263,6 @@ typedef struct
     flush_and_present_fn flush_and_present;
     on_resize_fn on_resize;
     wait_for_last_submitted_frame_fn wait_for_last_submitted_frame;
-    set_clip_fn set_clip;
     get_text_width_fn get_text_width;
     get_text_height_fn get_text_height;
     draw_rect_fn draw_rect;

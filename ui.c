@@ -17,14 +17,6 @@ typedef Slice(f32*) F32PtrSlice;
 
 static Queue(UIBox, BOX_QUEUE_CAPACITY) ui_box_queue = { 0 };
 static Stack(UIBox*, BOX_STACK_CAPACITY) ui_box_stack = { 0 };
-static Stack(Rect, BOX_STACK_CAPACITY) ui_clip_stack = { 0 };
-
-typedef enum
-{
-    UI_CLIP_NONE,
-    UI_CLIP_PART,
-    UI_CLIP_ALL
-} UI_CLIP_TYPE;
 
 UIContext* g_ui_context = NULL;
 
@@ -125,60 +117,6 @@ static void box_cache_remove_unused()
         memset(lru_box, 0, sizeof(*lru_box));
         lru_box = (UIBox*)((byte*)lru_cache->values_buf + lru_entry_index * lru_cache->value_size);
     }
-}
-
-//
-// Clip
-//
-
-static Rect intersect_rects(Rect r1, Rect r2)
-{
-    f32 xmin = max(r1.xmin, r2.xmin);
-    f32 ymin = max(r1.ymin, r2.ymin);
-    f32 xmax = min(r1.xmax, r2.xmax);
-    f32 ymax = min(r1.ymax, r2.ymax);
-
-    // If there is no intersection, return a rectangle whose width and height are both zero
-    if (xmax < xmin)
-        xmax = xmin;
-    if (ymax < ymin)
-        ymax = ymin;
-
-    return (Rect){ xmin, ymin, xmax, ymax };
-}
-
-static Rect ui_clip_get(b32* success)
-{
-    if (ui_clip_stack.depth > 0)
-    {
-        *success = True;
-        return ui_clip_stack.items[ui_clip_stack.depth - 1];
-    }
-    *success = False;
-    return (Rect){ 0, 0, 0, 0 };
-}
-
-static void ui_clip_pop()
-{
-    Assert(ui_clip_stack.depth > 0);
-    ui_clip_stack.depth--;
-    memset(&ui_clip_stack.items[ui_clip_stack.depth], 0, sizeof(ui_clip_stack.items[0]));
-}
-
-static void ui_clip_push(Rect rect)
-{
-    b32 success;
-    Rect last = ui_clip_get(&success);
-    if (success)
-    {
-        Rect inter = intersect_rects(rect, last);
-        ui_clip_stack.items[ui_clip_stack.depth] = inter;
-    }
-    else
-    {
-        ui_clip_stack.items[ui_clip_stack.depth] = rect;
-    }
-    ui_clip_stack.depth++;
 }
 
 //
@@ -772,7 +710,23 @@ isize ui_begin_frame(UIContext* ui_context)
     return g_ui_context->arena.pos;
 }
 
-static void ui_generate_render_commands(const UIBox* box)
+static Rect intersect_rects(Rect r1, Rect r2)
+{
+    f32 xmin = max(r1.xmin, r2.xmin);
+    f32 ymin = max(r1.ymin, r2.ymin);
+    f32 xmax = min(r1.xmax, r2.xmax);
+    f32 ymax = min(r1.ymax, r2.ymax);
+
+    // If there is no intersection, return a rectangle whose width or height is zero
+    if (xmax < xmin)
+        xmax = xmin;
+    if (ymax < ymin)
+        ymax = ymin;
+
+    return (Rect){ xmin, ymin, xmax, ymax };
+}
+
+static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 {
     f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
     Rect box_rect = (Rect){
@@ -783,31 +737,24 @@ static void ui_generate_render_commands(const UIBox* box)
     };
 
     // If clip is enabled, push a clip
+    Rect new_clip = clip;
     if (box->config.enable_clip)
-    {
-        b32 success;
-        Rect last_clip_rect = ui_clip_get(&success);
-        Rect new_clip_rect = success ? intersect_rects(last_clip_rect, box_rect) : box_rect;
-        ui_clip_push(new_clip_rect);
+        new_clip = intersect_rects(clip, box_rect);
 
-        UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
-        cmd->clip.base.type = UI_COMMAND_CLIP;
-        cmd->clip.base.size = sizeof(UICommandClip);
-        cmd->clip.rect = new_clip_rect;
-        cmd->clip.type = CLIP_SET;
-    }
-
+    // clang-format off
     // Draw box rect/text
     switch (box->type)
     {
         case BOX_TYPE_CONTAINER:
         {
             UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
+
             cmd->rect.base.type = UI_COMMAND_RECT;
             cmd->rect.base.size = sizeof(UICommandRect);
-            cmd->rect.rect = box_rect;
-            cmd->rect.color = box->config.color;
-            cmd->rect.style = box->config.rect_style;
+            cmd->rect.rect      = box_rect;
+            cmd->rect.color     = box->config.color;
+            cmd->rect.style     = box->config.rect_style;
+            cmd->rect.clip      = clip;
         }
         break;
         case BOX_TYPE_TEXT:
@@ -816,21 +763,23 @@ static void ui_generate_render_commands(const UIBox* box)
             do
             {
                 UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
-                cmd->text.base.type = UI_COMMAND_TEXT;
-                cmd->text.base.size = sizeof(UICommandText);
-                cmd->text.font.face = box->data.text.font.face;
-                cmd->text.font.face3 = box->data.text.font.face3;
-                cmd->text.font_size = box->data.text.font_size;
-                cmd->text.content = box->data.text.wrapped_lines.len ? *(box->data.text.wrapped_lines.data + i)
-                                                                     : box->data.text.content;
-                cmd->text.color = box->data.text.color;
+                const TextData* text = &box->data.text;
+
+                cmd->text.base.type  = UI_COMMAND_TEXT;
+                cmd->text.base.size  = sizeof(UICommandText);
+                cmd->text.font.face  = text->font.face;
+                cmd->text.font.face3 = text->font.face3;
+                cmd->text.font_size  = text->font_size;
+                cmd->text.content    = text->wrapped_lines.len ? *(text->wrapped_lines.data + i) : text->content;
+                cmd->text.color      = text->color;
                 cmd->text.position.x = box->position.x * dpi_scale;
-                cmd->text.position.y =
-                    (box->position.y + box->data.text.half_leading + i * box->data.text.line_height) * dpi_scale;
+                cmd->text.position.y = (box->position.y + text->half_leading + i * text->line_height) * dpi_scale;
+                cmd->text.clip       = clip;
             } while (++i < box->data.text.wrapped_lines.len);
         }
         break;
     }
+    // clang-format on
 
     // Recursive child boxes
     if (box->type == BOX_TYPE_CONTAINER)
@@ -838,32 +787,8 @@ static void ui_generate_render_commands(const UIBox* box)
         UIBox* child = box->child_first;
         while (child)
         {
-            ui_generate_render_commands(child);
+            ui_generate_render_commands(child, new_clip);
             child = child->next;
-        }
-    }
-
-    // Pop the clip if it has been pushed
-    if (box->config.enable_clip)
-    {
-        ui_clip_pop();
-
-        b32 success;
-        Rect last_clip_rect = ui_clip_get(&success);
-        if (success)
-        {
-            UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
-            cmd->clip.base.type = UI_COMMAND_CLIP;
-            cmd->clip.base.size = sizeof(UICommandClip);
-            cmd->clip.rect = last_clip_rect;
-            cmd->clip.type = CLIP_SET;
-        }
-        else
-        {
-            UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
-            cmd->clip.base.type = UI_COMMAND_CLIP;
-            cmd->clip.base.size = sizeof(UICommandClip);
-            cmd->clip.type = CLIP_CLEAR;
         }
     }
 }
@@ -872,37 +797,37 @@ void ui_end_frame(isize arena_pos_backup)
 {
     GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
     u32 dpi = g_ui_context->dpi;
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    Rect no_clip = { 0, 0, g_ui_context->client_width * dpi_scale, g_ui_context->client_height * dpi_scale };
     UIRenderFunc* render_fn = &g_ui_context->render_fn;
 
     g_ui_context->root = ui_box_get_root();
     ui_calculate_layout(g_ui_context->root);
-    ui_generate_render_commands(g_ui_context->root);
+    ui_generate_render_commands(g_ui_context->root, no_clip);
 
     // Draw
     for (isize i = 0; i < g_ui_context->command_queue.count; i++)
     {
+        Rect* clip;
         UICommand* cmd = &g_ui_context->command_queue.items[i];
-        // clang-format off
         switch (cmd->type)
         {
             case UI_COMMAND_RECT:
-                render_fn->draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style);
+                clip = memcmp(&cmd->rect.clip, &no_clip, sizeof(no_clip)) == 0 ? NULL : &cmd->rect.clip;
+                render_fn->draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style, clip);
                 break;
             case UI_COMMAND_TEXT:
                 UICommandText* text = &cmd->text;
-                render_fn->draw_text(glyph_cache, text->content, text->position, text->color, text->font, text->font_size, dpi);
-                break;
-            case UI_COMMAND_CLIP:
-                render_fn->set_clip(cmd->clip.type == CLIP_SET ? &cmd->clip.rect : NULL);
+                clip = memcmp(&cmd->text.clip, &no_clip, sizeof(no_clip)) == 0 ? NULL : &cmd->text.clip;
+                render_fn->draw_text(glyph_cache, text->content, text->position, text->color, text->font,
+                                     text->font_size, dpi, clip);
                 break;
             default:
                 Assert(0);
         }
-        // clang-format on
     }
 
     // Present
-    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     u32 physical_client_width = (u32)(g_ui_context->client_width * dpi_scale);
     u32 physical_client_height = (u32)(g_ui_context->client_height * dpi_scale);
     g_ui_context->render_fn.flush_and_present(physical_client_width, physical_client_height);

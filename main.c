@@ -40,7 +40,12 @@ static Color s_red   = { 251, 147, 143, 255 };
 static Color s_green = { 253, 216, 77,  255 };
 static Color s_blue  = { 94,  203, 228, 255 };
 
-static RectStyle s_round_border_shadow = { .border_color = { 253, 216, 77,  255 }, .corner_radius = 16, .border_thickness = 8, .enable_shadow = True };
+static RectStyle s_round_border_shadow = {
+    .border_color = { 253, 216, 77,  255 },
+    .corner_radius = 16,
+    .border_thickness = 8,
+    .enable_shadow = True
+};
 
 static Padding s_padding_big    = { 30, 30, 30, 30 };
 static Padding s_padding_medium = { 20, 20, 20, 20 };
@@ -257,7 +262,6 @@ i32 WinMainCRTStartup()
         .flush_and_present = renderer_flush_and_present,
         .on_resize = renderer_resize,
         .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
-        .set_clip = renderer_set_clip_rect,
         .get_text_width = renderer_get_text_width_for_dpi,
         .get_text_height = renderer_get_text_height_for_dpi,
         .draw_rect = renderer_draw_rect,
