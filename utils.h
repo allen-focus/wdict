@@ -117,7 +117,7 @@ isize utf8_encode(byte* str, const u32 codepoint);
 //
 
 #if !defined(MEM_COMMIT_BLOCK_SIZE)
-#    define MEM_COMMIT_BLOCK_SIZE MB(8) // NOTE: Must be a power of two
+#    define MEM_COMMIT_BLOCK_SIZE MB(8) // NOTE: must be a power of two
 #endif
 
 typedef struct

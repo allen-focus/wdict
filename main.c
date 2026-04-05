@@ -56,6 +56,8 @@ static f32 s_child_gap_medium = 10;
 static f32 s_child_gap_small  = 5;
 // clang-format on
 
+static Position s_scroll_delta = { 0.f, 0.f };
+
 //
 // Helper
 //
@@ -106,6 +108,7 @@ static void process_frame(AppContext* app_context)
             ui_box({ .sizing = { fixed(300), fixed(200) },
                      .color = s_blue,
                      .padding = s_padding_medium,
+                     .child_offset = s_scroll_delta,
                      .enable_clip = True })
             {
                 ui_box({ .sizing = { fixed(200), fixed(300) },
@@ -180,6 +183,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
             ui_context->mouse_pos.x = LOWORD(lparam) / dpi_scale;
             ui_context->mouse_pos.y = HIWORD(lparam) / dpi_scale;
+            return 0;
+        }
+
+        case WM_MOUSEWHEEL:
+        {
+            short mouse_delta = GET_WHEEL_DELTA_WPARAM(wparam);
+            s_scroll_delta.y += mouse_delta / -10;
             return 0;
         }
 

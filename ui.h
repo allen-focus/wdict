@@ -158,6 +158,7 @@ typedef struct
     Color color;
     RectStyle rect_style;
     Padding padding;
+    Position child_offset;
     f32 child_gap;
     Alignment alignment;
     LayoutDirection direction;

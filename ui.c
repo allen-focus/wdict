@@ -588,6 +588,10 @@ static void ui_box_resolve_position(UIBox* box)
             else if (parent->config.alignment.x == ALIGN_END)
                 box->position.x += parent->data.container.remaining_space.width - box->size.width;
         }
+
+        // Handle scroll offset
+        box->position.x += parent->config.child_offset.x;
+        box->position.y += parent->config.child_offset.y;
     }
 
     if (box->type == BOX_TYPE_CONTAINER)
