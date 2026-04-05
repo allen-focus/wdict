@@ -4,10 +4,10 @@ set(CMAKE_CXX_FLAGS_RELEASE "" CACHE STRING "" FORCE)
  
 add_library(tracy_client STATIC public/TracyClient.cpp)
  
-target_compile_definitions(tracy_client PUBLIC
+target_compile_definitions(tracy_client PRIVATE
     $<$<CONFIG:Profile>:TRACY_ENABLE>
     NDEBUG
 )
  
-target_compile_options(tracy_client PRIVATE /O2 /Zi /EHsc)
+target_compile_options(tracy_client PRIVATE /O2 /Z7 /EHsc)
  
