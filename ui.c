@@ -852,23 +852,29 @@ static b32 rect_contains_point(Rect r, Position p)
     return p.x >= r.xmin && p.x < r.xmax && p.y >= r.ymin && p.y < r.ymax;
 }
 
-static String init_and_return_hash_str(UIBox* box, const String text)
+// NOTE:
+//   "hello##world"  -> { text: "hello", hash_str: "hello world" };
+//   "hello###world" -> { text: "hello", hash_str: "world" };
+static String extract_hash_str_and_truncate_text(UIBox* box, String* text)
 {
     String hash_str;
-    for (isize i = 0; i < text.len; i++)
-        if (text.data[i] == '#')
-            if (text.len > i + 1)
-                if (text.data[i + 1] == '#')
+    for (isize i = 0; i < text->len; i++)
+        if (text->data[i] == '#')
+            if (text->len > i + 1)
+                if (text->data[i + 1] == '#')
                 {
-                    if (text.len > i + 2)
-                        if (text.data[i + 2] == '#')
+                    isize original_text_len = text->len;
+                    text->len = i;
+
+                    if (original_text_len > i + 2)
+                        if (text->data[i + 2] == '#')
                         {
-                            String temp = str_slice(text, i + 3, text.len);
+                            String temp = str_slice(*text, i + 3, original_text_len);
                             hash_str = str_clone(&g_ui_context->arena, temp);
                             break;
                         }
-                    String str_left = { text.data, i };
-                    String str_right = { text.data + i + 2, text.len - (i + 2) };
+                    String str_left = { text->data, i };
+                    String str_right = { text->data + i + 2, original_text_len - (i + 2) };
                     hash_str = str_concat(&g_ui_context->arena, str_left, str_right);
                     break;
                 }
@@ -883,7 +889,7 @@ static String init_and_return_hash_str(UIBox* box, const String text)
     return hash_str;
 }
 
-UISignalFlags ui_button(const String text, const Font font)
+UISignalFlags ui_button(String text, const Font font)
 {
     TextConfig text_config = { .font = font, .font_size = 12, .color = { 0, 0, 0, 255 }, .line_height = 12 };
 
@@ -893,10 +899,9 @@ UISignalFlags ui_button(const String text, const Font font)
              .padding = { 6, 6, 6, 6 },
              .alignment = { ALIGN_CENTER, ALIGN_CENTER } })
     {
-        ui_text(text, &text_config);
-
         UIBox* box = ui_box_get_parent();
-        hash_str = init_and_return_hash_str(box, text);
+        hash_str = extract_hash_str_and_truncate_text(box, &text);
+        ui_text(text, &text_config);
     }
 
     UISignalFlags flags = UI_Signal_Flag_None;
@@ -924,7 +929,7 @@ UISignalFlags ui_button(const String text, const Font font)
     return flags;
 }
 
-UISignalFlags ui_checkbox(const String text, b32* check)
+UISignalFlags ui_checkbox(String text, b32* check)
 {
     String hash_str;
     AlignPosition inner_box_x_align = *check ? ALIGN_END : ALIGN_START;
@@ -938,7 +943,7 @@ UISignalFlags ui_checkbox(const String text, b32* check)
         {
         }
         UIBox* box = ui_box_get_parent();
-        hash_str = init_and_return_hash_str(box, text);
+        hash_str = extract_hash_str_and_truncate_text(box, &text);
     }
 
     UISignalFlags flags = UI_Signal_Flag_None;
