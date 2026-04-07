@@ -530,7 +530,7 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
     // Set clip
     if (clip)
     {
-        b32 use_last_clip = memcmp(&s_clip_cache.rects[s_clip_cache.current_index], clip, sizeof(*clip)) != 0;
+        b32 use_last_clip = memcmp(&s_clip_cache.rects[s_clip_cache.current_index], clip, sizeof(*clip)) == 0;
         if (s_clip_cache.count == 0 || !use_last_clip)
             renderer_set_clip_rect(clip);
     }
