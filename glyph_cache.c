@@ -195,12 +195,13 @@ u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* gl
     return glyph_bitmap;
 }
 
-GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size,
-                                LRUSignal* signal)
+GlyphFindOrInsertResult glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size)
 {
+    GlyphFindOrInsertResult result = { 0 };
     GlyphKey key = { font, font_size, codepoint };
-    u32 entry_index = lru_cache_find_or_evict(&glyph_cache->lru_cache, &key, signal);
-    GlyphInfo* glyph_info =
-        (GlyphInfo*)((byte*)glyph_cache->lru_cache.values_buf + entry_index * glyph_cache->lru_cache.value_size);
-    return glyph_info;
+    LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&glyph_cache->lru_cache, &key);
+    result.signal = lru_result.signal;
+    result.info =
+        (GlyphInfo*)((byte*)glyph_cache->lru_cache.values_buf + lru_result.index * glyph_cache->lru_cache.value_size);
+    return result;
 }

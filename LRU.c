@@ -165,27 +165,31 @@ u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
 //    |           |                                |               |     |           |          |
 //    +-----------+--------------------------------+               |     +-----------+----------+
 // clang-format on
-u32 lru_cache_find(const LRUCache* lru_cache, const void* key, b32* found)
+LRUCacheFindResult lru_cache_find(const LRUCache* lru_cache, const void* key)
 {
+    LRUCacheFindResult result = { 0 };
+
     u32 hash_chain_head_index = lru_cache->hash(key, lru_cache->key_size) & (lru_cache->hash_chain_head_capacity - 1);
     u32 entry_index = lru_cache->hash_chain_heads[hash_chain_head_index];
 
-    *found = False;
+    result.found = False;
     while (entry_index)
     {
         void* entry_key = (byte*)lru_cache->keys_buf + entry_index * lru_cache->key_size;
         if (lru_cache->is_same(entry_key, key, lru_cache->key_size))
         {
-            *found = True;
+            result.found = True;
             break;
         }
         entry_index = lru_cache->entries[entry_index].next_with_same_hash;
     }
-    return *found;
+    result.index = entry_index;
+    return result;
 }
 
-u32 lru_cache_find_or_evict(LRUCache* lru_cache, const void* key, LRUSignal* signal)
+LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const void* key)
 {
+    LRUCacheFindOrEvictResult result = { 0 };
     Entry* sentinel = &lru_cache->entries[0];
 
     u32 hash_chain_head_index = lru_cache->hash(key, lru_cache->key_size) & (lru_cache->hash_chain_head_capacity - 1);
@@ -195,20 +199,20 @@ u32 lru_cache_find_or_evict(LRUCache* lru_cache, const void* key, LRUSignal* sig
     Entry* entry = NULL;
 
     // Check whether the entry exists
-    *signal = LRU_SIGNAL_TOINSERT;
+    result.signal = LRU_SIGNAL_TOINSERT;
     while (entry_index)
     {
         entry = &lru_cache->entries[entry_index];
         void* entry_key = (byte*)lru_cache->keys_buf + entry_index * lru_cache->key_size;
         if (lru_cache->is_same(entry_key, key, lru_cache->key_size))
         {
-            *signal = LRU_SIGNAL_FOUND;
+            result.signal = LRU_SIGNAL_FOUND;
             break;
         }
         entry_index = entry->next_with_same_hash;
     }
 
-    if (*signal == LRU_SIGNAL_FOUND)
+    if (result.signal == LRU_SIGNAL_FOUND)
     {
         // Found an existing entry, deattach from the entry linked list as a prepare
         Entry* prev_entry = &lru_cache->entries[entry->lru_prev];
@@ -223,12 +227,12 @@ u32 lru_cache_find_or_evict(LRUCache* lru_cache, const void* key, LRUSignal* sig
         // If the cache is full, pop one; else insert one to next empty entry slot
         if (sentinel->next_with_same_hash == 0)
         {
-            *signal = LRU_SIGNAL_TOEVICT;
+            result.signal = LRU_SIGNAL_TOEVICT;
             entry_index = lru_cache_pop_lru_entry(lru_cache);
         }
         else
         {
-            *signal = LRU_SIGNAL_TOINSERT;
+            result.signal = LRU_SIGNAL_TOINSERT;
             entry_index = sentinel->next_with_same_hash;
         }
         entry = &lru_cache->entries[entry_index];
@@ -245,6 +249,7 @@ u32 lru_cache_find_or_evict(LRUCache* lru_cache, const void* key, LRUSignal* sig
 
         lru_cache->stats.miss_count++;
     }
+    result.index = entry_index;
 
     // Insert the entry at the front of the entry linked list
     entry->lru_prev = 0;
@@ -252,5 +257,5 @@ u32 lru_cache_find_or_evict(LRUCache* lru_cache, const void* key, LRUSignal* sig
     lru_cache->entries[sentinel->lru_next].lru_prev = entry_index;
     sentinel->lru_next = entry_index;
 
-    return entry_index;
+    return result;
 }

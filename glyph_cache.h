@@ -53,6 +53,12 @@ typedef struct
     IDWriteFactory3* dwrite_factory;
 } GlyphCache;
 
+typedef struct
+{
+    GlyphInfo* info;
+    LRUSignal signal;
+} GlyphFindOrInsertResult;
+
 ///
 
 void font_register(Font* font, IDWriteFactory3* dwrite_factory, const wchar_t* font_name);
@@ -64,7 +70,6 @@ void glyph_cache_deinit(GlyphCache* glyph_cache);
 u8* glyph_rasterize(Arena* arena, IDWriteFactory3* dwrite_factory, GlyphInfo* glyph_info, u32 codepoint,
                     const Font font, const f32 font_size, const u32 dpi);
 
-GlyphInfo* glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size,
-                                LRUSignal* signal);
+GlyphFindOrInsertResult glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font font, f32 font_size);
 
 void atlas_insert_glyph(GlyphAtlas* atlas, GlyphInfo* glyph_info, byte* glyph_bitmap);

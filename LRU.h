@@ -47,6 +47,18 @@ typedef struct
     is_same_fn is_same;
 } LRUCache;
 
+typedef struct
+{
+    u32 index;
+    b32 found;
+} LRUCacheFindResult;
+
+typedef struct
+{
+    u32 index;
+    LRUSignal signal;
+} LRUCacheFindOrEvictResult;
+
 ///
 
 // NOTE: `hash_chain_head_capacity` must be a power of two
@@ -57,5 +69,5 @@ void lru_cache_destroy(LRUCache* lru_cache);
 // NOTE: User need to assign entry value using returned entry index
 void lru_cache_remove_entry(LRUCache* lru_cache, u32 entry_index);
 u32 lru_cache_pop_lru_entry(LRUCache* lru_cache);
-u32 lru_cache_find(const LRUCache* lru_cache, const void* key, b32* found);
-u32 lru_cache_find_or_evict(LRUCache* lru_cache, const void* key, LRUSignal* signal);
+LRUCacheFindResult lru_cache_find(const LRUCache* lru_cache, const void* key);
+LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const void* key);

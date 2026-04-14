@@ -596,12 +596,11 @@ f32 renderer_get_text_width_for_dpi(GlyphCache* glyph_cache, const String text, 
     {
         p = utf8_decode(p, &codepoint);
 
-        LRUSignal signal;
-        GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &signal);
-        if (signal == LRU_SIGNAL_TOINSERT || signal == LRU_SIGNAL_TOEVICT)
-            renderer_update_glyph(glyph_cache, glyph_info, font, font_size, codepoint, dpi);
+        GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, codepoint, font, font_size);
+        if (result.signal == LRU_SIGNAL_TOINSERT || result.signal == LRU_SIGNAL_TOEVICT)
+            renderer_update_glyph(glyph_cache, result.info, font, font_size, codepoint, dpi);
 
-        text_width += glyph_info->xadvance;
+        text_width += result.info->xadvance;
     }
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     return text_width / dpi_scale;
@@ -616,10 +615,9 @@ f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text,
     utf8_decode(text.data, &codepoint); // Get first glyph codepoint of the text
     Assert(codepoint);
 
-    LRUSignal signal;
-    GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &signal);
-    if (signal == LRU_SIGNAL_TOINSERT || signal == LRU_SIGNAL_TOEVICT)
-        renderer_update_glyph(glyph_cache, glyph_info, font, font_size, codepoint, dpi);
+    GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, codepoint, font, font_size);
+    if (result.signal == LRU_SIGNAL_TOINSERT || result.signal == LRU_SIGNAL_TOEVICT)
+        renderer_update_glyph(glyph_cache, result.info, font, font_size, codepoint, dpi);
 
     // TODO: Should we just return `font_size`?
     return font_size;
@@ -677,22 +675,21 @@ void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position pos
     {
         p = utf8_decode(p, &codepoint);
 
-        LRUSignal signal;
-        GlyphInfo* glyph_info = glyph_find_or_insert(glyph_cache, codepoint, font, font_size, &signal);
-        if (signal == LRU_SIGNAL_TOINSERT || signal == LRU_SIGNAL_TOEVICT)
-            renderer_update_glyph(glyph_cache, glyph_info, font, font_size, codepoint, dpi);
+        GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, codepoint, font, font_size);
+        if (result.signal == LRU_SIGNAL_TOINSERT || result.signal == LRU_SIGNAL_TOEVICT)
+            renderer_update_glyph(glyph_cache, result.info, font, font_size, codepoint, dpi);
 
         Rect target_rect = {
-            .xmin = next_position_x + (f32)glyph_info->xoff,
-            .ymin = position_y + (f32)glyph_info->yoff,
-            .xmax = next_position_x + (f32)glyph_info->xoff + (f32)glyph_info->w,
-            .ymax = position_y + (f32)glyph_info->yoff + (f32)glyph_info->h,
+            .xmin = next_position_x + (f32)result.info->xoff,
+            .ymin = position_y + (f32)result.info->yoff,
+            .xmax = next_position_x + (f32)result.info->xoff + (f32)result.info->w,
+            .ymax = position_y + (f32)result.info->yoff + (f32)result.info->h,
         };
         Rect texture_rect = {
-            .xmin = (f32)glyph_info->atlas_x,
-            .ymin = (f32)glyph_info->atlas_y,
-            .xmax = (f32)(glyph_info->atlas_x + glyph_info->w),
-            .ymax = (f32)(glyph_info->atlas_y + glyph_info->h),
+            .xmin = (f32)result.info->atlas_x,
+            .ymin = (f32)result.info->atlas_y,
+            .xmax = (f32)(result.info->atlas_x + result.info->w),
+            .ymax = (f32)(result.info->atlas_y + result.info->h),
         };
         RectStyle rect_style = { 0 };
         renderer_push_rect(target_rect, texture_rect, color, rect_style, clip);
@@ -702,6 +699,6 @@ void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position pos
         vertex->style_params.is_text = VERTEX_IS_TEXT;
 
         // Update x position for next char
-        next_position_x += (f32)glyph_info->xadvance;
+        next_position_x += (f32)result.info->xadvance;
     }
 }
