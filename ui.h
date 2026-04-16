@@ -8,6 +8,11 @@
     for (UIBox* box = ui_box_start(&(BoxConfig)__VA_ARGS__);                                                           \
          box != NULL;                                                                                                  \
          ui_box_end(box), box = NULL)
+
+#define ui_scrollable_area(...)                                                                                                    \
+    for (ScrollContext scroll_context = ui_scrollable_area_start(&(ScrollableAreaConfig)__VA_ARGS__);                                                           \
+         scroll_context.area_box != NULL;                                                                                                  \
+         ui_scrollable_area_end(scroll_context), scroll_context.area_box = NULL)
 // clang-format on
 
 // NOTE: In FIT mode, min/max constraints act as bounds on content wrapping:
@@ -25,21 +30,22 @@
 #define fixed(value)  { { value, value }, SIZING_MODE_FIXED }
 #define fit(...)      { __VA_ARGS__, SIZING_MODE_FIT }
 #define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }
+#define grow(...)     { __VA_ARGS__, SIZING_MODE_GROW }
 
 #define COMMAND_QUEUE_CAPACITY 4096
 #define HASH_STR_MAX_LENGTH    128
 
 ///
 
-// clang-format off
 typedef enum
 {
+    // clang-format off
     UI_Signal_Flag_None     = 0,
     UI_Signal_Flag_Hovered  = (1 << 0),
     UI_Signal_Flag_LClicked = (1 << 1),
     UI_Signal_Flag_RClicked = (1 << 2),
+    // clang-format on
 } UISignalFlags;
-// clang-format on
 
 #define ui_hovered(signal_flags)  (signal_flags & UI_Signal_Flag_Hovered)
 #define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
@@ -110,6 +116,7 @@ typedef enum
     SIZING_MODE_FIXED,
     SIZING_MODE_FIT,
     SIZING_MODE_FIT_GROW,
+    SIZING_MODE_GROW,
 } SizingMode;
 
 typedef struct
@@ -219,6 +226,7 @@ struct UIBox
     BoxConfig config;
     Position position;
     Size size;
+    Position scroll_delta;
 
     // layout tree
     UIBox* parent;
@@ -284,6 +292,7 @@ typedef struct
     Position mouse_pos;
     b32 mouse_lclick;
     b32 mouse_rclick;
+    Position mouse_delta;
 
     // ui
     UIBox* root;
@@ -294,6 +303,34 @@ typedef struct
     UIRenderFunc render_fn;
     Queue(UICommand, COMMAND_QUEUE_CAPACITY) command_queue;
 } UIContext;
+
+//
+// Widget
+//
+
+typedef struct
+{
+    UIBox* box;
+    b32 found;
+} UIBoxFindResult;
+
+typedef struct
+{
+    Position delta;
+    UIBox* area_box;
+    UIBoxFindResult area_result;
+    UIBoxFindResult content_result;
+    Color thumb_color;
+} ScrollContext;
+
+typedef struct
+{
+    String text_with_hash_str;
+    Sizing sizing;
+    Color background_color;
+    Padding padding;
+    Color thumb_color;
+} ScrollableAreaConfig;
 
 ///
 
@@ -312,5 +349,10 @@ UIBox* ui_text(const String text, const TextConfig* text_config);
 isize ui_begin_frame(UIContext* ui_context);
 void ui_end_frame(isize arena_pos_backup);
 
-UISignalFlags ui_button(const String text, const Font font);
-UISignalFlags ui_checkbox(const String text, b32* check);
+UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing,
+                        const Color background_color, const Color text_color);
+UISignalFlags ui_checkbox(const String text_with_hash_str, b32* check, const Color background_color,
+                          const Color switch_button_color);
+
+ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
+void ui_scrollable_area_end(ScrollContext scroll_ctx);

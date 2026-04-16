@@ -69,6 +69,8 @@ typedef int32_t       b32; // bool
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
+#define clamp(x, a, b) min(max(a, x), b)
+
 // clang-format off
 #define Queue(type, size) struct { type items[size]; isize count; }
 #define Stack(type, size) struct { type items[size]; isize depth; }

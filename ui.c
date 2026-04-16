@@ -13,6 +13,11 @@
 #define BOX_STACK_CAPACITY        16
 #define BOX_QUEUE_CAPACITY        2048
 
+// Widgets
+#define CHECKBOX_HEIGHT     22
+#define CHECKBOX_PAD        3
+#define SCROLLBAR_THICKNESS 8
+
 typedef Slice(f32*) F32PtrSlice;
 
 static Queue(UIBox, BOX_QUEUE_CAPACITY) ui_box_queue = { 0 };
@@ -70,39 +75,42 @@ void ui_deinit(UIContext* ui_context)
 // Box cache
 //
 
-static UIBox* find_or_insert_last_box_with_same_hash_str(const String hash_str, b32* found)
+static UIBoxFindResult find_or_insert_box_with_same_hash_str(const String hash_str)
 {
+    UIBoxFindResult result = { 0 };
+
     UIBoxCache* box_cache = &g_ui_context->box_cache;
     BoxKey key = { .len = hash_str.len };
     memcpy(key.str, hash_str.data, hash_str.len);
 
-    LRUSignal signal;
-    u32 entry_index = lru_cache_find_or_evict(&box_cache->lru_cache, &key, &signal);
-    UIBox* last_box = (UIBox*)((byte*)box_cache->lru_cache.values_buf + entry_index * box_cache->lru_cache.value_size);
+    LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&box_cache->lru_cache, &key);
+    UIBox* last_box =
+        (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
 
     // NOTE:
     //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
     //   insertion order (new entries appended to tail). And LRU eviction is disabled;
     //   unused boxes are explicitly dropped per frame.
-    switch (signal)
+    switch (lru_result.signal)
     {
         case LRU_SIGNAL_FOUND:
             // Detect duplicate box key
             if (g_ui_context->frame_index != 0)
                 if (last_box->last_frame_index == g_ui_context->frame_index)
                     Assert(0);
-            *found = True;
+            result.found = True;
             break;
         case LRU_SIGNAL_TOINSERT:
             memcpy(&last_box->key, &key, sizeof(key));
-            *found = False;
+            result.found = False;
             break;
         case LRU_SIGNAL_TOEVICT:
         default:
             Assert(0);
     }
+    result.box = last_box;
 
-    return last_box;
+    return result;
 }
 
 static void box_cache_remove_unused()
@@ -149,6 +157,16 @@ static UIBox* ui_box_get_root()
     return &ui_box_queue.items[0];
 }
 
+static b32 axis_has_fit_attribute(const SizingMode mode)
+{
+    return mode == SIZING_MODE_FIT || mode == SIZING_MODE_FIT_GROW;
+}
+
+static b32 axis_has_grow_attribute(const SizingMode mode)
+{
+    return mode == SIZING_MODE_GROW || mode == SIZING_MODE_FIT_GROW;
+}
+
 UIBox* ui_box_start(const BoxConfig* config)
 {
     Assert(ui_box_stack.depth <= BOX_STACK_CAPACITY);
@@ -178,9 +196,9 @@ UIBox* ui_box_start(const BoxConfig* config)
     memcpy(&box->config, config, sizeof(*config));
     box->size.width = box->config.sizing.width.mode == SIZING_MODE_FIXED ? box->config.sizing.width.min_max.min : 0;
     box->size.height = box->config.sizing.height.mode == SIZING_MODE_FIXED ? box->config.sizing.height.min_max.min : 0;
-    if (box->config.sizing.width.mode == SIZING_MODE_FIT_GROW && box->config.sizing.width.min_max.max == 0)
+    if (axis_has_grow_attribute(box->config.sizing.width.mode) && box->config.sizing.width.min_max.max == 0)
         box->config.sizing.width.min_max.max = INFINITY;
-    if (box->config.sizing.height.mode == SIZING_MODE_FIT_GROW && box->config.sizing.height.min_max.max == 0)
+    if (axis_has_grow_attribute(box->config.sizing.height.mode) && box->config.sizing.height.min_max.max == 0)
         box->config.sizing.height.min_max.max = INFINITY;
 
     return box;
@@ -324,11 +342,6 @@ static AxisContext get_axis_context(UIBox* box, const Axis axis)
         ctx.main_direction = LAYOUT_TOP_TO_BOTTOM;
     }
     return ctx;
-}
-
-static b32 axis_has_fit_attribute(const SizingMode mode)
-{
-    return mode == SIZING_MODE_FIT || mode == SIZING_MODE_FIT_GROW;
 }
 
 // Recursively calculate sizes for boxes configured with 'fit' attribute
@@ -506,7 +519,7 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
         while (child)
         {
             AxisContext child_ctx = get_axis_context(child, axis);
-            if (child_ctx.sizing_mode == SIZING_MODE_FIT_GROW)
+            if (axis_has_grow_attribute(child_ctx.sizing_mode))
             {
                 *slice_push(&growables, &g_ui_context->arena) = child_ctx.size;
                 *slice_push(&growable_limits, &g_ui_context->arena) = child_ctx.max_size;
@@ -607,17 +620,16 @@ static void ui_box_resolve_position(UIBox* box)
     // Update the box size and position in box cache if the box has a hash string
     if (box->key.len)
     {
-        b32 found;
         String box_hash_str = { box->key.str, box->key.len };
-        UIBox* last_box = find_or_insert_last_box_with_same_hash_str(box_hash_str, &found);
-        last_box->size = box->size;
-        last_box->position = box->position;
+        UIBoxFindResult result = find_or_insert_box_with_same_hash_str(box_hash_str);
+        result.box->size = box->size;
+        result.box->position = box->position;
 
         // NOTE:
         //   Update `last_frame_index` here because this is the final box that will be used for the current frame.
         //   This enables duplicate detection: during lookup, if a box is already marked with the current frame index,
         //   it indicates a duplicate key (panic condition).
-        last_box->last_frame_index = g_ui_context->frame_index;
+        result.box->last_frame_index = g_ui_context->frame_index;
     }
 }
 
@@ -838,6 +850,7 @@ void ui_end_frame(isize arena_pos_backup)
 
     ui_reset();
     box_cache_remove_unused();
+    g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
@@ -852,124 +865,329 @@ static b32 rect_contains_point(Rect r, Position p)
     return p.x >= r.xmin && p.x < r.xmax && p.y >= r.ymin && p.y < r.ymax;
 }
 
+typedef struct
+{
+    String display_str;
+    String hash_str;
+} TextHash;
+
 // NOTE:
 //   "hello##world"  -> { text: "hello", hash_str: "hello world" };
 //   "hello###world" -> { text: "hello", hash_str: "world" };
-static String extract_hash_str_and_truncate_text(UIBox* box, String* text)
+static TextHash extract_hash_str(const String* text)
 {
-    String hash_str;
+    TextHash text_hash = { 0 };
     for (isize i = 0; i < text->len; i++)
         if (text->data[i] == '#')
             if (text->len > i + 1)
                 if (text->data[i + 1] == '#')
                 {
-                    isize original_text_len = text->len;
-                    text->len = i;
+                    // Init display string
+                    text_hash.display_str.data = text->data;
+                    text_hash.display_str.len = i;
 
-                    if (original_text_len > i + 2)
+                    if (text->len > i + 2)
                         if (text->data[i + 2] == '#')
                         {
-                            String temp = str_slice(*text, i + 3, original_text_len);
-                            hash_str = str_clone(&g_ui_context->arena, temp);
+                            String temp = str_slice(*text, i + 3, text->len);
+                            text_hash.hash_str = str_clone(&g_ui_context->arena, temp);
                             break;
                         }
                     String str_left = { text->data, i };
-                    String str_right = { text->data + i + 2, original_text_len - (i + 2) };
-                    hash_str = str_concat(&g_ui_context->arena, str_left, str_right);
+                    String str_right = { text->data + i + 2, text->len - (i + 2) };
+                    text_hash.hash_str = str_concat(&g_ui_context->arena, str_left, str_right);
                     break;
                 }
 
-    if (!hash_str.len || hash_str.len > HASH_STR_MAX_LENGTH)
+    if (!text_hash.hash_str.len || text_hash.hash_str.len > HASH_STR_MAX_LENGTH)
         Assert(0);
 
-    // Update box's key. This will be used for find the same box in the box cache.
-    memcpy(box->key.str, hash_str.data, hash_str.len);
-    box->key.len = hash_str.len;
-
-    return hash_str;
+    return text_hash;
 }
 
-UISignalFlags ui_button(String text, const Font font)
+static void update_box_key(UIBox* box, String box_hash_str)
 {
-    TextConfig text_config = { .font = font, .font_size = 12, .color = { 0, 0, 0, 255 }, .line_height = 12 };
+    memcpy(box->key.str, box_hash_str.data, box_hash_str.len);
+    box->key.len = box_hash_str.len;
+}
 
-    String hash_str;
-    ui_box({ .sizing = { fit({}), fit({}) },
-             .color = { 94, 203, 228, 255 },
-             .padding = { 6, 6, 6, 6 },
-             .alignment = { ALIGN_CENTER, ALIGN_CENTER } })
+UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing,
+                        const Color background_color, const Color text_color)
+{
+    TextHash text_hash;
+    UIBox* box = ui_box_start(&(BoxConfig){ .sizing = sizing,
+                                            .color = background_color,
+                                            .rect_style = { .corner_radius = 8 },
+                                            .padding = { 6, 6, 6, 6 },
+                                            .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
     {
-        UIBox* box = ui_box_get_parent();
-        hash_str = extract_hash_str_and_truncate_text(box, &text);
-        ui_text(text, &text_config);
+        text_hash = extract_hash_str(&text_with_hash_str);
+        update_box_key(box, text_hash.hash_str);
+
+        ui_text(text_hash.display_str,
+                &(TextConfig){ .font = font, .font_size = 12, .color = text_color, .line_height = 12 });
     }
+    ui_box_end(box);
 
     UISignalFlags flags = UI_Signal_Flag_None;
-    b32 found;
-    UIBox* last_box = find_or_insert_last_box_with_same_hash_str(hash_str, &found);
-    if (found)
-        if (last_box->key.len)
+    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
+    if (result.found)
+    {
+        Rect last_box_rect = {
+            .xmin = result.box->position.x,
+            .ymin = result.box->position.y,
+            .xmax = result.box->position.x + result.box->size.width,
+            .ymax = result.box->position.y + result.box->size.height,
+        };
+        if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
         {
-            Rect last_box_rect = {
-                .xmin = last_box->position.x,
-                .ymin = last_box->position.y,
-                .xmax = last_box->position.x + last_box->size.width,
-                .ymax = last_box->position.y + last_box->size.height,
-            };
-            if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
-            {
-                flags |= UI_Signal_Flag_Hovered;
-                if (g_ui_context->mouse_lclick)
-                    flags |= UI_Signal_Flag_LClicked;
-                if (g_ui_context->mouse_rclick)
-                    flags |= UI_Signal_Flag_RClicked;
-            }
+            flags |= UI_Signal_Flag_Hovered;
+            if (g_ui_context->mouse_lclick)
+                flags |= UI_Signal_Flag_LClicked;
+            if (g_ui_context->mouse_rclick)
+                flags |= UI_Signal_Flag_RClicked;
         }
+    }
 
     return flags;
 }
 
-UISignalFlags ui_checkbox(String text, b32* check)
+UISignalFlags ui_checkbox(const String text_with_hash_str, b32* check, const Color background_color,
+                          const Color switch_button_color)
 {
-    String hash_str;
-    AlignPosition inner_box_x_align = *check ? ALIGN_END : ALIGN_START;
-    ui_box({ .sizing = { fixed(60), fixed(30) },
-             .color = { 94, 203, 228, 255 },
-             .padding = { 4, 4, 4, 4 },
-             .alignment = { inner_box_x_align, ALIGN_CENTER },
-             .enable_clip = True })
+    TextHash text_hash;
+    AlignPosition switch_box_x_align = *check ? ALIGN_END : ALIGN_START;
+
+    UIBox* container = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT * 2), fixed(CHECKBOX_HEIGHT) },
+                                                  .color = background_color,
+                                                  .rect_style = { .corner_radius = CHECKBOX_HEIGHT },
+                                                  .padding = { CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD },
+                                                  .alignment = { switch_box_x_align, ALIGN_CENTER } });
     {
-        ui_box({ .sizing = { fixed(22), fit_grow({}) }, .color = { 251, 147, 143, 255 } })
-        {
-        }
-        UIBox* box = ui_box_get_parent();
-        hash_str = extract_hash_str_and_truncate_text(box, &text);
+        f32 switch_button_radius = CHECKBOX_HEIGHT - CHECKBOX_PAD * 2;
+        UIBox* switch_button =
+            ui_box_start(&(BoxConfig){ .sizing = { fixed(switch_button_radius), fixed(switch_button_radius) },
+                                       .color = switch_button_color,
+                                       .rect_style = { .corner_radius = switch_button_radius } });
+        ui_box_end(switch_button);
+
+        text_hash = extract_hash_str(&text_with_hash_str);
+        update_box_key(container, text_hash.hash_str);
     }
+    ui_box_end(container);
 
     UISignalFlags flags = UI_Signal_Flag_None;
-    b32 found;
-    UIBox* last_box = find_or_insert_last_box_with_same_hash_str(hash_str, &found);
-    if (found)
-        if (last_box->key.len)
+    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
+    if (result.found)
+    {
+        Rect last_box_rect = {
+            .xmin = result.box->position.x,
+            .ymin = result.box->position.y,
+            .xmax = result.box->position.x + result.box->size.width,
+            .ymax = result.box->position.y + result.box->size.height,
+        };
+        if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
         {
-            Rect last_box_rect = {
-                .xmin = last_box->position.x,
-                .ymin = last_box->position.y,
-                .xmax = last_box->position.x + last_box->size.width,
-                .ymax = last_box->position.y + last_box->size.height,
-            };
-            if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
+            flags |= UI_Signal_Flag_Hovered;
+            if (g_ui_context->mouse_lclick)
             {
-                flags |= UI_Signal_Flag_Hovered;
-                if (g_ui_context->mouse_lclick)
-                {
-                    *check = !(*check);
-                    flags |= UI_Signal_Flag_LClicked;
-                }
-                if (g_ui_context->mouse_rclick)
-                    flags |= UI_Signal_Flag_RClicked;
+                *check = !(*check);
+                flags |= UI_Signal_Flag_LClicked;
             }
+            if (g_ui_context->mouse_rclick)
+                flags |= UI_Signal_Flag_RClicked;
         }
+    }
 
     return flags;
+}
+
+//
+// Situation 1 - only height exceed                   |  Situation 2 - both height and width exceed
+// ================================                   |  ==========================================
+//                                                    |  NOTE: Container Box's layout direction is top to bottom.
+//                                                    |
+//  <------ Scroll Box ------->                       |  <------- Scroll Box -------->
+//  ┏━━━━━━━━━━━━━━━━━┳━━━━━┳━┓<-- Scroll Bar         |  ┏━━━━━━━━━━━━━━━━━━━━━━━━━┳━┓<-- Scroll Bar (Vertical)
+//  ┃ +-------------+ ┃     ┃ ┃                       |  ┃ ╔═════════════════════╗ ┃ ┃
+//  ┃ |             | ┃     ┃█┃                       |  ┃ ║ +-----------------+ ║ ┃ ┃
+//  ┃ |   Content   | ┃ Gap ┃█┃<--- Scroll Bar Thumb  |  ┃ ║ |     Content     | ║ ┃█┃
+//  ┃ |     Box     | ┃ Box ┃ ┃                       |  ┃ ║ |       Box       | ║ ┃█┃<--- Scroll Bar Thumb (Vertical)
+//  ┃ |             | ┃     ┃ ┃                       |  ┃ ║ +-----------------+ ║ ┃ ┃
+//  ┃ +-------------+ ┃     ┃ ┃                       |  ┃ ║ |        ▓▓▓▓▓▓▓  | ║ ┃ ┃
+//  ┗━━━━━━━━━━━━━━━━━┻━━━━━┻━┛                       |  ┃ ║ +-----------------+ ║ ┃ ┃
+//  <- Container Box ->                               |  ┃ ╚═════════════════════╝ ┣━┫<--- Scroll Bar Pad (Vertical)
+//                                                    |  ┗━━━━━━━━━━━━━━━━━━━━━━━━━┻━┛
+//                                                    |    < Container Inner Box >       And...
+//                                                    |  <----- Container Box ----->       Scroll Bar Thumb (Horizontal)
+//                                                    |                                    Scroll Bar (Horizontal)
+//
+typedef enum
+{
+    // clang-format off
+    SCROLLBAR_NONE       = 0b00,
+    SCROLLBAR_HORIZONTAL = 0b01,
+    SCROLLBAR_VERTICAL   = 0b10,
+    SCROLLBAR_BOTH       = 0b11,
+    // clang-format on
+} ScrollBarFlags;
+
+ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
+{
+    ScrollContext scroll_ctx = { 0 };
+    scroll_ctx.thumb_color = config->thumb_color;
+
+    /* Create area box */
+    scroll_ctx.area_box =
+        ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->background_color, .enable_clip = True });
+    String area_box_hash_str = extract_hash_str(&config->text_with_hash_str).hash_str;
+    update_box_key(scroll_ctx.area_box, area_box_hash_str);
+
+    /* Handle interaction */
+    UISignalFlags flags = UI_Signal_Flag_None;
+    scroll_ctx.area_result = find_or_insert_box_with_same_hash_str(area_box_hash_str);
+    UIBox* last_area_box = NULL;
+    if (scroll_ctx.area_result.found)
+    {
+        last_area_box = scroll_ctx.area_result.box;
+        Rect last_box_rect = {
+            .xmin = last_area_box->position.x,
+            .ymin = last_area_box->position.y,
+            .xmax = last_area_box->position.x + last_area_box->size.width,
+            .ymax = last_area_box->position.y + last_area_box->size.height,
+        };
+        if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
+        {
+            flags |= UI_Signal_Flag_Hovered;
+            if (g_ui_context->mouse_lclick)
+                flags |= UI_Signal_Flag_LClicked;
+            if (g_ui_context->mouse_rclick)
+                flags |= UI_Signal_Flag_RClicked;
+        }
+    }
+
+    if (ui_hovered(flags))
+    {
+        last_area_box->scroll_delta.x += g_ui_context->mouse_delta.x;
+        last_area_box->scroll_delta.y += g_ui_context->mouse_delta.y;
+    }
+
+    /* Get last content box from cache to determine the box size */
+    String content_box_text_with_hash_str =
+        str_concat(&g_ui_context->arena, config->text_with_hash_str, str(" (content box)"));
+    String content_box_hash_str = extract_hash_str(&content_box_text_with_hash_str).hash_str;
+    {
+        scroll_ctx.content_result = find_or_insert_box_with_same_hash_str(content_box_hash_str);
+        if (scroll_ctx.content_result.found)
+        {
+            Assert(scroll_ctx.area_result.found);
+            ScrollBarFlags bar_flags = SCROLLBAR_NONE;
+
+            /* Virtual area (content viewport), may have padding when both scrollbars present */
+            Size virtual_area_size = scroll_ctx.area_result.box->size;
+            Size content_size = scroll_ctx.content_result.box->size;
+            bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
+            bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
+            if (bar_flags == SCROLLBAR_BOTH)
+            {
+                virtual_area_size.width -= SCROLLBAR_THICKNESS;
+                virtual_area_size.height -= SCROLLBAR_THICKNESS;
+            }
+
+            /* Adjust scroll_delta */
+            f32 max_scroll_x = content_size.width - virtual_area_size.width;
+            last_area_box->scroll_delta.x =
+                clamp(last_area_box->scroll_delta.x, 0, max_scroll_x > 0 ? max_scroll_x : 0);
+
+            f32 max_scroll_y = content_size.height - virtual_area_size.height;
+            last_area_box->scroll_delta.y =
+                clamp(last_area_box->scroll_delta.y, 0, max_scroll_y > 0 ? max_scroll_y : 0);
+        }
+        scroll_ctx.delta = scroll_ctx.area_result.found ? last_area_box->scroll_delta : (Position){ 0.f, 0.f };
+    }
+
+    /* Create content box */
+    ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
+    ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } }); // Container Inner
+    UIBox* content_box = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
+                                                    .padding = config->padding,
+                                                    .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
+    update_box_key(content_box, content_box_hash_str);
+
+    return scroll_ctx;
+}
+
+static void scroll_bar(const b32 is_horizontal, const f32 delta, const f32 thickness, const f32 thumb_extent,
+                       const Color thumb_color)
+{
+    if (is_horizontal)
+    {
+        UIBox* bar =
+            ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(thickness) }, .child_offset = { delta, 0 } });
+        UIBox* thumb = ui_box_start(&(BoxConfig){ .sizing = { fixed(thumb_extent), fixed(thickness) },
+                                                  .color = thumb_color,
+                                                  .rect_style = { .corner_radius = SCROLLBAR_THICKNESS } });
+        ui_box_end(thumb);
+        ui_box_end(bar);
+    }
+    else
+    {
+        UIBox* bar =
+            ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), grow({}) }, .child_offset = { 0, delta } });
+        UIBox* thumb = ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), fixed(thumb_extent) },
+                                                  .color = thumb_color,
+                                                  .rect_style = { .corner_radius = SCROLLBAR_THICKNESS } });
+        ui_box_end(thumb);
+        ui_box_end(bar);
+    }
+}
+
+void ui_scrollable_area_end(ScrollContext scroll_ctx)
+{
+    ScrollBarFlags bar_flags = SCROLLBAR_NONE;
+    Size thumb_size = { 0 };
+
+    /* Calculate thumb size */
+    if (scroll_ctx.content_result.found)
+    {
+        Assert(scroll_ctx.area_result.found);
+        Size virtual_area_size = scroll_ctx.area_result.box->size;
+        Size content_size = scroll_ctx.content_result.box->size;
+        bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
+        bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
+        if (bar_flags == SCROLLBAR_BOTH)
+        {
+            virtual_area_size.width -= SCROLLBAR_THICKNESS;
+            virtual_area_size.height -= SCROLLBAR_THICKNESS;
+        }
+        if (bar_flags & SCROLLBAR_HORIZONTAL)
+        {
+            thumb_size.width = virtual_area_size.width * (virtual_area_size.width / content_size.width);
+            scroll_ctx.delta.x = scroll_ctx.delta.x * (virtual_area_size.width / content_size.width);
+        }
+        if (bar_flags & SCROLLBAR_VERTICAL)
+        {
+            thumb_size.height = virtual_area_size.height * (virtual_area_size.height / content_size.height);
+            scroll_ctx.delta.y = scroll_ctx.delta.y * (virtual_area_size.height / content_size.height);
+        }
+    }
+
+    /* Close nested UI boxes & Create scroll bar */
+    ui_box_end(scroll_ctx.area_box->child_first->child_first->child_first); // Content Box
+    ui_box_end(scroll_ctx.area_box->child_first->child_first); // Container Inner Box
+    if (bar_flags & SCROLLBAR_HORIZONTAL)
+        scroll_bar(True, scroll_ctx.delta.x, SCROLLBAR_THICKNESS, thumb_size.width, scroll_ctx.thumb_color);
+    ui_box_end(scroll_ctx.area_box->child_first); // Container Box
+    if (bar_flags == SCROLLBAR_BOTH)
+    {
+        UIBox* vbar_container = ui_box_start(
+            &(BoxConfig){ .sizing = { fixed(SCROLLBAR_THICKNESS), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+        scroll_bar(False, scroll_ctx.delta.y, SCROLLBAR_THICKNESS, thumb_size.height, scroll_ctx.thumb_color);
+        UIBox* pad = ui_box_start(&(BoxConfig){ .sizing = { fixed(SCROLLBAR_THICKNESS), fixed(SCROLLBAR_THICKNESS) } });
+        ui_box_end(pad);
+        ui_box_end(vbar_container);
+    }
+    else if (bar_flags & SCROLLBAR_VERTICAL)
+        scroll_bar(False, scroll_ctx.delta.y, SCROLLBAR_THICKNESS, thumb_size.height, scroll_ctx.thumb_color);
+    ui_box_end(scroll_ctx.area_box);
 }

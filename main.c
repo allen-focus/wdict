@@ -34,18 +34,11 @@ typedef struct
 
 // clang-format off
 static Color s_black = { 0,   0,   0,   255 };
-static Color s_grey  = { 209, 233, 229, 255 };
+static Color s_grey  = { 244, 244, 244, 255 };
 static Color s_white = { 255, 255, 255, 255 };
 static Color s_red   = { 251, 147, 143, 255 };
 static Color s_green = { 253, 216, 77,  255 };
 static Color s_blue  = { 94,  203, 228, 255 };
-
-static RectStyle s_round_border_shadow = {
-    .border_color = { 253, 216, 77,  255 },
-    .corner_radius = 16,
-    .border_thickness = 8,
-    .enable_shadow = True
-};
 
 static Padding s_padding_big    = { 30, 30, 30, 30 };
 static Padding s_padding_medium = { 20, 20, 20, 20 };
@@ -55,8 +48,6 @@ static f32 s_child_gap_big    = 20;
 static f32 s_child_gap_medium = 10;
 static f32 s_child_gap_small  = 5;
 // clang-format on
-
-static Position s_scroll_delta = { 0.f, 0.f };
 
 //
 // Helper
@@ -105,41 +96,41 @@ static void process_frame(AppContext* app_context)
             .alignment = { ALIGN_CENTER, ALIGN_CENTER },
         })
         {
-            ui_box({ .sizing = { fixed(300), fixed(200) },
-                     .color = s_blue,
-                     .padding = s_padding_medium,
-                     .child_offset = s_scroll_delta,
-                     .enable_clip = True })
+            ui_box({
+                .sizing = { fixed(300), fixed(200) },
+                .color = s_blue,
+                .padding = s_padding_medium,
+            })
             {
-                ui_box({ .sizing = { fixed(200), fixed(300) },
-                         .color = s_grey,
-                         .padding = s_padding_small,
-                         .child_gap = s_child_gap_medium,
-                         .direction = LAYOUT_TOP_TO_BOTTOM })
+                ui_scrollable_area({ str("###scroll area"), (Sizing){ grow({}), grow({}) }, s_white, s_padding_small,
+                                     (Color){ 218, 219, 222, 255 } })
                 {
-                    ui_box({ .sizing = { fit({}), fit({}) }, .child_gap = s_child_gap_small })
-                    {
-                        UISignalFlags flags = ui_button(str("hello##world"), font_zh);
-                        if (ui_hovered(flags))
-                            ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = s_red })
-                            {
-                            }
-                        if (ui_lclicked(flags))
-                            set_app_title(app_context, str("Left Click"));
-                        if (ui_rclicked(flags))
-                            set_app_title(app_context, str("Right Click"));
-                    }
 
-                    static b32 check = False;
-                    ui_checkbox(str("good##bye"), &check);
-                    if (check)
-                        ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_green })
+                    ui_box({ .sizing = { fixed(350), fixed(150) },
+                             .color = s_grey,
+                             .padding = s_padding_small,
+                             .child_gap = s_child_gap_medium,
+                             .direction = LAYOUT_TOP_TO_BOTTOM })
+                    {
+                        // clang-format off
+                        ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = s_child_gap_small })
                         {
+                            UISignalFlags flags = ui_button(str("hello##world"), font_zh, 
+                                                            (Sizing){ fit_grow({ .max = 70 }), fit({}) },
+                                                            s_blue, s_black);
+                            if (ui_hovered(flags))
+                                ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = s_red }) {}
+                            if (ui_lclicked(flags))
+                                set_app_title(app_context, str("Left Click"));
+                            if (ui_rclicked(flags))
+                                set_app_title(app_context, str("Right Click"));
                         }
 
-                    ui_box(
-                        { .sizing = { fixed(300), fixed(500) }, .color = s_black, .rect_style = s_round_border_shadow })
-                    {
+                        static b32 check = False;
+                        ui_checkbox(str("good##bye"), &check, s_blue, s_white);
+                        if (check)
+                            ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_green }) {}
+                        // clang-format on
                     }
                 }
             }
@@ -186,10 +177,15 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             return 0;
         }
 
+        case WM_MOUSEHWHEEL:
+        {
+            ui_context->mouse_delta.x += GET_WHEEL_DELTA_WPARAM(wparam) / 10;
+            return 0;
+        }
+
         case WM_MOUSEWHEEL:
         {
-            short mouse_delta = GET_WHEEL_DELTA_WPARAM(wparam);
-            s_scroll_delta.y += mouse_delta / -10;
+            ui_context->mouse_delta.y += GET_WHEEL_DELTA_WPARAM(wparam) / -10;
             return 0;
         }
 

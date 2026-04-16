@@ -290,7 +290,7 @@ static void renderer_upload_glyph(const GlyphAtlas* atlas, const GlyphInfo* glyp
 
 void renderer_recreate_glyph_atlas_texture(const GlyphAtlas* glyph_atlas)
 {
-    Assert(s_renderer_state.glyph_atlas_texture); // Should we check others?
+    Assert(s_renderer_state.glyph_atlas_texture); // TODO: Should we check others?
     ID3D11Texture2D_Release(s_renderer_state.glyph_atlas_texture);
     ID3D11ShaderResourceView_Release(s_renderer_state.glyph_atlas_shader_resource_view);
 
