@@ -84,6 +84,7 @@ static void process_frame(AppContext* app_context)
 
     UIContext* ui_context = &app_context->ui;
     Font font_zh = app_context->fonts[FONT_INDEX_ZH];
+    Font font_ui = app_context->fonts[FONT_INDEX_UI];
 
     TracyCZone(ctx, 1);
     isize arena_pos_backup = ui_begin_frame(ui_context);
@@ -103,7 +104,7 @@ static void process_frame(AppContext* app_context)
             })
             {
                 ui_scrollable_area({ str("###scroll area"), (Sizing){ grow({}), grow({}) }, s_white, s_padding_small,
-                                     (Color){ 218, 219, 222, 255 } })
+                                     (Color){ 218, 219, 222, 200 } })
                 {
 
                     ui_box({ .sizing = { fixed(350), fixed(150) },
@@ -117,7 +118,7 @@ static void process_frame(AppContext* app_context)
                         {
                             UISignalFlags flags = ui_button(str("hello##world"), font_zh, 
                                                             (Sizing){ fit_grow({ .max = 70 }), fit({}) },
-                                                            s_blue, s_black);
+                                                            s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
                             if (ui_hovered(flags))
                                 ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = s_red }) {}
                             if (ui_lclicked(flags))
@@ -127,7 +128,9 @@ static void process_frame(AppContext* app_context)
                         }
 
                         static b32 check = False;
-                        ui_checkbox(str("good##bye"), &check, s_blue, s_white);
+                        UISignalFlags flags = ui_checkbox(str("good##bye"), font_ui, &check, (Color){ 200, 200, 200, 255 }, s_white, (Color){ 46, 143, 255, 255 });
+                        if (ui_lclicked(flags))
+                            check = !check;
                         if (check)
                             ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_green }) {}
                         // clang-format on
@@ -274,7 +277,7 @@ i32 WinMainCRTStartup()
         .draw_text = renderer_draw_text,
     };
     DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (void**)&app_context.dwrite_factory);
-    font_register(&app_context.fonts[FONT_INDEX_UI], app_context.dwrite_factory, L"Segoe UI");
+    font_register(&app_context.fonts[FONT_INDEX_UI], app_context.dwrite_factory, L"Segoe UI Symbol");
     font_register(&app_context.fonts[FONT_INDEX_ZH], app_context.dwrite_factory, L"Microsoft YaHei");
     font_register(&app_context.fonts[FONT_INDEX_MONO], app_context.dwrite_factory, L"Consolas");
     ui_init(&app_context.ui, CLIENT_WIDTH, CLIENT_HEIGHT, GetDpiForSystem(), app_context.dwrite_factory, render_fn);

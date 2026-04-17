@@ -717,11 +717,32 @@ static void ui_calculate_layout(UIBox* box)
 // Frame
 //
 
+static f32 calculate_frame_delta_time(u64 frame_index)
+{
+    static LARGE_INTEGER freq;
+    static LARGE_INTEGER last_time;
+
+    if (frame_index == 0)
+    {
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&last_time);
+        return 0.f;
+    }
+
+    LARGE_INTEGER current_time;
+    QueryPerformanceCounter(&current_time);
+
+    f32 delta_time = (f32)(current_time.QuadPart - last_time.QuadPart) / (f32)freq.QuadPart;
+    last_time = current_time;
+    return delta_time;
+}
+
 isize ui_begin_frame(UIContext* ui_context)
 {
     g_ui_context = ui_context;
     if (g_ui_context->frame_index > 0)
         g_ui_context->render_fn.wait_for_last_submitted_frame();
+    g_ui_context->frame_delta_time = calculate_frame_delta_time(g_ui_context->frame_index);
 
     return g_ui_context->arena.pos;
 }
@@ -911,93 +932,178 @@ static void update_box_key(UIBox* box, String box_hash_str)
     box->key.len = box_hash_str.len;
 }
 
-UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing,
-                        const Color background_color, const Color text_color)
+// Linear interpolation
+static u8 lerp_u8(u8 a, u8 b, f32 t)
 {
-    TextHash text_hash;
+    return (u8)(a + (b - a) * t);
+}
+
+static f32 lerp_f32(f32 a, f32 b, f32 t)
+{
+    return a + (b - a) * t;
+}
+
+static Color lerp_color(const Color a, const Color b, const f32 t)
+{
+    Color c = {
+        .r = lerp_u8(a.r, b.r, t), .g = lerp_u8(a.g, b.g, t), .b = lerp_u8(a.b, b.b, t), .a = lerp_u8(a.a, b.a, t)
+    };
+    return c;
+}
+
+static b32 update_transition(f32* transition, const f32 speed, const b32 reverse)
+{
+    b32 is_done = False;
+    if (!reverse)
+    {
+        *transition += (1.f - *transition) * speed * g_ui_context->frame_delta_time;
+        *transition = clamp(*transition, 0.f, 1.f);
+        if (fabs(*transition - 1.f) < 0.001f)
+        {
+            is_done = True;
+            *transition = 1.f;
+        }
+    }
+    else
+    {
+        *transition -= *transition * speed * g_ui_context->frame_delta_time;
+        *transition = clamp(*transition, 0.f, 1.f);
+        if (fabs(*transition - 0.f) < 0.001f)
+        {
+            is_done = True;
+            *transition = 0.f;
+        }
+    }
+    return is_done;
+}
+
+static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
+{
+    *flags = UI_Signal_Flag_None;
+    Rect last_box_rect = {
+        .xmin = box->position.x,
+        .ymin = box->position.y,
+        .xmax = box->position.x + box->size.width,
+        .ymax = box->position.y + box->size.height,
+    };
+    if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
+    {
+        *flags |= UI_Signal_Flag_Hovered;
+        if (g_ui_context->mouse_lclick)
+            *flags |= UI_Signal_Flag_LClicked;
+        if (g_ui_context->mouse_rclick)
+            *flags |= UI_Signal_Flag_RClicked;
+    }
+}
+
+UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing, const Color bg_color,
+                        const Color text_color, const Color bg_color_hover, const Color bg_color_press)
+{
+    Color bg_color_final = bg_color;
+
+    /* Get last button from cache */
+    TextHash text_hash = extract_hash_str(&text_with_hash_str);
+    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
+
+    /* Handle interaction */
+    UISignalFlags flags = UI_Signal_Flag_None;
+    if (result.found)
+    {
+        UIBox* last_box = result.box;
+        update_interaction_flags(last_box, &flags);
+
+        /* Animation */
+        if (ui_hovered(flags))
+            bg_color_final = bg_color_hover;
+        if (ui_clicked(flags) || (last_box->press_t > 0))
+        {
+            if (ui_clicked(flags))
+            {
+                last_box->press_t = 0.f;
+                last_box->anim_state = ANIMATION_FORWARD;
+            }
+            if (last_box->anim_state == ANIMATION_IDLE || last_box->anim_state == ANIMATION_FORWARD)
+            {
+                if (update_transition(&last_box->press_t, 30.f, False))
+                    last_box->anim_state = ANIMATION_REVERSE;
+            }
+            else
+            {
+                if (update_transition(&last_box->press_t, 24.f, True))
+                    last_box->anim_state = ANIMATION_IDLE;
+            }
+            bg_color_final =
+                lerp_color(ui_hovered(flags) ? bg_color_hover : bg_color, bg_color_press, last_box->press_t);
+        }
+    }
+
+    /* Create button box and text */
     UIBox* box = ui_box_start(&(BoxConfig){ .sizing = sizing,
-                                            .color = background_color,
+                                            .color = bg_color_final,
                                             .rect_style = { .corner_radius = 8 },
                                             .padding = { 6, 6, 6, 6 },
                                             .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-    {
-        text_hash = extract_hash_str(&text_with_hash_str);
-        update_box_key(box, text_hash.hash_str);
-
-        ui_text(text_hash.display_str,
-                &(TextConfig){ .font = font, .font_size = 12, .color = text_color, .line_height = 12 });
-    }
+    update_box_key(box, text_hash.hash_str);
+    ui_text(text_hash.display_str,
+            &(TextConfig){ .font = font, .font_size = 12, .color = text_color, .line_height = 12 });
     ui_box_end(box);
-
-    UISignalFlags flags = UI_Signal_Flag_None;
-    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
-    if (result.found)
-    {
-        Rect last_box_rect = {
-            .xmin = result.box->position.x,
-            .ymin = result.box->position.y,
-            .xmax = result.box->position.x + result.box->size.width,
-            .ymax = result.box->position.y + result.box->size.height,
-        };
-        if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
-        {
-            flags |= UI_Signal_Flag_Hovered;
-            if (g_ui_context->mouse_lclick)
-                flags |= UI_Signal_Flag_LClicked;
-            if (g_ui_context->mouse_rclick)
-                flags |= UI_Signal_Flag_RClicked;
-        }
-    }
 
     return flags;
 }
 
-UISignalFlags ui_checkbox(const String text_with_hash_str, b32* check, const Color background_color,
-                          const Color switch_button_color)
+UISignalFlags ui_checkbox(const String text_with_hash_str, const Font font, b32* check, const Color bg_color,
+                          const Color switch_button_color, const Color bg_color_active)
 {
-    TextHash text_hash;
-    AlignPosition switch_box_x_align = *check ? ALIGN_END : ALIGN_START;
+    Color bg_color_final = bg_color;
+    f32 pad_width = 0.f;
 
+    /* Get last button from cache */
+    TextHash text_hash = extract_hash_str(&text_with_hash_str);
+    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
+
+    /* Handle interaction */
+    UISignalFlags flags = UI_Signal_Flag_None;
+    if (result.found)
+    {
+        UIBox* last_container = result.box;
+        update_interaction_flags(last_container, &flags);
+
+        /* Animation */
+        if (ui_lclicked(flags) || (last_container->press_t > 0))
+        {
+            if (ui_lclicked(flags))
+                last_container->anim_state = *check ? ANIMATION_REVERSE : ANIMATION_FORWARD;
+            if (last_container->anim_state != ANIMATION_IDLE)
+                if (update_transition(&last_container->press_t, 18.f, last_container->anim_state == ANIMATION_REVERSE))
+                    last_container->anim_state = ANIMATION_IDLE;
+        }
+        bg_color_final = lerp_color(bg_color, bg_color_active, last_container->press_t);
+        pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, last_container->press_t);
+    }
+
+    /* Create checkbox */
     UIBox* container = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT * 2), fixed(CHECKBOX_HEIGHT) },
-                                                  .color = background_color,
+                                                  .color = bg_color_final,
                                                   .rect_style = { .corner_radius = CHECKBOX_HEIGHT },
                                                   .padding = { CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD },
-                                                  .alignment = { switch_box_x_align, ALIGN_CENTER } });
+                                                  .alignment = { ALIGN_START, ALIGN_CENTER } });
     {
+        // pad
+        UIBox* pad = ui_box_start(
+            &(BoxConfig){ .sizing = { fixed(pad_width), grow({}) }, .alignment = { ALIGN_START, ALIGN_CENTER } });
+        ui_box_end(pad);
+
+        // switch button
         f32 switch_button_radius = CHECKBOX_HEIGHT - CHECKBOX_PAD * 2;
         UIBox* switch_button =
             ui_box_start(&(BoxConfig){ .sizing = { fixed(switch_button_radius), fixed(switch_button_radius) },
                                        .color = switch_button_color,
                                        .rect_style = { .corner_radius = switch_button_radius } });
         ui_box_end(switch_button);
-
-        text_hash = extract_hash_str(&text_with_hash_str);
-        update_box_key(container, text_hash.hash_str);
     }
+    text_hash = extract_hash_str(&text_with_hash_str);
+    update_box_key(container, text_hash.hash_str);
     ui_box_end(container);
-
-    UISignalFlags flags = UI_Signal_Flag_None;
-    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
-    if (result.found)
-    {
-        Rect last_box_rect = {
-            .xmin = result.box->position.x,
-            .ymin = result.box->position.y,
-            .xmax = result.box->position.x + result.box->size.width,
-            .ymax = result.box->position.y + result.box->size.height,
-        };
-        if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
-        {
-            flags |= UI_Signal_Flag_Hovered;
-            if (g_ui_context->mouse_lclick)
-            {
-                *check = !(*check);
-                flags |= UI_Signal_Flag_LClicked;
-            }
-            if (g_ui_context->mouse_rclick)
-                flags |= UI_Signal_Flag_RClicked;
-        }
-    }
 
     return flags;
 }
@@ -1039,7 +1145,7 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
 
     /* Create area box */
     scroll_ctx.area_box =
-        ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->background_color, .enable_clip = True });
+        ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .enable_clip = True });
     String area_box_hash_str = extract_hash_str(&config->text_with_hash_str).hash_str;
     update_box_key(scroll_ctx.area_box, area_box_hash_str);
 

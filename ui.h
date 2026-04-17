@@ -50,6 +50,7 @@ typedef enum
 #define ui_hovered(signal_flags)  (signal_flags & UI_Signal_Flag_Hovered)
 #define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
 #define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
+#define ui_clicked(signal_flags)  (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
 
 //
 // Command
@@ -212,6 +213,13 @@ typedef struct
     isize len;
 } BoxKey;
 
+typedef enum
+{
+    ANIMATION_IDLE,
+    ANIMATION_FORWARD,
+    ANIMATION_REVERSE,
+} AnimationState;
+
 typedef struct UIBox UIBox;
 struct UIBox
 {
@@ -221,23 +229,27 @@ struct UIBox
         TextData text;
     } data;
 
-    // info
     BoxType type;
     BoxConfig config;
-    Position position;
-    Size size;
-    Position scroll_delta;
 
-    // layout tree
+    /* layout tree */
     UIBox* parent;
     UIBox* prev;
     UIBox* next;
     UIBox* child_first;
     UIBox* child_last;
 
-    // box cache
+    /* cached data */
     BoxKey key;
     u64 last_frame_index;
+
+    Position position;
+    Size size;
+    Position scroll_delta;
+
+    f32 hover_t; // `t` is transition, range: [0, 1]
+    f32 press_t;
+    AnimationState anim_state;
 };
 
 //
@@ -282,23 +294,24 @@ typedef struct
 {
     Arena arena;
     u64 frame_index;
+    f32 frame_delta_time;
 
-    // window
+    /* window */
     u32 dpi;
     u32 client_width; // logic client width
     u32 client_height; // logic client height
 
-    // interaction
+    /* interaction */
     Position mouse_pos;
     b32 mouse_lclick;
     b32 mouse_rclick;
     Position mouse_delta;
 
-    // ui
+    /* ui */
     UIBox* root;
     UIBoxCache box_cache;
 
-    // render
+    /* render */
     GlyphCache glyph_cache;
     UIRenderFunc render_fn;
     Queue(UICommand, COMMAND_QUEUE_CAPACITY) command_queue;
@@ -327,7 +340,7 @@ typedef struct
 {
     String text_with_hash_str;
     Sizing sizing;
-    Color background_color;
+    Color bg_color;
     Padding padding;
     Color thumb_color;
 } ScrollableAreaConfig;
@@ -349,10 +362,10 @@ UIBox* ui_text(const String text, const TextConfig* text_config);
 isize ui_begin_frame(UIContext* ui_context);
 void ui_end_frame(isize arena_pos_backup);
 
-UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing,
-                        const Color background_color, const Color text_color);
-UISignalFlags ui_checkbox(const String text_with_hash_str, b32* check, const Color background_color,
-                          const Color switch_button_color);
+UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing, const Color bg_color,
+                        const Color text_color, const Color bg_color_hover, const Color bg_color_press);
+UISignalFlags ui_checkbox(const String text_with_hash_str, const Font font, b32* check, const Color bg_color,
+                          const Color switch_button_color, const Color bg_color_active);
 
 ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
 void ui_scrollable_area_end(ScrollContext scroll_ctx);
