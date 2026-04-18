@@ -364,8 +364,8 @@ void ui_end_frame(isize arena_pos_backup);
 
 UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing, const Color bg_color,
                         const Color text_color, const Color bg_color_hover, const Color bg_color_press);
-UISignalFlags ui_checkbox(const String text_with_hash_str, const Font font, b32* check, const Color bg_color,
-                          const Color switch_button_color, const Color bg_color_active);
+UISignalFlags ui_switchbox(const String text_with_hash_str, const Font font, b32* check, const Color bg_color,
+                           const Color switch_button_color, const Color bg_color_active);
 
 ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
 void ui_scrollable_area_end(ScrollContext scroll_ctx);

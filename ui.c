@@ -175,7 +175,7 @@ UIBox* ui_box_start(const BoxConfig* config)
     UIBox* box = ui_box_new();
     UIBox* parent = ui_box_get_parent();
 
-    // Set the parent of the current box and add the current box as a child of its parent
+    /* Set the parent of the current box and add the current box as a child of its parent */
     if (parent)
     {
         box->parent = parent;
@@ -240,7 +240,7 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
         text_box->data.text.half_leading = (line_height - base_line_height) / 2.0f;
     }
 
-    // Calculate box->config.sizing.width.value.min by finding the width of the longest word in the text.
+    /* Calculate box->config.sizing.width.value.min by finding the width of the longest word in the text. */
     f32 min_width = 0;
     f32 whole_text_width = 0;
     isize word_count = 0;
@@ -261,8 +261,8 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
                 utf8_decode(&text.data[start], &start_codepoint);
                 if (start_codepoint != ' ')
                 {
-                    // For ASCII: measure up to current position (word boundary before delimiter).
-                    // For non-ASCII: include this character itself, treating it as a single-word unit.
+                    /* For ASCII: measure up to current position (word boundary before delimiter).
+                    For non-ASCII: include this character itself, treating it as a single-word unit. */
                     isize end = start_codepoint < 127 ? ptr - text.data : next - text.data;
                     f32 word_width = get_text_width(glyph_cache, str_slice(text, start, end), text_box->data.text.font,
                                                     text_box->data.text.font_size, dpi);
@@ -274,7 +274,7 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
             ptr = next;
         }
 
-        // Handle last word
+        /* Handle last word */
         f32 word_width = get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font,
                                         text_box->data.text.font_size, dpi);
         min_width = max(min_width, word_width);
@@ -363,7 +363,7 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
         }
     }
 
-    // Recursively resolve child box sizes (depth-first, reverse order)
+    /* Recursively resolve child box sizes (depth-first, reverse order) */
     if (box->type == BOX_TYPE_CONTAINER)
     {
         UIBox* child = box->child_first;
@@ -374,8 +374,8 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
         }
     }
 
-    // Select a bigger min size if box axis has both fit attribute and min size config
-    // And clamp box axis size to less than box axis max size
+    /* Select a bigger min size if box axis has both fit attribute and min size config
+    And clamp box axis size to less than box axis max size */
     if (axis_has_fit_attribute(box_ctx.sizing_mode))
     {
         if (box_ctx_min_size_backup > *box_ctx.min_size)
@@ -386,7 +386,7 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
             *box_ctx.size = *box_ctx.max_size;
     }
 
-    // If the current box is a child, adjust its parent's size based on box direction.
+    /* If the current box is a child, adjust its parent's size based on box direction. */
     UIBox* parent = box->parent;
     if (parent)
     {
@@ -425,7 +425,7 @@ static void distribute_axis(f32* remaining, F32PtrSlice* items, F32PtrSlice* lim
         f32 second_pivot = mode == GROW ? INFINITY : 0;
         f32 to_add = 0;
 
-        // Find the pivot size (smallest for grow, largest for shrink) and the next pivot.
+        /* Find the pivot size (smallest for grow, largest for shrink) and the next pivot. */
         for (isize i = 0; i < items->len; i++)
         {
             if (mode == GROW ? (*items->data[i] < pivot) : (*items->data[i] > pivot))
@@ -441,11 +441,11 @@ static void distribute_axis(f32* remaining, F32PtrSlice* items, F32PtrSlice* lim
             }
         }
 
-        // If all items have the same size, distribute remaining space equally.
+        /* If all items have the same size, distribute remaining space equally. */
         if ((mode == GROW && second_pivot == INFINITY) || (mode == SHRINK && second_pivot == 0))
             to_add = *remaining / items->len;
 
-        // Count items at the pivot and adjust to_add if it would "exceed" remaining space.
+        /* Count items at the pivot and adjust to_add if it would "exceed" remaining space. */
         isize pivot_count = 0;
         for (isize i = 0; i < items->len; i++)
             if (fabsf(*items->data[i] - pivot) < EPSILON)
@@ -453,8 +453,8 @@ static void distribute_axis(f32* remaining, F32PtrSlice* items, F32PtrSlice* lim
         if (mode == GROW ? (to_add * pivot_count > *remaining) : (to_add * pivot_count < *remaining))
             to_add = *remaining / pivot_count;
 
-        // Distribute space among items at the pivot size.
-        // When an item hits its limit, clamp it and remove from further distribution.
+        /* Distribute space among items at the pivot size.
+        When an item hits its limit, clamp it and remove from further distribution. */
         for (isize i = 0; i < items->len; i++)
         {
             if (fabsf(*items->data[i] - pivot) >= EPSILON)
@@ -488,7 +488,7 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
         AxisContext ctx = get_axis_context(box, axis);
         *ctx.remaining = *ctx.size;
 
-        // Subtract padding and child gap
+        /* Subtract padding and child gap */
         // TODO: When the window is resized to very small, the root box's remaining will be less
         // than padding, then `Assert` broken.
         *ctx.remaining -= ctx.padding_start + ctx.padding_end;
@@ -497,20 +497,20 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
         if (box->config.direction == ctx.main_direction)
             *ctx.remaining -= box->config.child_gap * child_gap_count;
 
-        // Subtract the childrens' determined size from the parent's remaining space.
+        /* Subtract the childrens' determined size from the parent's remaining space. */
         UIBox* child = box->child_first;
         while (child)
         {
             AxisContext child_ctx = get_axis_context(child, axis);
 
-            // Subtract the child's determined size from the parent's remaining space.
+            /* Subtract the child's determined size from the parent's remaining space. */
             if (box->config.direction == ctx.main_direction)
                 *ctx.remaining -= *child_ctx.size;
 
             child = child->next;
         }
 
-        // Distribute remaining space to children (growables and shrinkables are mutually exclusive)
+        /* Distribute remaining space to children (growables and shrinkables are mutually exclusive) */
         F32PtrSlice growables = { 0 };
         F32PtrSlice growable_limits = { 0 };
         F32PtrSlice shrinkables = { 0 };
@@ -551,7 +551,7 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
     }
     g_ui_context->arena.pos = arena_pos_backup;
 
-    // Recursively resolve size (breadth first)
+    /* Recursively resolve size (breadth first) */
     if (box->type == BOX_TYPE_CONTAINER)
     {
         UIBox* child = box->child_first;
@@ -602,7 +602,7 @@ static void ui_box_resolve_position(UIBox* box)
                 box->position.x += parent->data.container.remaining_space.width - box->size.width;
         }
 
-        // Handle scroll offset
+        /* Handle scroll offset */
         box->position.x += parent->config.child_offset.x;
         box->position.y += parent->config.child_offset.y;
     }
@@ -617,7 +617,7 @@ static void ui_box_resolve_position(UIBox* box)
         }
     }
 
-    // Update the box size and position in box cache if the box has a hash string
+    /* Update the box size and position in box cache if the box has a hash string */
     if (box->key.len)
     {
         String box_hash_str = { box->key.str, box->key.len };
@@ -657,27 +657,27 @@ static void perform_text_wrapping(UIBox* text_box)
         byte* next = utf8_decode(ptr, &codepoint);
         isize distance = ptr - text.data;
 
-        // Check width
+        /* Check width */
         f32 width = get_text_width(glyph_cache, str_slice(text, line_start, distance), font, font_size, dpi);
         if (width > max_width && last_break > line_start)
         {
             *slice_push(&text_box->data.text.wrapped_lines, &g_ui_context->arena) =
                 str_slice(text, line_start, last_break);
 
-            // Skip space if needed
+            /* Skip space if needed */
             line_start = (text.data[last_break] == ' ') ? last_break + 1 : last_break;
             last_break = line_start;
             continue;
         }
 
-        // Update break position
+        /* Update break position */
         if (codepoint == ' ' || codepoint > 127)
             last_break = distance;
 
         ptr = next;
     }
 
-    // Handle last line
+    /* Handle last line */
     *slice_push(&text_box->data.text.wrapped_lines, &g_ui_context->arena) = str_slice(text, line_start, text.len);
 
     text_box->size.height = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
@@ -773,13 +773,13 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
         (box->position.y + box->size.height) * dpi_scale,
     };
 
-    // If clip is enabled, push a clip
+    /* If clip is enabled, push a clip */
     Rect new_clip = clip;
     if (box->config.enable_clip)
         new_clip = intersect_rects(clip, box_rect);
 
     // clang-format off
-    // Draw box rect/text
+    /* Draw box rect/text */
     switch (box->type)
     {
         case BOX_TYPE_CONTAINER:
@@ -818,7 +818,7 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
     }
     // clang-format on
 
-    // Recursive child boxes
+    /* Recursive child boxes */
     if (box->type == BOX_TYPE_CONTAINER)
     {
         UIBox* child = box->child_first;
@@ -842,7 +842,7 @@ void ui_end_frame(isize arena_pos_backup)
     ui_calculate_layout(g_ui_context->root);
     ui_generate_render_commands(g_ui_context->root, no_clip);
 
-    // Draw
+    /* Draw */
     for (isize i = 0; i < g_ui_context->command_queue.count; i++)
     {
         Rect* clip;
@@ -864,7 +864,7 @@ void ui_end_frame(isize arena_pos_backup)
         }
     }
 
-    // Present
+    /* Present */
     u32 physical_client_width = (u32)(g_ui_context->client_width * dpi_scale);
     u32 physical_client_height = (u32)(g_ui_context->client_height * dpi_scale);
     g_ui_context->render_fn.flush_and_present(physical_client_width, physical_client_height);
@@ -1051,11 +1051,14 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font font, const 
     return flags;
 }
 
-UISignalFlags ui_checkbox(const String text_with_hash_str, const Font font, b32* check, const Color bg_color,
-                          const Color switch_button_color, const Color bg_color_active)
+UISignalFlags ui_switchbox(const String text_with_hash_str, const Font font, b32* check, const Color bg_color,
+                           const Color switch_button_color, const Color bg_color_active)
 {
     Color bg_color_final = bg_color;
+    Color status_color_ok = switch_button_color;
+    Color status_color_cancel = switch_button_color;
     f32 pad_width = 0.f;
+    f32 shadow_offset_x = 0.f;
 
     /* Get last button from cache */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
@@ -1078,7 +1081,10 @@ UISignalFlags ui_checkbox(const String text_with_hash_str, const Font font, b32*
                     last_container->anim_state = ANIMATION_IDLE;
         }
         bg_color_final = lerp_color(bg_color, bg_color_active, last_container->press_t);
+        status_color_ok.a = lerp_u8(0, 255, last_container->press_t);
+        status_color_cancel.a = lerp_u8(255, 0, last_container->press_t);
         pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, last_container->press_t);
+        shadow_offset_x = lerp_f32(1.f, -2.f, last_container->press_t);
     }
 
     /* Create checkbox */
@@ -1088,18 +1094,26 @@ UISignalFlags ui_checkbox(const String text_with_hash_str, const Font font, b32*
                                                   .padding = { CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD },
                                                   .alignment = { ALIGN_START, ALIGN_CENTER } });
     {
-        // pad
-        UIBox* pad = ui_box_start(
+        /* left padding */
+        UIBox* pad_left = ui_box_start(
             &(BoxConfig){ .sizing = { fixed(pad_width), grow({}) }, .alignment = { ALIGN_START, ALIGN_CENTER } });
-        ui_box_end(pad);
+        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(5), grow({}) } }));
+        ui_text(str("✓"), &(TextConfig){ .font = font, .font_size = 9, .color = status_color_ok });
+        ui_box_end(pad_left);
 
-        // switch button
+        /* switch button */
         f32 switch_button_radius = CHECKBOX_HEIGHT - CHECKBOX_PAD * 2;
-        UIBox* switch_button =
-            ui_box_start(&(BoxConfig){ .sizing = { fixed(switch_button_radius), fixed(switch_button_radius) },
-                                       .color = switch_button_color,
-                                       .rect_style = { .corner_radius = switch_button_radius } });
-        ui_box_end(switch_button);
+        ui_box_end(ui_box_start(&(BoxConfig){
+            .sizing = { fixed(switch_button_radius), fixed(switch_button_radius) },
+            .color = switch_button_color,
+            .rect_style = { .corner_radius = switch_button_radius, .shadow_offset = { shadow_offset_x, 0 } } }));
+
+        /* right padding */
+        UIBox* pad_right = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },
+                                                      .alignment = { ALIGN_END, ALIGN_CENTER } });
+        ui_text(str("✗"), &(TextConfig){ .font = font, .font_size = 9, .color = status_color_cancel });
+        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(6), grow({}) } }));
+        ui_box_end(pad_right);
     }
     text_hash = extract_hash_str(&text_with_hash_str);
     update_box_key(container, text_hash.hash_str);
@@ -1230,20 +1244,18 @@ static void scroll_bar(const b32 is_horizontal, const f32 delta, const f32 thick
     {
         UIBox* bar =
             ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(thickness) }, .child_offset = { delta, 0 } });
-        UIBox* thumb = ui_box_start(&(BoxConfig){ .sizing = { fixed(thumb_extent), fixed(thickness) },
-                                                  .color = thumb_color,
-                                                  .rect_style = { .corner_radius = SCROLLBAR_THICKNESS } });
-        ui_box_end(thumb);
+        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(thumb_extent), fixed(thickness) },
+                                              .color = thumb_color,
+                                              .rect_style = { .corner_radius = SCROLLBAR_THICKNESS } }));
         ui_box_end(bar);
     }
     else
     {
         UIBox* bar =
             ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), grow({}) }, .child_offset = { 0, delta } });
-        UIBox* thumb = ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), fixed(thumb_extent) },
-                                                  .color = thumb_color,
-                                                  .rect_style = { .corner_radius = SCROLLBAR_THICKNESS } });
-        ui_box_end(thumb);
+        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), fixed(thumb_extent) },
+                                              .color = thumb_color,
+                                              .rect_style = { .corner_radius = SCROLLBAR_THICKNESS } }));
         ui_box_end(bar);
     }
 }
@@ -1289,8 +1301,7 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
         UIBox* vbar_container = ui_box_start(
             &(BoxConfig){ .sizing = { fixed(SCROLLBAR_THICKNESS), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
         scroll_bar(False, scroll_ctx.delta.y, SCROLLBAR_THICKNESS, thumb_size.height, scroll_ctx.thumb_color);
-        UIBox* pad = ui_box_start(&(BoxConfig){ .sizing = { fixed(SCROLLBAR_THICKNESS), fixed(SCROLLBAR_THICKNESS) } });
-        ui_box_end(pad);
+        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(SCROLLBAR_THICKNESS), fixed(SCROLLBAR_THICKNESS) } }));
         ui_box_end(vbar_container);
     }
     else if (bar_flags & SCROLLBAR_VERTICAL)

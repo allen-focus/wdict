@@ -16,10 +16,13 @@
 
 #define MAX_TITLE_LENGTH 64
 
-#define FONT_INDEX_UI   0
-#define FONT_INDEX_ZH   1
-#define FONT_INDEX_MONO 2
-#define FONT_CAPACITY   3
+typedef enum
+{
+    FONT_INDEX_UI,
+    FONT_INDEX_ZH,
+    FONT_INDEX_MONO,
+    FONT_CAPACITY
+} FontIndex;
 
 ///
 
@@ -128,7 +131,14 @@ static void process_frame(AppContext* app_context)
                         }
 
                         static b32 check = False;
-                        UISignalFlags flags = ui_checkbox(str("good##bye"), font_ui, &check, (Color){ 200, 200, 200, 255 }, s_white, (Color){ 46, 143, 255, 255 });
+                        UISignalFlags flags = ui_switchbox(
+                            str("good##bye"),
+                            font_ui,
+                            &check,
+                            (Color){ 200, 200, 200, 255 },
+                            s_white,
+                            (Color){ 46, 143, 255, 255 }
+                        );
                         if (ui_lclicked(flags))
                             check = !check;
                         if (check)
@@ -262,10 +272,10 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 i32 WinMainCRTStartup()
 #endif
 {
-    // Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607)
+    /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // Init context
+    /* Init context */
     AppContext app_context = { .title = L"App Title" };
     UIRenderFunc render_fn = {
         .flush_and_present = renderer_flush_and_present,
@@ -282,7 +292,7 @@ i32 WinMainCRTStartup()
     font_register(&app_context.fonts[FONT_INDEX_MONO], app_context.dwrite_factory, L"Consolas");
     ui_init(&app_context.ui, CLIENT_WIDTH, CLIENT_HEIGHT, GetDpiForSystem(), app_context.dwrite_factory, render_fn);
 
-    // Create window
+    /* Create window */
     RECT rect = get_screen_center_rect(app_context.ui.client_width, app_context.ui.client_height, app_context.ui.dpi);
     DWORD window_style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRectEx(&rect, window_style, 0, 0); // set the client position to screen center
@@ -296,15 +306,15 @@ i32 WinMainCRTStartup()
         CreateWindowExW(0, wc.lpszClassName, app_context.title, window_style, rect.left, rect.top,
                         rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
 
-    // Initialize renderer
+    /* Initialize renderer */
     renderer_init(app_context.window, &app_context.ui.glyph_cache.atlas);
 
-    // Render first frame before showing window
+    /* Render first frame before showing window */
     process_frame(&app_context); // rasterize needed glyphs
     process_frame(&app_context);
     ShowWindow(app_context.window, SW_SHOWDEFAULT);
 
-    // Run message loop
+    /* Run message loop */
     MSG message;
     while (True)
     {
@@ -321,7 +331,7 @@ i32 WinMainCRTStartup()
         process_frame(&app_context);
     }
 
-    // Clean
+    /* Clean */
     renderer_deinit();
     font_unregister(&app_context.fonts[FONT_INDEX_UI]);
     font_unregister(&app_context.fonts[FONT_INDEX_ZH]);
