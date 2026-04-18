@@ -26,8 +26,7 @@ typedef struct
 {
     f32 corner_radius;
     f32 border_thickness;
-    f32 enable_shadow;
-    f32 is_text;
+    Position shadow_offset;
 } VertexStyle;
 
 typedef struct
@@ -37,6 +36,7 @@ typedef struct
     ColorF32 color;
     ColorF32 border_color;
     VertexStyle style_params;
+    f32 is_text;
     i32 clip_rect_index;
 } Vertex;
 
@@ -92,7 +92,7 @@ void renderer_wait_for_last_submitted_frame()
 
 void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
 {
-    // Create device and context
+    /* Create device and context */
     {
         u32 flags = 0;
 #ifndef NDEBUG
@@ -123,7 +123,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
     }
 #endif
 
-    // Create swapchain
+    /* Create swapchain */
     {
         IDXGIFactory2* factory;
         {
@@ -157,7 +157,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
             IDXGISwapChain2_GetFrameLatencyWaitableObject(s_renderer_state.swapchain2);
     }
 
-    // Create render target view for backbuffer texture
+    /* Create render target view for backbuffer texture */
     {
         ID3D11Texture2D* texture;
         IDXGISwapChain1_GetBuffer(s_renderer_state.swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
@@ -168,7 +168,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
         ID3D11Texture2D_Release(texture);
     }
 
-    // Create sampler state
+    /* Create sampler state */
     {
         D3D11_SAMPLER_DESC desc = {
             .Filter = D3D11_FILTER_MIN_MAG_MIP_POINT,
@@ -180,7 +180,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
         ID3D11Device_CreateSamplerState(s_renderer_state.device, &desc, &s_renderer_state.sampler_state);
     }
 
-    // Create blend state
+    /* Create blend state */
     {
         D3D11_BLEND_DESC desc = { .RenderTarget[0] = { .BlendEnable = True,
                                                        .SrcBlend = D3D11_BLEND_SRC_ALPHA,
@@ -193,7 +193,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
         ID3D11Device_CreateBlendState(s_renderer_state.device, &desc, &s_renderer_state.blend_state);
     }
 
-    // Create texture (glyph atlas)
+    /* Create texture (glyph atlas) */
     {
         D3D11_TEXTURE2D_DESC desc = {
             .Width = glyph_atlas->w,
@@ -212,12 +212,12 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
         ID3D11Device_CreateTexture2D(s_renderer_state.device, &desc, &data, &s_renderer_state.glyph_atlas_texture);
     }
 
-    // Create texture view (glyph atlas)
+    /* Create texture view (glyph atlas) */
     ID3D11Device_CreateShaderResourceView(s_renderer_state.device,
                                           (ID3D11Resource*)s_renderer_state.glyph_atlas_texture, 0,
                                           &s_renderer_state.glyph_atlas_shader_resource_view);
 
-    // Create vertex buffer
+    /* Create vertex buffer */
     {
         D3D11_BUFFER_DESC desc = {
             .ByteWidth = sizeof(s_vertex_cache.data),
@@ -229,7 +229,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
         ID3D11Device_CreateBuffer(s_renderer_state.device, &desc, &initial, &s_renderer_state.vertex_buffer);
     }
 
-    // Create constant buffer for delivering MVP (Model View Projection)
+    /* Create constant buffer for delivering MVP (Model View Projection) */
     {
         D3D11_BUFFER_DESC desc = {
             .ByteWidth = sizeof(f32) * 4 * 4, // f32 mvp[4][4]
@@ -240,7 +240,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
         ID3D11Device_CreateBuffer(s_renderer_state.device, &desc, NULL, &s_renderer_state.mvp_buffer);
     }
 
-    // Create constant buffer for clipping
+    /* Create constant buffer for clipping */
     {
         D3D11_BUFFER_DESC desc = {
             .ByteWidth = sizeof(s_clip_cache.rects),
@@ -251,7 +251,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
         ID3D11Device_CreateBuffer(s_renderer_state.device, &desc, NULL, &s_renderer_state.clip_rect_buffer);
     }
 
-    // Create input layout, vertex shader, pixel shader
+    /* Create input layout, vertex shader, pixel shader */
     {
         // clang-format off
         D3D11_INPUT_ELEMENT_DESC desc[] = {
@@ -261,6 +261,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
             { "COLOR",        0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, color),           D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "BORDER_COLOR", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, border_color),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "STYLE_PARAMS", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         offsetof(Vertex, style_params),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "IS_TEXT",      0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, is_text),         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "CLIP_INDEX",   0,             DXGI_FORMAT_R32_SINT,           0,         offsetof(Vertex, clip_rect_index), D3D11_INPUT_PER_INSTANCE_DATA, 1 }
         };
         // clang-format on
@@ -310,7 +311,7 @@ void renderer_recreate_glyph_atlas_texture(const GlyphAtlas* glyph_atlas)
     };
     ID3D11Device_CreateTexture2D(s_renderer_state.device, &desc, &data, &s_renderer_state.glyph_atlas_texture);
 
-    // Create texture view (glyph atlas)
+    /* Create texture view (glyph atlas) */
     ID3D11Device_CreateShaderResourceView(s_renderer_state.device,
                                           (ID3D11Resource*)s_renderer_state.glyph_atlas_texture, 0,
                                           &s_renderer_state.glyph_atlas_shader_resource_view);
@@ -360,12 +361,12 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
 {
     TracyCZone(ctx, 1);
 
-    // Map buffer
+    /* Map buffer */
     map_vertex_buffer();
     map_clip_rects_to_cbuffer();
     map_mvp_to_cbuffer(client_width, client_height);
 
-    // Set viewport
+    /* Set viewport */
     D3D11_VIEWPORT viewport = {
         .TopLeftX = 0,
         .TopLeftY = 0,
@@ -375,12 +376,12 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
         .MaxDepth = 1,
     };
 
-    // Clear screen
+    /* Clear screen */
     FLOAT color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     ID3D11DeviceContext_ClearRenderTargetView(s_renderer_state.context, s_renderer_state.render_target_view, color);
 
     // clang-format off
-    // IA-VS-RS-PS-OM, Draw
+    /* IA-VS-RS-PS-OM, Draw */
     u32 stride = sizeof(Vertex);
     u32 offset = 0;
     ID3D11DeviceContext_IASetInputLayout(s_renderer_state.context, s_renderer_state.layout);
@@ -399,7 +400,7 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
     ID3D11DeviceContext_DrawInstanced(s_renderer_state.context, 4, s_vertex_cache.count, 0, 0);
     // clang-format on
 
-    // Present
+    /* Present */
     b32 vsync = True;
     u32 flags = 0;
 #if !defined(NDEBUG) || defined(TRACY_ENABLE)
@@ -408,7 +409,7 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
 #endif
     IDXGISwapChain1_Present(s_renderer_state.swapchain, vsync, flags);
 
-    // Reset vertex stack & clip rect cache
+    /* Reset vertex stack & clip rect cache */
     memset(&s_vertex_cache, 0, sizeof(s_vertex_cache));
     memset(&s_clip_cache, 0, sizeof(s_clip_cache));
 
@@ -442,11 +443,11 @@ void renderer_resize(const u32 client_width, const u32 client_height)
 {
     TracyCZone(ctx, 1);
 
-    // Release old swapchain buffers
+    /* Release old swapchain buffers */
     ID3D11DeviceContext_OMSetRenderTargets(s_renderer_state.context, 0, NULL, NULL);
     ID3D11RenderTargetView_Release(s_renderer_state.render_target_view);
 
-    // Resize swapchain
+    /* Resize swapchain */
     u32 flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 #if !defined(NDEBUG) || defined(TRACY_ENABLE)
     flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
@@ -454,7 +455,7 @@ void renderer_resize(const u32 client_width, const u32 client_height)
     IDXGISwapChain1_ResizeBuffers(s_renderer_state.swapchain, 0, client_width, client_height, DXGI_FORMAT_UNKNOWN,
                                   flags);
 
-    // Create render target view for new backbuffer texture
+    /* Create render target view for new backbuffer texture */
     ID3D11Texture2D* texture;
     IDXGISwapChain1_GetBuffer(s_renderer_state.swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
     D3D11_RENDER_TARGET_VIEW_DESC desc = { .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
@@ -499,7 +500,7 @@ static void renderer_set_clip_rect(const Rect* clip)
     u32 clip_rect_index = start_index;
     Rect void_rect = { 0, 0, 0, 0 };
 
-    // Open addressing
+    /* Open addressing */
     while (memcmp(&s_clip_cache.rects[clip_rect_index], &void_rect, sizeof(void_rect)) != 0)
     {
         if (memcmp(&s_clip_cache.rects[clip_rect_index], clip, sizeof(*clip)) == 0)
@@ -527,7 +528,7 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
 {
     Assert(s_vertex_cache.count != VERTEX_CAPACITY);
 
-    // Set clip
+    /* Set clip */
     if (clip)
     {
         b32 use_last_clip = memcmp(&s_clip_cache.rects[s_clip_cache.current_index], clip, sizeof(*clip)) == 0;
@@ -536,8 +537,9 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
     }
 
     Vertex* vertex = &s_vertex_cache.data[s_vertex_cache.count];
+    vertex->is_text = VERTEX_IS_NOT_TEXT;
 
-    // Update target rect
+    /* Update target rect */
     {
         vertex->target_rect.xmin = target_rect.xmin;
         vertex->target_rect.ymin = target_rect.ymin;
@@ -545,7 +547,7 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
         vertex->target_rect.ymax = target_rect.ymax;
     }
 
-    // Update texture rect
+    /* Update texture rect */
     {
         vertex->texture_rect.xmin = texture_rect.xmin / (f32)GLYPH_ATLAS_WIDTH;
         vertex->texture_rect.ymin = texture_rect.ymin / (f32)GLYPH_ATLAS_HEIGHT;
@@ -553,17 +555,17 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
         vertex->texture_rect.ymax = texture_rect.ymax / (f32)GLYPH_ATLAS_HEIGHT;
     }
 
-    // Update color & border color
+    /* Update color & border color */
     vertex->color = color_srgb_to_linear(color);
     vertex->border_color = color_srgb_to_linear(style.border_color);
 
-    // Update style parameters
+    /* Update style parameters */
     vertex->style_params.corner_radius = style.corner_radius;
     vertex->style_params.border_thickness = style.border_thickness;
-    vertex->style_params.enable_shadow = (f32)style.enable_shadow;
-    vertex->style_params.is_text = VERTEX_IS_NOT_TEXT;
+    vertex->style_params.shadow_offset.x = style.shadow_offset.x;
+    vertex->style_params.shadow_offset.y = style.shadow_offset.y;
 
-    // Update clip rect index
+    /* Update clip rect index */
     vertex->clip_rect_index = clip ? s_clip_cache.current_index : CLIP_INDEX_SKIP;
 
     s_vertex_cache.count++;
@@ -630,24 +632,16 @@ f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text,
 void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style,
                         const Rect* clip)
 {
-    // Calculate expanded rect
+    /* Calculate expanded rect */
     Rect expanded_rect = rect;
-    if (style.enable_shadow)
+    if (style.shadow_offset.x || style.shadow_offset.y)
     {
-        // NOTE: As we hard-coded shadow sigma and offset, we could just use the
-        // pre-calculated original rect. The detail of that calculation is below:
-        //   ```
-        //   f32 shadow_sigma = 4;
-        //   f32 shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
-        //   expanded_rect.xmin -= shadow_radius + max(0, -shadow_offset.x);
-        //   expanded_rect.xmax += shadow_radius + max(0, shadow_offset.x);
-        //   expanded_rect.ymin -= shadow_radius + max(0, -shadow_offset.y);
-        //   expanded_rect.ymax += shadow_radius + max(0, shadow_offset.y);
-        //   ```
-        expanded_rect.xmin -= 12;
-        expanded_rect.xmax += 12;
-        expanded_rect.ymin -= 12;
-        expanded_rect.ymax += 14;
+        f32 shadow_sigma = 4;
+        f32 shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
+        expanded_rect.xmin -= shadow_radius + max(0, -style.shadow_offset.x);
+        expanded_rect.xmax += shadow_radius + max(0, style.shadow_offset.x);
+        expanded_rect.ymin -= shadow_radius + max(0, -style.shadow_offset.y);
+        expanded_rect.ymax += shadow_radius + max(0, style.shadow_offset.y);
     }
 
     GlyphInfo* glyph_white = (GlyphInfo*)glyph_cache->lru_cache.values_buf;
@@ -665,7 +659,7 @@ void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position pos
 {
     f32 next_position_x = position.x;
 
-    // Get physical pixel position of y
+    /* Get physical pixel position of y */
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     f32 position_y = position.y + renderer_get_text_height_for_dpi(glyph_cache, text, font, font_size, dpi) * dpi_scale;
 
@@ -694,11 +688,11 @@ void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position pos
         RectStyle rect_style = { 0 };
         renderer_push_rect(target_rect, texture_rect, color, rect_style, clip);
 
-        // Mark this as text rendering by setting style_params[3]
+        /* Mark this as text rendering */
         Vertex* vertex = &s_vertex_cache.data[s_vertex_cache.count - 1];
-        vertex->style_params.is_text = VERTEX_IS_TEXT;
+        vertex->is_text = VERTEX_IS_TEXT;
 
-        // Update x position for next char
+        /* Update x position for next char */
         next_position_x += (f32)result.info->xadvance;
     }
 }

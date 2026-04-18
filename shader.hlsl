@@ -24,6 +24,7 @@ struct VS_Input
     float4 color : COLOR;
     float4 border_color : BORDER_COLOR;
     float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: enable_shadow, w: is_text
+    float is_text : IS_TEXT;
     int clip_index : CLIP_INDEX;
     uint vertex_id : SV_VertexID;
 };
@@ -72,35 +73,26 @@ PS_INPUT vs(VS_Input input)
 
     // Calculate original rect based shadow
     float shadow_sigma = 0;
-    float2 shadow_offset = float2(0, 0);
+    float2 shadow_offset = float2(input.style_params.z, input.style_params.w);
     float2 original_rect_half_size = target_rect_half_size;
     float2 original_rect_center = target_rect_center;
     float enable_shadow = input.style_params.z;
     if (enable_shadow)
     {
         shadow_sigma = 4;
-        shadow_offset = float2(0, 2);
+        float shadow_radius = 3.0 * shadow_sigma;
 
-        // NOTE: As we hard-coded shadow sigma and offset, we could just use the
-        // pre-calculated original rect. The detail of that calculation is below:
-        // ```
-        // float shadow_radius = 3.0 * shadow_sigma;
-        //
-        // // Calculate how much we expanded in each direction
-        // float expand_left = shadow_radius + max(0, -input.shadow_offset.x);
-        // float expand_right = shadow_radius + max(0, input.shadow_offset.x);
-        // float expand_top = shadow_radius + max(0, -input.shadow_offset.y);
-        // float expand_bottom = shadow_radius + max(0, input.shadow_offset.y);
-        //
-        // // Shrink back to original size
-        // original_rect_half_size.x -= (expand_left + expand_right) * 0.5;
-        // original_rect_half_size.y -= (expand_top + expand_bottom) * 0.5;
-        // original_rect_center.x -= input.shadow_offset.x * 0.5;
-        // original_rect_center.y -= input.shadow_offset.y * 0.5;
-        // ```
-        original_rect_half_size.x -= 12;
-        original_rect_half_size.y -= 13;
-        original_rect_center.y -= 1;
+        // Calculate how much we expanded in each direction
+        float expand_left = shadow_radius + max(0, -shadow_offset.x);
+        float expand_right = shadow_radius + max(0, shadow_offset.x);
+        float expand_top = shadow_radius + max(0, -shadow_offset.y);
+        float expand_bottom = shadow_radius + max(0, shadow_offset.y);
+
+        // Shrink back to original size
+        original_rect_half_size.x -= (expand_left + expand_right) * 0.5;
+        original_rect_half_size.y -= (expand_top + expand_bottom) * 0.5;
+        original_rect_center.x -= shadow_offset.x * 0.5;
+        original_rect_center.y -= shadow_offset.y * 0.5;
     }
 
     // Output
@@ -120,7 +112,7 @@ PS_INPUT vs(VS_Input input)
     output.border_thickness = input.style_params.y;
     output.shadow_sigma = shadow_sigma;
     output.shadow_offset = shadow_offset;
-    output.is_text = input.style_params.w;
+    output.is_text = input.is_text;
     output.clip_index = input.clip_index;
     return output;
 }

@@ -98,7 +98,7 @@ typedef struct
 {
     Color border_color;
     f32 corner_radius, border_thickness;
-    b32 enable_shadow;
+    Position shadow_offset;
 } RectStyle;
 
 //
