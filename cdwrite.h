@@ -17,6 +17,12 @@ typedef enum DWRITE_FACTORY_TYPE {
     DWRITE_FACTORY_TYPE_ISOLATED = 1,
 } DWRITE_FACTORY_TYPE;
 
+typedef enum DWRITE_FONT_SIMULATIONS {
+    DWRITE_FONT_SIMULATIONS_NONE    = 0,
+    DWRITE_FONT_SIMULATIONS_BOLD    = 1,
+    DWRITE_FONT_SIMULATIONS_OBLIQUE = 2,
+} DWRITE_FONT_SIMULATIONS;
+
 typedef enum DWRITE_FONT_WEIGHT {
     DWRITE_FONT_WEIGHT_THIN        = 100,
     DWRITE_FONT_WEIGHT_EXTRA_LIGHT = 200,
@@ -57,6 +63,34 @@ typedef enum DWRITE_FONT_STRETCH {
     DWRITE_FONT_STRETCH_ULTRA_EXPANDED  = 9,
 } DWRITE_FONT_STRETCH;
 
+typedef enum DWRITE_FONT_PROPERTY_ID {
+    DWRITE_FONT_PROPERTY_ID_NONE                             = 0,
+    DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FAMILY_NAME = 1,
+    DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FAMILY_NAME          = 2,
+    DWRITE_FONT_PROPERTY_ID_WEIGHT_STRETCH_STYLE_FACE_NAME   = 3,
+    DWRITE_FONT_PROPERTY_ID_FULL_NAME                        = 4,
+    DWRITE_FONT_PROPERTY_ID_WIN32_FAMILY_NAME                = 5,
+    DWRITE_FONT_PROPERTY_ID_POSTSCRIPT_NAME                  = 6,
+    DWRITE_FONT_PROPERTY_ID_DESIGN_SCRIPT_LANGUAGE_TAG       = 7,
+    DWRITE_FONT_PROPERTY_ID_SUPPORTED_SCRIPT_LANGUAGE_TAG    = 8,
+    DWRITE_FONT_PROPERTY_ID_SEMANTIC_TAG                     = 9,
+    DWRITE_FONT_PROPERTY_ID_WEIGHT                           = 10,
+    DWRITE_FONT_PROPERTY_ID_STRETCH                          = 11,
+    DWRITE_FONT_PROPERTY_ID_STYLE                            = 12,
+    DWRITE_FONT_PROPERTY_ID_TYPOGRAPHIC_FACE_NAME            = 13,
+    DWRITE_FONT_PROPERTY_ID_TOTAL                            = 13,
+    DWRITE_FONT_PROPERTY_ID_TOTAL_RS3                        = 14,
+    DWRITE_FONT_PROPERTY_ID_PREFERRED_FAMILY_NAME            = 2,
+    DWRITE_FONT_PROPERTY_ID_FAMILY_NAME                      = 1,
+    DWRITE_FONT_PROPERTY_ID_FACE_NAME                        = 3,
+} DWRITE_FONT_PROPERTY_ID;
+
+typedef struct DWRITE_FONT_PROPERTY {
+    DWRITE_FONT_PROPERTY_ID propertyId;
+    WCHAR*                  propertyValue;
+    WCHAR*                  localeName;
+} DWRITE_FONT_PROPERTY;
+
 typedef enum DWRITE_GRID_FIT_MODE {
     DWRITE_GRID_FIT_MODE_DEFAULT  = 0,
     DWRITE_GRID_FIT_MODE_DISABLED = 1,
@@ -88,6 +122,7 @@ typedef enum DWRITE_TEXTURE_TYPE {
 // GUID
 //
 
+DEFINE_GUID(IID_IDWriteFontFace,                 0x5f49804d, 0x7024, 0x4d43, 0xbf, 0xa9, 0xd2, 0x59, 0x84, 0xf5, 0x38, 0x49);
 DEFINE_GUID(IID_IDWriteFontFace3,                0xd37d7598, 0x09be, 0x4222, 0xa2, 0x36, 0x20, 0x81, 0x34, 0x1c, 0xc1, 0xf2);
 DEFINE_GUID(IID_IDWriteFactory,                  0xb859ee5a, 0xd838, 0x4b5b, 0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48);
 
@@ -95,12 +130,19 @@ DEFINE_GUID(IID_IDWriteFactory,                  0xb859ee5a, 0xd838, 0x4b5b, 0xa
 // struct
 //
 
-typedef struct IDWriteFactory3                 { struct { void* tbl[]; }* v; } IDWriteFactory3;
+typedef struct IDWriteFactory                  { struct { void* tbl[]; }* v; } IDWriteFactory;
+typedef struct IDWriteFactory5                 { struct { void* tbl[]; }* v; } IDWriteFactory5;
 typedef struct IDWriteFont                     { struct { void* tbl[]; }* v; } IDWriteFont;
-typedef struct IDWriteFontCollection           { struct { void* tbl[]; }* v; } IDWriteFontCollection;
+typedef struct IDWriteFontFamily               { struct { void* tbl[]; }* v; } IDWriteFontFamily;
+typedef struct IDWriteFontCollection1          { struct { void* tbl[]; }* v; } IDWriteFontCollection1;
+typedef struct IDWriteFontFileLoader           { struct { void* tbl[]; }* v; } IDWriteFontFileLoader;
+typedef struct IDWriteFontFile                 { struct { void* tbl[]; }* v; } IDWriteFontFile;
+typedef struct IDWriteFontSetBuilder1          { struct { void* tbl[]; }* v; } IDWriteFontSetBuilder1;
+typedef struct IDWriteFontSet                  { struct { void* tbl[]; }* v; } IDWriteFontSet;
 typedef struct IDWriteFontFace                 { struct { void* tbl[]; }* v; } IDWriteFontFace;
 typedef struct IDWriteFontFace3                { struct { void* tbl[]; }* v; } IDWriteFontFace3;
-typedef struct IDWriteFontFamily               { struct { void* tbl[]; }* v; } IDWriteFontFamily;
+typedef struct IDWriteInMemoryFontFileLoader   { struct { void* tbl[]; }* v; } IDWriteInMemoryFontFileLoader;
+typedef struct IDWriteGlyphRunAnalysis         { struct { void* tbl[]; }* v; } IDWriteGlyphRunAnalysis;
 
 typedef struct DWRITE_MATRIX {
     FLOAT m11;
@@ -150,8 +192,6 @@ typedef struct DWRITE_GLYPH_RUN {
     UINT32               bidiLevel;
 } DWRITE_GLYPH_RUN;
 
-typedef struct IDWriteGlyphRunAnalysis         { struct { void* tbl[]; }* v; } IDWriteGlyphRunAnalysis;
-
 //
 // function
 //
@@ -161,25 +201,39 @@ EXTERN_C HRESULT DECLSPEC_IMPORT WINAPI DWriteCreateFactory (DWRITE_FACTORY_TYPE
 #pragma warning(disable: 4068)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
-static inline HRESULT                           IDWriteFactory3_GetSystemFontCollection                      (IDWriteFactory3* this, IDWriteFontCollection** fontCollection, BOOL checkForUpdates) { return ((HRESULT (WINAPI*)(IDWriteFactory3*, IDWriteFontCollection**, BOOL))this->v->tbl[3])(this, fontCollection, checkForUpdates); }
-static inline HRESULT                           IDWriteFontCollection_FindFamilyName                         (IDWriteFontCollection* this, const WCHAR* familyName, UINT32* index, BOOL* exists) { return ((HRESULT (WINAPI*)(IDWriteFontCollection*, const WCHAR*, UINT32*, BOOL*))this->v->tbl[5])(this, familyName, index, exists); }
-static inline HRESULT                           IDWriteFontCollection_GetFontFamily                          (IDWriteFontCollection* this, UINT32 index, IDWriteFontFamily** fontFamily) { return ((HRESULT (WINAPI*)(IDWriteFontCollection*, UINT32, IDWriteFontFamily**))this->v->tbl[4])(this, index, fontFamily); }
-static inline HRESULT                           IDWriteFontFamily_GetFirstMatchingFont                       (IDWriteFontFamily* this, DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STRETCH stretch, DWRITE_FONT_STYLE style, IDWriteFont** matchingFont) { return ((HRESULT (WINAPI*)(IDWriteFontFamily*, DWRITE_FONT_WEIGHT, DWRITE_FONT_STRETCH, DWRITE_FONT_STYLE, IDWriteFont**))this->v->tbl[7])(this, weight, stretch, style, matchingFont); }
+static inline HRESULT                           IDWriteFactory5_GetSystemFontSet                             (IDWriteFactory5* this, IDWriteFontSet** fontSet) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, IDWriteFontSet**))this->v->tbl[35])(this, fontSet); }
+static inline HRESULT                           IDWriteFactory5_GetSystemFontCollection1                     (IDWriteFactory5* this, BOOL includeDownloadableFonts, IDWriteFontCollection1** fontCollection, BOOL checkForUpdates) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, BOOL, IDWriteFontCollection1**, BOOL))this->v->tbl[38])(this, includeDownloadableFonts, fontCollection, checkForUpdates); }
+static inline HRESULT                           IDWriteFactory5_CreateFontSetBuilder1                        (IDWriteFactory5* this, IDWriteFontSetBuilder1** fontSetBuilder) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, IDWriteFontSetBuilder1**))this->v->tbl[43])(this, fontSetBuilder); }
+static inline HRESULT                           IDWriteFactory5_CreateFontFileReference                      (IDWriteFactory5* this, const WCHAR* filePath, const FILETIME* lastWriteTime, IDWriteFontFile** fontFile) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, const WCHAR*, const FILETIME*, IDWriteFontFile**))this->v->tbl[7])(this, filePath, lastWriteTime, fontFile); }
+static inline HRESULT                           IDWriteFactory5_CreateFontCollectionFromFontSet              (IDWriteFactory5* this, IDWriteFontSet* fontSet, IDWriteFontCollection1** fontCollection) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, IDWriteFontSet*, IDWriteFontCollection1**))this->v->tbl[37])(this, fontSet, fontCollection); }
+static inline HRESULT                           IDWriteFactory5_CreateInMemoryFontFileLoader                 (IDWriteFactory5* this, IDWriteInMemoryFontFileLoader** newLoader) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, IDWriteInMemoryFontFileLoader**))this->v->tbl[44])(this, newLoader); }
+static inline HRESULT                           IDWriteFactory5_CreateGlyphRunAnalysis2                      (IDWriteFactory5* this, const DWRITE_GLYPH_RUN* glyphRun, const DWRITE_MATRIX* transform, DWRITE_RENDERING_MODE1 renderingMode, DWRITE_MEASURING_MODE measuringMode, DWRITE_GRID_FIT_MODE gridFitMode, DWRITE_TEXT_ANTIALIAS_MODE antialiasMode, FLOAT baselineOriginX, FLOAT baselineOriginY, IDWriteGlyphRunAnalysis** glyphRunAnalysis) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, const DWRITE_GLYPH_RUN*, const DWRITE_MATRIX*, DWRITE_RENDERING_MODE1, DWRITE_MEASURING_MODE, DWRITE_GRID_FIT_MODE, DWRITE_TEXT_ANTIALIAS_MODE, FLOAT, FLOAT, IDWriteGlyphRunAnalysis**))this->v->tbl[31])(this, glyphRun, transform, renderingMode, measuringMode, gridFitMode, antialiasMode, baselineOriginX, baselineOriginY, glyphRunAnalysis); }
+static inline HRESULT                           IDWriteFactory5_RegisterFontFileLoader                       (IDWriteFactory5* this, IDWriteFontFileLoader* fontFileLoader) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, IDWriteFontFileLoader*))this->v->tbl[13])(this, fontFileLoader); }
+static inline HRESULT                           IDWriteFactory5_UnregisterFontFileLoader                     (IDWriteFactory5* this, IDWriteFontFileLoader* fontFileLoader) { return ((HRESULT (WINAPI*)(IDWriteFactory5*, IDWriteFontFileLoader*))this->v->tbl[14])(this, fontFileLoader); }
+static inline UINT32                            IDWriteFactory5_Release                                      (IDWriteFactory5* this) { return ((UINT32 (WINAPI*)(IDWriteFactory5*))this->v->tbl[2])(this); }
+static inline UINT32                            IDWriteFont_Release                                          (IDWriteFont* this) { return ((UINT32 (WINAPI*)(IDWriteFont*))this->v->tbl[2])(this); }
 static inline HRESULT                           IDWriteFont_CreateFontFace                                   (IDWriteFont* this, IDWriteFontFace** fontFace) { return ((HRESULT (WINAPI*)(IDWriteFont*, IDWriteFontFace**))this->v->tbl[13])(this, fontFace); }
+static inline HRESULT                           IDWriteFontCollection1_FindFamilyName                        (IDWriteFontCollection1* this, const WCHAR* familyName, UINT32* index, BOOL* exists) { return ((HRESULT (WINAPI*)(IDWriteFontCollection1*, const WCHAR*, UINT32*, BOOL*))this->v->tbl[5])(this, familyName, index, exists); }
+static inline HRESULT                           IDWriteFontCollection1_GetFontFamily                         (IDWriteFontCollection1* this, UINT32 index, IDWriteFontFamily** fontFamily) { return ((HRESULT (WINAPI*)(IDWriteFontCollection1*, UINT32, IDWriteFontFamily**))this->v->tbl[4])(this, index, fontFamily); }
+static inline UINT32                            IDWriteFontCollection1_Release                               (IDWriteFontCollection1* this) { return ((UINT32 (WINAPI*)(IDWriteFontCollection1*))this->v->tbl[2])(this); }
+static inline HRESULT                           IDWriteFontFamily_GetFirstMatchingFont                       (IDWriteFontFamily* this, DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STRETCH stretch, DWRITE_FONT_STYLE style, IDWriteFont** matchingFont) { return ((HRESULT (WINAPI*)(IDWriteFontFamily*, DWRITE_FONT_WEIGHT, DWRITE_FONT_STRETCH, DWRITE_FONT_STYLE, IDWriteFont**))this->v->tbl[7])(this, weight, stretch, style, matchingFont); }
+static inline UINT32                            IDWriteFontFamily_Release                                    (IDWriteFontFamily* this) { return ((UINT32 (WINAPI*)(IDWriteFontFamily*))this->v->tbl[2])(this); }
+static inline UINT32                            IDWriteFontSet_Release                                       (IDWriteFontSet* this) { return ((UINT32 (WINAPI*)(IDWriteFontSet*))this->v->tbl[2])(this); }
+static inline HRESULT                           IDWriteFontSetBuilder1_CreateFontSet                         (IDWriteFontSetBuilder1* this, IDWriteFontSet** fontSet) { return ((HRESULT (WINAPI*)(IDWriteFontSetBuilder1*, IDWriteFontSet**))this->v->tbl[6])(this, fontSet); }
+static inline HRESULT                           IDWriteFontSetBuilder1_AddFontFile                           (IDWriteFontSetBuilder1* this, IDWriteFontFile* fontFile) { return ((HRESULT (WINAPI*)(IDWriteFontSetBuilder1*, IDWriteFontFile*))this->v->tbl[7])(this, fontFile); }
+static inline UINT32                            IDWriteFontSetBuilder1_Release                               (IDWriteFontSetBuilder1* this) { return ((UINT32 (WINAPI*)(IDWriteFontSetBuilder1*))this->v->tbl[2])(this); }
+static inline UINT32                            IDWriteFontFile_Release                                      (IDWriteFontFile* this) { return ((UINT32 (WINAPI*)(IDWriteFontFile*))this->v->tbl[2])(this); }
 static inline HRESULT                           IDWriteFontFace_QueryInterface                               (IDWriteFontFace* this, const GUID* riid, void** ppvObject) { return ((HRESULT (WINAPI*)(IDWriteFontFace*, const GUID*, void**))this->v->tbl[0])(this, riid, ppvObject); }
-static inline HRESULT                           IDWriteFontFace_GetGlyphIndices                              (IDWriteFontFace* this, const UINT32* codePoints, UINT32 codePointCount, UINT16* glyphIndices) { return ((HRESULT (WINAPI*)(IDWriteFontFace*, const UINT32*, UINT32, UINT16*))this->v->tbl[11])(this, codePoints, codePointCount, glyphIndices); }
-static inline void                              IDWriteFontFace_GetMetrics                                   (IDWriteFontFace* this, DWRITE_FONT_METRICS* fontFaceMetrics) { ((void (WINAPI*)(IDWriteFontFace*, DWRITE_FONT_METRICS*))this->v->tbl[8])(this, fontFaceMetrics); }
+static inline UINT32                            IDWriteFontFace_Release                                      (IDWriteFontFace* this) { return ((UINT32 (WINAPI*)(IDWriteFontFace*))this->v->tbl[2])(this); }
+static inline HRESULT                           IDWriteFontFace3_QueryInterface                              (IDWriteFontFace3* this, const GUID* riid, void** ppvObject) { return ((HRESULT (WINAPI*)(IDWriteFontFace3*, const GUID*, void**))this->v->tbl[0])(this, riid, ppvObject); }
+static inline HRESULT                           IDWriteFontFace3_GetGlyphIndices                             (IDWriteFontFace3* this, const UINT32* codePoints, UINT32 codePointCount, UINT16* glyphIndices) { return ((HRESULT (WINAPI*)(IDWriteFontFace3*, const UINT32*, UINT32, UINT16*))this->v->tbl[11])(this, codePoints, codePointCount, glyphIndices); }
+static inline void                              IDWriteFontFace3_GetMetrics                                  (IDWriteFontFace3* this, DWRITE_FONT_METRICS* fontFaceMetrics) { ((void (WINAPI*)(IDWriteFontFace3*, DWRITE_FONT_METRICS*))this->v->tbl[8])(this, fontFaceMetrics); }
 static inline HRESULT                           IDWriteFontFace3_GetDesignGlyphMetrics                       (IDWriteFontFace3* this, const UINT16* glyphIndices, UINT32 glyphCount, DWRITE_GLYPH_METRICS* glyphMetrics, BOOL isSideways) { return ((HRESULT (WINAPI*)(IDWriteFontFace3*, const UINT16*, UINT32, DWRITE_GLYPH_METRICS*, BOOL))this->v->tbl[10])(this, glyphIndices, glyphCount, glyphMetrics, isSideways); }
-static inline HRESULT                           IDWriteFactory3_CreateGlyphRunAnalysis2                      (IDWriteFactory3* this, const DWRITE_GLYPH_RUN* glyphRun, const DWRITE_MATRIX* transform, DWRITE_RENDERING_MODE1 renderingMode, DWRITE_MEASURING_MODE measuringMode, DWRITE_GRID_FIT_MODE gridFitMode, DWRITE_TEXT_ANTIALIAS_MODE antialiasMode, FLOAT baselineOriginX, FLOAT baselineOriginY, IDWriteGlyphRunAnalysis** glyphRunAnalysis) { return ((HRESULT (WINAPI*)(IDWriteFactory3*, const DWRITE_GLYPH_RUN*, const DWRITE_MATRIX*, DWRITE_RENDERING_MODE1, DWRITE_MEASURING_MODE, DWRITE_GRID_FIT_MODE, DWRITE_TEXT_ANTIALIAS_MODE, FLOAT, FLOAT, IDWriteGlyphRunAnalysis**))this->v->tbl[31])(this, glyphRun, transform, renderingMode, measuringMode, gridFitMode, antialiasMode, baselineOriginX, baselineOriginY, glyphRunAnalysis); }
+static inline UINT32                            IDWriteFontFace3_Release                                     (IDWriteFontFace3* this) { return ((UINT32 (WINAPI*)(IDWriteFontFace3*))this->v->tbl[2])(this); }
+static inline HRESULT                           IDWriteInMemoryFontFileLoader_CreateInMemoryFontFileReference(IDWriteInMemoryFontFileLoader* this, IDWriteFactory* factory, const void* fontData, UINT32 fontDataSize, IUnknown* ownerObject, IDWriteFontFile** fontFile) { return ((HRESULT (WINAPI*)(IDWriteInMemoryFontFileLoader*, IDWriteFactory*, const void*, UINT32, IUnknown*, IDWriteFontFile**))this->v->tbl[4])(this, factory, fontData, fontDataSize, ownerObject, fontFile); }
+static inline UINT32                            IDWriteInMemoryFontFileLoader_Release                        (IDWriteInMemoryFontFileLoader* this) { return ((UINT32 (WINAPI*)(IDWriteInMemoryFontFileLoader*))this->v->tbl[2])(this); }
 static inline HRESULT                           IDWriteGlyphRunAnalysis_GetAlphaTextureBounds                (IDWriteGlyphRunAnalysis* this, DWRITE_TEXTURE_TYPE textureType, RECT* textureBounds) { return ((HRESULT (WINAPI*)(IDWriteGlyphRunAnalysis*, DWRITE_TEXTURE_TYPE, RECT*))this->v->tbl[3])(this, textureType, textureBounds); }
 static inline HRESULT                           IDWriteGlyphRunAnalysis_CreateAlphaTexture                   (IDWriteGlyphRunAnalysis* this, DWRITE_TEXTURE_TYPE textureType, const RECT* textureBounds, UINT8* alphaValues, UINT32 bufferSize) { return ((HRESULT (WINAPI*)(IDWriteGlyphRunAnalysis*, DWRITE_TEXTURE_TYPE, const RECT*, UINT8*, UINT32))this->v->tbl[4])(this, textureType, textureBounds, alphaValues, bufferSize); }
-
-static inline UINT32                            IDWriteFactory3_Release                                      (IDWriteFactory3* this) { return ((UINT32 (WINAPI*)(IDWriteFactory3*))this->v->tbl[2])(this); }
-static inline UINT32                            IDWriteFontCollection_Release                                (IDWriteFontCollection* this) { return ((UINT32 (WINAPI*)(IDWriteFontCollection*))this->v->tbl[2])(this); }
-static inline UINT32                            IDWriteFontFamily_Release                                    (IDWriteFontFamily* this) { return ((UINT32 (WINAPI*)(IDWriteFontFamily*))this->v->tbl[2])(this); }
-static inline UINT32                            IDWriteFont_Release                                          (IDWriteFont* this) { return ((UINT32 (WINAPI*)(IDWriteFont*))this->v->tbl[2])(this); }
-static inline UINT32                            IDWriteFontFace3_Release                                     (IDWriteFontFace3* this) { return ((UINT32 (WINAPI*)(IDWriteFontFace3*))this->v->tbl[2])(this); }
-static inline UINT32                            IDWriteFontFace_Release                                      (IDWriteFontFace* this) { return ((UINT32 (WINAPI*)(IDWriteFontFace*))this->v->tbl[2])(this); }
 static inline UINT32                            IDWriteGlyphRunAnalysis_Release                              (IDWriteGlyphRunAnalysis* this) { return ((UINT32 (WINAPI*)(IDWriteGlyphRunAnalysis*))this->v->tbl[2])(this); }
 #pragma clang diagnostic pop
 

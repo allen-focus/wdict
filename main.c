@@ -21,6 +21,7 @@ typedef enum
     FONT_INDEX_UI,
     FONT_INDEX_ZH,
     FONT_INDEX_MONO,
+    FONT_INDEX_ICON,
     FONT_CAPACITY
 } FontIndex;
 
@@ -31,7 +32,7 @@ typedef struct
     HWND window;
     wchar_t title[MAX_TITLE_LENGTH];
     UIContext ui;
-    IDWriteFactory3* dwrite_factory;
+    DWriteContext dwrite;
     Font fonts[FONT_CAPACITY];
 } AppContext;
 
@@ -86,8 +87,9 @@ static void process_frame(AppContext* app_context)
 {
 
     UIContext* ui_context = &app_context->ui;
-    Font font_zh = app_context->fonts[FONT_INDEX_ZH];
-    Font font_ui = app_context->fonts[FONT_INDEX_UI];
+    Font* font_zh = &app_context->fonts[FONT_INDEX_ZH];
+    Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
+    Font* font_symbol = &app_context->fonts[FONT_INDEX_ICON];
 
     TracyCZone(ctx, 1);
     isize arena_pos_backup = ui_begin_frame(ui_context);
@@ -117,6 +119,8 @@ static void process_frame(AppContext* app_context)
                              .direction = LAYOUT_TOP_TO_BOTTOM })
                     {
                         // clang-format off
+
+                        /* button 1 */
                         ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = s_child_gap_small })
                         {
                             UISignalFlags flags = ui_button(str("hello##world"), font_zh, 
@@ -128,12 +132,18 @@ static void process_frame(AppContext* app_context)
                                 set_app_title(app_context, str("Left Click"));
                             if (ui_rclicked(flags))
                                 set_app_title(app_context, str("Right Click"));
+
                         }
 
+                        /* button 2 */
+                        ui_button(str("hello##world2"), font_mono, (Sizing){ fit_grow({ .max = 70 }), fit({}) },
+                                  s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
+
+                        /* switch box */
                         static b32 check = False;
                         UISignalFlags flags = ui_switchbox(
                             str("good##bye"),
-                            font_ui,
+                            font_symbol,
                             &check,
                             (Color){ 200, 200, 200, 255 },
                             s_white,
@@ -239,7 +249,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ui_context->dpi = GetDpiForWindow(window);
             glyph_cache_deinit(&ui_context->glyph_cache);
-            glyph_cache_init(&ui_context->glyph_cache, GLYPHS_LENGTH, app_context->dwrite_factory);
+            glyph_cache_init(&app_context->dwrite, &ui_context->glyph_cache, GLYPHS_LENGTH);
             renderer_recreate_glyph_atlas_texture(&ui_context->glyph_cache.atlas);
 
             // Set new window
@@ -286,11 +296,17 @@ i32 WinMainCRTStartup()
         .draw_rect = renderer_draw_rect,
         .draw_text = renderer_draw_text,
     };
-    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (void**)&app_context.dwrite_factory);
-    font_register(&app_context.fonts[FONT_INDEX_UI], app_context.dwrite_factory, L"Segoe UI Symbol");
-    font_register(&app_context.fonts[FONT_INDEX_ZH], app_context.dwrite_factory, L"Microsoft YaHei");
-    font_register(&app_context.fonts[FONT_INDEX_MONO], app_context.dwrite_factory, L"Consolas");
-    ui_init(&app_context.ui, CLIENT_WIDTH, CLIENT_HEIGHT, GetDpiForSystem(), app_context.dwrite_factory, render_fn);
+
+    dwrite_init(&app_context.dwrite);
+    font_register_from_system(&app_context.dwrite, L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                              &app_context.fonts[FONT_INDEX_UI]);
+    font_register_from_system(&app_context.dwrite, L"Microsoft YaHei", DWRITE_FONT_WEIGHT_NORMAL,
+                              DWRITE_FONT_STYLE_NORMAL, &app_context.fonts[FONT_INDEX_ZH]);
+    font_register_from_system(&app_context.dwrite, L"Consolas", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                              &app_context.fonts[FONT_INDEX_MONO]);
+    font_register_from_resource(&app_context.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                &app_context.fonts[FONT_INDEX_ICON]);
+    ui_init(&app_context.dwrite, &app_context.ui, CLIENT_WIDTH, CLIENT_HEIGHT, GetDpiForSystem(), render_fn);
 
     /* Create window */
     RECT rect = get_screen_center_rect(app_context.ui.client_width, app_context.ui.client_height, app_context.ui.dpi);
@@ -336,7 +352,8 @@ i32 WinMainCRTStartup()
     font_unregister(&app_context.fonts[FONT_INDEX_UI]);
     font_unregister(&app_context.fonts[FONT_INDEX_ZH]);
     font_unregister(&app_context.fonts[FONT_INDEX_MONO]);
-    IDWriteFactory3_Release(app_context.dwrite_factory);
+    font_unregister(&app_context.fonts[FONT_INDEX_ICON]);
+    dwrite_deinit(&app_context.dwrite);
 
     return 0;
 }

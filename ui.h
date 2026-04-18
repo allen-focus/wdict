@@ -35,6 +35,9 @@
 #define COMMAND_QUEUE_CAPACITY 4096
 #define HASH_STR_MAX_LENGTH    128
 
+#define ICON_FONT_UTF8_OK     "\xEE\xA0\x80"
+#define ICON_FONT_UTF8_CANCEL "\xEE\xA0\x81"
+
 ///
 
 typedef enum
@@ -80,7 +83,7 @@ typedef struct
 typedef struct
 {
     UICommandBase base;
-    Font font;
+    const Font* font;
     f32 font_size;
     String content;
     Color color;
@@ -175,7 +178,7 @@ typedef struct
 
 typedef struct
 {
-    Font font;
+    const Font* font;
     f32 font_size;
     Color color;
     f32 line_height;
@@ -197,7 +200,7 @@ typedef struct
 
 typedef struct
 {
-    Font font;
+    const Font* font;
     f32 font_size;
     String content;
     Color color;
@@ -259,14 +262,14 @@ struct UIBox
 typedef void (*flush_and_present_fn)(const u32 client_width, const u32 client_height);
 typedef void (*on_resize_fn)(const u32 client_width, const u32 client_height);
 typedef void (*wait_for_last_submitted_frame_fn)();
-typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
+typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font* font, const f32 font_size,
                                  const u32 dpi);
-typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
+typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font* font, const f32 font_size,
                                   const u32 dpi);
 typedef void (*draw_rect_fn)(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style,
                              const Rect* clip);
 typedef void (*draw_text_fn)(GlyphCache* glyph_cache, String text, const Position position, const Color color,
-                             const Font font, const f32 font_size, const u32 dpi, const Rect* clip);
+                             const Font* font, const f32 font_size, const u32 dpi, const Rect* clip);
 
 // NOTE:
 //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
@@ -351,7 +354,7 @@ extern UIContext* g_ui_context;
 
 ///
 
-void ui_init(UIContext* ui_context, u32 width, u32 height, u32 dpi, IDWriteFactory3* dwrite_factory,
+void ui_init(const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi,
              UIRenderFunc render_fn);
 
 void ui_reset();
@@ -362,9 +365,9 @@ UIBox* ui_text(const String text, const TextConfig* text_config);
 isize ui_begin_frame(UIContext* ui_context);
 void ui_end_frame(isize arena_pos_backup);
 
-UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing, const Color bg_color,
+UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const Sizing sizing, const Color bg_color,
                         const Color text_color, const Color bg_color_hover, const Color bg_color_press);
-UISignalFlags ui_switchbox(const String text_with_hash_str, const Font font, b32* check, const Color bg_color,
+UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color bg_color_active);
 
 ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);

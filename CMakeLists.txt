@@ -130,6 +130,31 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
 endif()
 
 #
+# Resource
+#
+
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc")
+    set(RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources")
+    set(RC_OUTPUT "${RESOURCE_DIR}/resource.res")
+    set(RESOURCE_STAMP "${RESOURCE_DIR}/resource_compile.stamp")
+
+    add_custom_command(
+        OUTPUT "${RC_OUTPUT}" "${RESOURCE_STAMP}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RESOURCE_DIR}"
+        COMMAND rc /nologo /fo "${RC_OUTPUT}" "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc"
+        COMMAND ${CMAKE_COMMAND} -E touch "${RESOURCE_STAMP}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc"
+        COMMENT "Compiling resource file"
+        VERBATIM
+    )
+
+    add_custom_target(resource_compile DEPENDS "${RESOURCE_STAMP}")
+    add_dependencies(${PROJECT_NAME} resource_compile)
+
+    target_link_options(${PROJECT_NAME} PRIVATE "${RC_OUTPUT}")
+endif()
+
+#
 # Output directory  (mirrors the original build/ layout)
 #
 

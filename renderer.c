@@ -575,12 +575,12 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
 // text width & height
 //
 
-static void renderer_update_glyph(GlyphCache* glyph_cache, GlyphInfo* glyph_info, const Font font, const f32 font_size,
+static void renderer_update_glyph(GlyphCache* glyph_cache, GlyphInfo* glyph_info, const Font* font, const f32 font_size,
                                   const u32 codepoint, const u32 dpi)
 {
     GlyphAtlas* atlas = &glyph_cache->atlas;
     u8* glyph_bitmap =
-        glyph_rasterize(&glyph_cache->arena, glyph_cache->dwrite_factory, glyph_info, codepoint, font, font_size, dpi);
+        glyph_rasterize(glyph_cache->dwrite, &glyph_cache->arena, glyph_info, codepoint, font, font_size, dpi);
     if (codepoint != ' ')
     {
         atlas_insert_glyph(atlas, glyph_info, glyph_bitmap);
@@ -588,7 +588,7 @@ static void renderer_update_glyph(GlyphCache* glyph_cache, GlyphInfo* glyph_info
     }
 }
 
-f32 renderer_get_text_width_for_dpi(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
+f32 renderer_get_text_width_for_dpi(GlyphCache* glyph_cache, const String text, const Font* font, const f32 font_size,
                                     const u32 dpi)
 {
     f32 text_width = 0;
@@ -610,7 +610,7 @@ f32 renderer_get_text_width_for_dpi(GlyphCache* glyph_cache, const String text, 
 
 // TODO: Future support for multiple fonts per line is planned. This will require calculating text height
 // based on varying font line spaces rather than relying on a single font's line space.
-f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text, const Font font, const f32 font_size,
+f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text, const Font* font, const f32 font_size,
                                      const u32 dpi)
 {
     u32 codepoint = 0;
@@ -655,7 +655,7 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
 }
 
 void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position position, const Color color,
-                        const Font font, const f32 font_size, const u32 dpi, const Rect* clip)
+                        const Font* font, const f32 font_size, const u32 dpi, const Rect* clip)
 {
     f32 next_position_x = position.x;
 

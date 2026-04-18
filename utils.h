@@ -70,6 +70,7 @@ typedef int32_t       b32; // bool
 #endif
 
 #define clamp(x, a, b) min(max(a, x), b)
+#define countof(a) (sizeof(a) / sizeof(*(a)))
 
 // clang-format off
 #define Queue(type, size) struct { type items[size]; isize count; }

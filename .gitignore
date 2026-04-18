@@ -1,5 +1,6 @@
 /build/
 /shaders/
+/resources/
 
 /.cache/
 /compile_commands.json

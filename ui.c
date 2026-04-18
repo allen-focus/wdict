@@ -50,11 +50,10 @@ static void box_cache_deinit(UIBoxCache* box_cache)
     memset(box_cache, 0, sizeof(*box_cache));
 }
 
-void ui_init(UIContext* ui_context, u32 width, u32 height, u32 dpi, IDWriteFactory3* dwrite_factory,
-             UIRenderFunc render_fn)
+void ui_init(const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi, UIRenderFunc render_fn)
 {
     ui_context->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
-    glyph_cache_init(&ui_context->glyph_cache, GLYPHS_LENGTH, dwrite_factory);
+    glyph_cache_init(dwrite, &ui_context->glyph_cache, GLYPHS_LENGTH);
     box_cache_init(&ui_context->box_cache);
     ui_context->client_width = width;
     ui_context->client_height = height;
@@ -226,10 +225,9 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
     {
         text_box->type = BOX_TYPE_TEXT;
 
-        Assert(text_config->font.face && text_config->font.face3);
+        Assert(text_config->font->face3);
         Assert(text_config->font_size);
-        text_box->data.text.font.face = text_config->font.face;
-        text_box->data.text.font.face3 = text_config->font.face3;
+        text_box->data.text.font = text_config->font;
         text_box->data.text.font_size = text_config->font_size;
 
         text_box->data.text.content = text;
@@ -639,7 +637,7 @@ static void perform_text_wrapping(UIBox* text_box)
     GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
     get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
 
-    Font font = text_box->data.text.font;
+    const Font* font = text_box->data.text.font;
     f32 font_size = text_box->data.text.font_size;
     String text = text_box->data.text.content;
     f32 max_width = text_box->size.width;
@@ -804,8 +802,7 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 
                 cmd->text.base.type  = UI_COMMAND_TEXT;
                 cmd->text.base.size  = sizeof(UICommandText);
-                cmd->text.font.face  = text->font.face;
-                cmd->text.font.face3 = text->font.face3;
+                cmd->text.font       = text->font;
                 cmd->text.font_size  = text->font_size;
                 cmd->text.content    = text->wrapped_lines.len ? *(text->wrapped_lines.data + i) : text->content;
                 cmd->text.color      = text->color;
@@ -996,7 +993,7 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
     }
 }
 
-UISignalFlags ui_button(const String text_with_hash_str, const Font font, const Sizing sizing, const Color bg_color,
+UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const Sizing sizing, const Color bg_color,
                         const Color text_color, const Color bg_color_hover, const Color bg_color_press)
 {
     Color bg_color_final = bg_color;
@@ -1051,7 +1048,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font font, const 
     return flags;
 }
 
-UISignalFlags ui_switchbox(const String text_with_hash_str, const Font font, b32* check, const Color bg_color,
+UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color bg_color_active)
 {
     Color bg_color_final = bg_color;
@@ -1098,7 +1095,7 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font font, b32
         UIBox* pad_left = ui_box_start(
             &(BoxConfig){ .sizing = { fixed(pad_width), grow({}) }, .alignment = { ALIGN_START, ALIGN_CENTER } });
         ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(5), grow({}) } }));
-        ui_text(str("✓"), &(TextConfig){ .font = font, .font_size = 9, .color = status_color_ok });
+        ui_text(str(ICON_FONT_UTF8_OK), &(TextConfig){ .font = font, .font_size = 9, .color = status_color_ok });
         ui_box_end(pad_left);
 
         /* switch button */
@@ -1111,7 +1108,8 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font font, b32
         /* right padding */
         UIBox* pad_right = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },
                                                       .alignment = { ALIGN_END, ALIGN_CENTER } });
-        ui_text(str("✗"), &(TextConfig){ .font = font, .font_size = 9, .color = status_color_cancel });
+        ui_text(str(ICON_FONT_UTF8_CANCEL),
+                &(TextConfig){ .font = font, .font_size = 9, .color = status_color_cancel });
         ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(6), grow({}) } }));
         ui_box_end(pad_right);
     }

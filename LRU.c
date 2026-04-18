@@ -83,7 +83,7 @@ void lru_cache_remove_entry(LRUCache* lru_cache, u32 entry_index)
     Entry* sentinel = &lru_cache->entries[0];
     Entry* selected_entry = &lru_cache->entries[entry_index];
 
-    // Unlink the selected entry from the hash chain by updating its predecessor's `next_with_same_hash`
+    /* Unlink the selected entry from the hash chain by updating its predecessor's `next_with_same_hash` */
     u32* prev_hash_chain_entry_index = &lru_cache->hash_chain_heads[selected_entry->hash_chain_head_index];
     while (*prev_hash_chain_entry_index != entry_index)
     {
@@ -92,13 +92,13 @@ void lru_cache_remove_entry(LRUCache* lru_cache, u32 entry_index)
     }
     *prev_hash_chain_entry_index = selected_entry->next_with_same_hash;
 
-    // Update near entries of the entry linked list
+    /* Update near entries of the entry linked list */
     lru_cache->entries[selected_entry->lru_prev].lru_next = selected_entry->lru_next;
     lru_cache->entries[selected_entry->lru_next].lru_prev = selected_entry->lru_prev;
     selected_entry->lru_prev = 0;
     selected_entry->lru_next = 0;
 
-    // Update free entry hash chain
+    /* Update free entry hash chain */
     u32 next_free_entry_index = sentinel->next_with_same_hash;
     sentinel->next_with_same_hash = entry_index;
     selected_entry->next_with_same_hash = next_free_entry_index;
@@ -107,7 +107,7 @@ void lru_cache_remove_entry(LRUCache* lru_cache, u32 entry_index)
 
 u32 lru_cache_pop_lru_entry(LRUCache* lru_cache)
 {
-    // LRU entry is the tail entry of the entry linked list
+    /* LRU entry is the tail entry of the entry linked list */
     Entry* sentinel = &lru_cache->entries[0];
     u32 lru_entry_index = sentinel->lru_prev;
     Assert(lru_entry_index);
@@ -198,7 +198,7 @@ LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const voi
     u32 entry_index = *hash_chain_head;
     Entry* entry = NULL;
 
-    // Check whether the entry exists
+    /* Check whether the entry exists */
     result.signal = LRU_SIGNAL_TOINSERT;
     while (entry_index)
     {
@@ -214,7 +214,7 @@ LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const voi
 
     if (result.signal == LRU_SIGNAL_FOUND)
     {
-        // Found an existing entry, deattach from the entry linked list as a prepare
+        /* Found an existing entry, deattach from the entry linked list as a prepare */
         Entry* prev_entry = &lru_cache->entries[entry->lru_prev];
         Entry* next_entry = &lru_cache->entries[entry->lru_next];
         prev_entry->lru_next = entry->lru_next;
@@ -224,7 +224,7 @@ LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const voi
     }
     else
     {
-        // If the cache is full, pop one; else insert one to next empty entry slot
+        /* If the cache is full, pop one; else insert one to next empty entry slot */
         if (sentinel->next_with_same_hash == 0)
         {
             result.signal = LRU_SIGNAL_TOEVICT;
@@ -238,12 +238,12 @@ LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const voi
         entry = &lru_cache->entries[entry_index];
         sentinel->next_with_same_hash = entry->next_with_same_hash;
 
-        // Assign value
+        /* Assign value */
         void* entry_key = (byte*)lru_cache->keys_buf + entry_index * lru_cache->key_size;
         memcpy(entry_key, key, lru_cache->key_size);
         entry->hash_chain_head_index = hash_chain_head_index;
 
-        // Insert the new entry at the head of the hash chain
+        /* Insert the new entry at the head of the hash chain */
         entry->next_with_same_hash = *hash_chain_head;
         *hash_chain_head = entry_index;
 
@@ -251,7 +251,7 @@ LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const voi
     }
     result.index = entry_index;
 
-    // Insert the entry at the front of the entry linked list
+    /* Insert the entry at the front of the entry linked list */
     entry->lru_prev = 0;
     entry->lru_next = sentinel->lru_next;
     lru_cache->entries[sentinel->lru_next].lru_prev = entry_index;
