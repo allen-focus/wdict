@@ -218,10 +218,10 @@ typedef struct
 
 typedef enum
 {
-    ANIMATION_IDLE,
-    ANIMATION_FORWARD,
-    ANIMATION_REVERSE,
-} AnimationState;
+    TRANSITION_IDLE,
+    TRANSITION_FORWARD,
+    TRANSITION_REVERSE,
+} TransitionState;
 
 // tween: in-between
 typedef struct
@@ -254,14 +254,21 @@ struct UIBox
     /* cached data */
     BoxKey key;
     u64 last_frame_index;
+    f64 idle_timer;
 
     Position position;
     Size size;
     Position scroll_delta;
 
-    f32 hover_t; // `t` is transition, range: [0, 1]
-    f32 press_t;
-    AnimationState anim_state;
+    // NOTE:
+    //   `_t` stands for transition value, ranging from [0, 1].
+    //   The terms "hot" and "active" are context-dependent. For example:
+    //     - Button: "hot" means hover, "active" means click.
+    //     - Scroll Area: "hot" means nothing, whereas "active" means
+    //       the mouse is moving continuously across frames.
+    f32 hot_t;
+    f32 active_t;
+    TransitionState anim_state;
     TweenAnimation scroll_anim_x;
     TweenAnimation scroll_anim_y;
 };
@@ -318,9 +325,10 @@ typedef struct
 
     /* interaction */
     Position mouse_pos;
+    Position mouse_delta;
+    Position mouse_scroll_delta;
     b32 mouse_lclick;
     b32 mouse_rclick;
-    Position mouse_delta;
 
     /* ui */
     UIBox* root;

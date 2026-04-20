@@ -864,6 +864,7 @@ void ui_end_frame(isize arena_pos_backup)
     ui_reset();
     box_cache_remove_unused();
     g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
+    g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
     g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
@@ -992,7 +993,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                         const Color bg_color, const Color text_color, const Color bg_color_hover,
                         const Color bg_color_press)
 {
-    /* Animation-related variables */
+    /* Transition-related variables */
     Color bg_color_final = bg_color;
 
     /* Get last button from cache */
@@ -1006,28 +1007,28 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
         UIBox* last_box = result.box;
         update_interaction_flags(last_box, &flags);
 
-        /* Animation */
+        /* Transition */
         if (ui_hovered(flags))
             bg_color_final = bg_color_hover;
-        if (ui_clicked(flags) || (last_box->press_t > 0))
+        if (ui_clicked(flags) || (last_box->active_t > 0))
         {
             if (ui_clicked(flags))
             {
-                last_box->press_t = 0.f;
-                last_box->anim_state = ANIMATION_FORWARD;
+                last_box->active_t = 0.f;
+                last_box->anim_state = TRANSITION_FORWARD;
             }
-            if (last_box->anim_state == ANIMATION_IDLE || last_box->anim_state == ANIMATION_FORWARD)
+            if (last_box->anim_state == TRANSITION_IDLE || last_box->anim_state == TRANSITION_FORWARD)
             {
-                if (update_transition(&last_box->press_t, 30.f, False))
-                    last_box->anim_state = ANIMATION_REVERSE;
+                if (update_transition(&last_box->active_t, 30.f, False))
+                    last_box->anim_state = TRANSITION_REVERSE;
             }
             else
             {
-                if (update_transition(&last_box->press_t, 24.f, True))
-                    last_box->anim_state = ANIMATION_IDLE;
+                if (update_transition(&last_box->active_t, 24.f, True))
+                    last_box->anim_state = TRANSITION_IDLE;
             }
             bg_color_final =
-                lerp_color(ui_hovered(flags) ? bg_color_hover : bg_color, bg_color_press, last_box->press_t);
+                lerp_color(ui_hovered(flags) ? bg_color_hover : bg_color, bg_color_press, last_box->active_t);
         }
     }
 
@@ -1048,7 +1049,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
 UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color bg_color_active)
 {
-    /* Animation-related variables */
+    /* Transition-related variables */
     Color bg_color_final = bg_color;
     Color status_color_ok = switch_button_color;
     Color status_color_cancel = switch_button_color;
@@ -1066,20 +1067,21 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
         UIBox* last_container = result.box;
         update_interaction_flags(last_container, &flags);
 
-        /* Animation */
-        if (ui_lclicked(flags) || (last_container->press_t > 0))
+        /* Transition */
+        if (ui_lclicked(flags) || (last_container->active_t > 0))
         {
             if (ui_lclicked(flags))
-                last_container->anim_state = *check ? ANIMATION_REVERSE : ANIMATION_FORWARD;
-            if (last_container->anim_state != ANIMATION_IDLE)
-                if (update_transition(&last_container->press_t, 18.f, last_container->anim_state == ANIMATION_REVERSE))
-                    last_container->anim_state = ANIMATION_IDLE;
+                last_container->anim_state = *check ? TRANSITION_REVERSE : TRANSITION_FORWARD;
+            if (last_container->anim_state != TRANSITION_IDLE)
+                if (update_transition(&last_container->active_t, 18.f,
+                                      last_container->anim_state == TRANSITION_REVERSE))
+                    last_container->anim_state = TRANSITION_IDLE;
         }
-        bg_color_final = lerp_color(bg_color, bg_color_active, last_container->press_t);
-        status_color_ok.a = lerp_u8(0, 255, last_container->press_t);
-        status_color_cancel.a = lerp_u8(255, 0, last_container->press_t);
-        pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, last_container->press_t);
-        shadow_offset_x = lerp_f32(1.f, -2.f, last_container->press_t);
+        bg_color_final = lerp_color(bg_color, bg_color_active, last_container->active_t);
+        status_color_ok.a = lerp_u8(0, 255, last_container->active_t);
+        status_color_cancel.a = lerp_u8(255, 0, last_container->active_t);
+        pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, last_container->active_t);
+        shadow_offset_x = lerp_f32(1.f, -2.f, last_container->active_t);
     }
 
     /* Create checkbox */
@@ -1161,7 +1163,7 @@ static f32 evaluate_tween(const TweenAnimation* anim, f64 now)
     Assert(anim->duration >= 0.f);
     if (anim->duration > 0.f)
     {
-        f32 progress = (f32)((now - anim->started_at) / anim->duration);
+        f32 progress = (f32)((now - anim->started_at) / anim->duration); // range: [0, 1]
         if (progress >= 1.0)
             return anim->target;
         return anim->start + (anim->target - anim->start) * progress;
@@ -1173,7 +1175,6 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
 {
     f64 now = g_ui_context->current_time;
     ScrollContext scroll_ctx = { 0 };
-    scroll_ctx.thumb_color = config->thumb_color;
 
     /* Create area box */
     scroll_ctx.area_box =
@@ -1196,19 +1197,41 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
 
         if (ui_hovered(flags))
         {
-            if (g_ui_context->mouse_delta.x)
+            if (g_ui_context->mouse_delta.x || g_ui_context->mouse_delta.y ||
+                last_area_box->scroll_anim_x.target - last_area_box->scroll_delta.x ||
+                last_area_box->scroll_anim_y.target - last_area_box->scroll_delta.y)
+            {
+                last_area_box->idle_timer = 0.f;
+                last_area_box->anim_state = TRANSITION_FORWARD;
+            }
+
+            /* Update smooth scrolling related state */
+            if (g_ui_context->mouse_scroll_delta.x)
             {
                 f32 new_target_x =
-                    last_area_box->scroll_anim_x.target + g_ui_context->mouse_delta.x * SCROLL_SENSITIVITY;
+                    last_area_box->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
                 start_tween(&last_area_box->scroll_anim_x, last_area_box->scroll_delta.x, new_target_x, now, 0.09f);
             }
-            if (g_ui_context->mouse_delta.y)
+            if (g_ui_context->mouse_scroll_delta.y)
             {
                 f32 new_target_y =
-                    last_area_box->scroll_anim_y.target + g_ui_context->mouse_delta.y * SCROLL_SENSITIVITY;
+                    last_area_box->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
                 start_tween(&last_area_box->scroll_anim_y, last_area_box->scroll_delta.y, new_target_y, now, 0.09f);
             }
         }
+
+        /* Handle scroll thumb fade-out transition */
+        if (last_area_box->anim_state == TRANSITION_FORWARD)
+            update_transition(&last_area_box->active_t, 8.f, False);
+        else if (last_area_box->anim_state == TRANSITION_REVERSE)
+            update_transition(&last_area_box->active_t, 2.f, True);
+
+        last_area_box->idle_timer += g_ui_context->frame_delta_time;
+        if (last_area_box->idle_timer > 1.f || !ui_hovered(flags))
+            last_area_box->anim_state = TRANSITION_REVERSE;
+
+        scroll_ctx.thumb_color = config->thumb_color;
+        scroll_ctx.thumb_color.a = lerp_u8(0, config->thumb_color.a, last_area_box->active_t);
     }
 
     /* Get last content box from cache to determine the box size */

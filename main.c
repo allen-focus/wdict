@@ -110,7 +110,7 @@ static void process_frame(AppContext* app_context)
             })
             {
                 ui_scrollable_area({ str("###scroll area"), (Sizing){ grow({}), grow({}) }, s_white, s_padding_small,
-                                     (Color){ 218, 219, 222, 200 } })
+                                     (Color){ 200, 200, 200, 200 } })
                 {
 
                     ui_box({ .sizing = { fixed(1000), fixed(1800) },
@@ -214,20 +214,23 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_MOUSEMOVE:
         {
             f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+            Position mouse_pos_backup = ui_context->mouse_pos;
             ui_context->mouse_pos.x = LOWORD(lparam) / dpi_scale;
             ui_context->mouse_pos.y = HIWORD(lparam) / dpi_scale;
+            ui_context->mouse_delta.x = ui_context->mouse_pos.x - mouse_pos_backup.x;
+            ui_context->mouse_delta.y = ui_context->mouse_pos.x - mouse_pos_backup.y;
             return 0;
         }
 
         case WM_MOUSEHWHEEL:
         {
-            ui_context->mouse_delta.x += GET_WHEEL_DELTA_WPARAM(wparam) / 10;
+            ui_context->mouse_scroll_delta.x += GET_WHEEL_DELTA_WPARAM(wparam) / 10;
             return 0;
         }
 
         case WM_MOUSEWHEEL:
         {
-            ui_context->mouse_delta.y += GET_WHEEL_DELTA_WPARAM(wparam) / -10;
+            ui_context->mouse_scroll_delta.y += GET_WHEEL_DELTA_WPARAM(wparam) / -10;
             return 0;
         }
 
