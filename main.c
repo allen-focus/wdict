@@ -11,8 +11,8 @@
 
 ///
 
-#define CLIENT_WIDTH  400
-#define CLIENT_HEIGHT 400
+#define CLIENT_WIDTH  600
+#define CLIENT_HEIGHT 600
 
 #define MAX_TITLE_LENGTH 64
 
@@ -87,6 +87,7 @@ static void process_frame(AppContext* app_context)
 {
 
     UIContext* ui_context = &app_context->ui;
+    Font* font_ui = &app_context->fonts[FONT_INDEX_UI];
     Font* font_zh = &app_context->fonts[FONT_INDEX_ZH];
     Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
     Font* font_symbol = &app_context->fonts[FONT_INDEX_ICON];
@@ -103,7 +104,7 @@ static void process_frame(AppContext* app_context)
         })
         {
             ui_box({
-                .sizing = { fixed(300), fixed(200) },
+                .sizing = { fixed(500), fixed(500) },
                 .color = s_blue,
                 .padding = s_padding_medium,
             })
@@ -112,7 +113,7 @@ static void process_frame(AppContext* app_context)
                                      (Color){ 218, 219, 222, 200 } })
                 {
 
-                    ui_box({ .sizing = { fixed(350), fixed(150) },
+                    ui_box({ .sizing = { fixed(1000), fixed(1800) },
                              .color = s_grey,
                              .padding = s_padding_small,
                              .child_gap = s_child_gap_medium,
@@ -124,7 +125,7 @@ static void process_frame(AppContext* app_context)
                         ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = s_child_gap_small })
                         {
                             UISignalFlags flags = ui_button(str("hello##world"), font_zh, 
-                                                            (Sizing){ fit_grow({ .max = 70 }), fit({}) },
+                                                            (Sizing){ fit_grow({ .max = 70 }), fit({}) }, s_padding_small,
                                                             s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
                             if (ui_hovered(flags))
                                 ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = s_red }) {}
@@ -136,8 +137,26 @@ static void process_frame(AppContext* app_context)
                         }
 
                         /* button 2 */
-                        ui_button(str("hello##world2"), font_mono, (Sizing){ fit_grow({ .max = 70 }), fit({}) },
+                        ui_button(str("goodbye I don't know it##world2"), font_mono, (Sizing){ fit({}), fit({}) }, s_padding_small,
                                   s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
+                        
+                        /* button 3 */
+                        ui_button(str("今天天气怎么样？何时去爬山？##zh"), font_zh, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                  s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
+
+                        /* button 4 */
+                        ui_button(str("我歌月徘徊，我舞影零乱##zh2"), font_zh, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                  s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
+
+                        ui_box({ .sizing = { fixed(400), fit({}) }, .child_gap = 20, .direction = LAYOUT_TOP_TO_BOTTOM })
+                        {
+                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
+                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
+                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
+                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
+                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
+                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
+                        }
 
                         /* switch box */
                         static b32 check = False;

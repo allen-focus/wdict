@@ -75,38 +75,6 @@ FontDataOwner* FontDataOwner_Create(void* data, UINT32 size)
 // font
 //
 
-// NOTE:
-//   Somehow, filtering by weight/style using font properties does not work as expected.
-//   The resulting font set is always empty (count == 0).
-//   ```
-//   void font_register_from_system(IDWriteFactory5* dwrite_factory, wchar_t* font_name, Font* font)
-//   {
-//       /* Get system font set */
-//       IDWriteFontSet* font_set = NULL;
-//       IDWriteFactory5_GetSystemFontSet(dwrite_factory, &font_set);
-//       {
-//           /* filter font set */
-//           IDWriteFontSet* filtered_set = NULL;
-//           DWRITE_FONT_PROPERTY properties[] = { { DWRITE_FONT_PROPERTY_ID_FAMILY_NAME, font_name, NULL },
-//                                                 { DWRITE_FONT_PROPERTY_ID_WEIGHT, L"400", NULL },
-//                                                 { DWRITE_FONT_PROPERTY_ID_STYLE, L"0", NULL } };
-//           IDWriteFontSet_GetMatchingFonts1(font_set, properties, countof(properties), &filtered_set);
-//           UINT32 count = IDWriteFontSet_GetFontCount(filtered_set);
-//           Assert(count > 0);
-//           {
-//               /* Get the first matched font */
-//               IDWriteFontFaceReference* face_ref = NULL;
-//               IDWriteFontSet_GetFontFaceReference(filtered_set, 0, &face_ref);
-//               IDWriteFontFaceReference_CreateFontFace(face_ref, &font->face3);
-//               IDWriteFontFaceReference_Release(face_ref);
-//           }
-//           IDWriteFontSet_Release(filtered_set);
-//       }
-//       IDWriteFontSet_Release(font_set);
-//   }
-//   ```
-//   So we just use old IDWriteFontCollection interface.
-
 // NOTE: The interface for handling in-memory font data requires Windows 10 Creators Update version (v1703).
 void dwrite_init(DWriteContext* dwrite)
 {
@@ -124,6 +92,17 @@ void dwrite_deinit(DWriteContext* dwrite)
     IDWriteFactory5_Release(dwrite->factory);
 }
 
+// NOTE:
+//   Somehow, filtering by weight/style using font properties does not work as expected.
+//   The resulting font set is always empty (count == 0).
+//   ```
+//   DWRITE_FONT_PROPERTY properties[] = { { DWRITE_FONT_PROPERTY_ID_FAMILY_NAME, font_name, NULL },
+//                                         { DWRITE_FONT_PROPERTY_ID_WEIGHT, L"400", NULL },
+//                                         { DWRITE_FONT_PROPERTY_ID_STYLE, L"0", NULL } };
+//   IDWriteFontSet_GetMatchingFonts1(font_set, properties, countof(properties), &filtered_set);
+//   UINT32 count = IDWriteFontSet_GetFontCount(filtered_set);
+//   ```
+//   So we just use old IDWriteFontCollection interface.
 static void font_register(IDWriteFontCollection1* collection, u32 family_index, DWRITE_FONT_WEIGHT weight,
                           DWRITE_FONT_STYLE style, Font* font)
 {

@@ -14,9 +14,11 @@
 #define BOX_QUEUE_CAPACITY        2048
 
 // Widgets
-#define CHECKBOX_HEIGHT     22
-#define CHECKBOX_PAD        3
-#define SCROLLBAR_THICKNESS 8
+#define CHECKBOX_HEIGHT      22
+#define CHECKBOX_PAD         3
+#define SCROLLBAR_THICKNESS  8
+#define SCROLL_SENSITIVITY   4.f
+#define SCROLL_ANIM_DURATION 0.09f
 
 typedef Slice(f32*) F32PtrSlice;
 
@@ -715,24 +717,15 @@ static void ui_calculate_layout(UIBox* box)
 // Frame
 //
 
-static f32 calculate_frame_delta_time(u64 frame_index)
+static f64 get_current_time(u64 frame_index)
 {
     static LARGE_INTEGER freq;
-    static LARGE_INTEGER last_time;
+    static LARGE_INTEGER current_time;
 
     if (frame_index == 0)
-    {
         QueryPerformanceFrequency(&freq);
-        QueryPerformanceCounter(&last_time);
-        return 0.f;
-    }
-
-    LARGE_INTEGER current_time;
     QueryPerformanceCounter(&current_time);
-
-    f32 delta_time = (f32)(current_time.QuadPart - last_time.QuadPart) / (f32)freq.QuadPart;
-    last_time = current_time;
-    return delta_time;
+    return (f64)current_time.QuadPart / freq.QuadPart;
 }
 
 isize ui_begin_frame(UIContext* ui_context)
@@ -740,7 +733,9 @@ isize ui_begin_frame(UIContext* ui_context)
     g_ui_context = ui_context;
     if (g_ui_context->frame_index > 0)
         g_ui_context->render_fn.wait_for_last_submitted_frame();
-    g_ui_context->frame_delta_time = calculate_frame_delta_time(g_ui_context->frame_index);
+    f64 last_time = g_ui_context->current_time;
+    g_ui_context->current_time = get_current_time(g_ui_context->frame_index);
+    g_ui_context->frame_delta_time = (f32)(g_ui_context->current_time - last_time);
 
     return g_ui_context->arena.pos;
 }
@@ -993,9 +988,11 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
     }
 }
 
-UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const Sizing sizing, const Color bg_color,
-                        const Color text_color, const Color bg_color_hover, const Color bg_color_press)
+UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const Sizing sizing, const Padding padding,
+                        const Color bg_color, const Color text_color, const Color bg_color_hover,
+                        const Color bg_color_press)
 {
+    /* Animation-related variables */
     Color bg_color_final = bg_color;
 
     /* Get last button from cache */
@@ -1038,7 +1035,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
     UIBox* box = ui_box_start(&(BoxConfig){ .sizing = sizing,
                                             .color = bg_color_final,
                                             .rect_style = { .corner_radius = 8 },
-                                            .padding = { 6, 6, 6, 6 },
+                                            .padding = padding,
                                             .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
     update_box_key(box, text_hash.hash_str);
     ui_text(text_hash.display_str,
@@ -1051,6 +1048,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
 UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color bg_color_active)
 {
+    /* Animation-related variables */
     Color bg_color_final = bg_color;
     Color status_color_ok = switch_button_color;
     Color status_color_cancel = switch_button_color;
@@ -1150,8 +1148,30 @@ typedef enum
     // clang-format on
 } ScrollBarFlags;
 
+static void start_tween(TweenAnimation* anim, f32 current_pos, f32 new_target, f64 now, f32 duration)
+{
+    anim->start = current_pos;
+    anim->target = new_target;
+    anim->started_at = now;
+    anim->duration = duration;
+}
+
+static f32 evaluate_tween(const TweenAnimation* anim, f64 now)
+{
+    Assert(anim->duration >= 0.f);
+    if (anim->duration > 0.f)
+    {
+        f32 progress = (f32)((now - anim->started_at) / anim->duration);
+        if (progress >= 1.0)
+            return anim->target;
+        return anim->start + (anim->target - anim->start) * progress;
+    }
+    return anim->target;
+}
+
 ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
 {
+    f64 now = g_ui_context->current_time;
     ScrollContext scroll_ctx = { 0 };
     scroll_ctx.thumb_color = config->thumb_color;
 
@@ -1168,26 +1188,27 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
     if (scroll_ctx.area_result.found)
     {
         last_area_box = scroll_ctx.area_result.box;
-        Rect last_box_rect = {
-            .xmin = last_area_box->position.x,
-            .ymin = last_area_box->position.y,
-            .xmax = last_area_box->position.x + last_area_box->size.width,
-            .ymax = last_area_box->position.y + last_area_box->size.height,
-        };
-        if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
-        {
-            flags |= UI_Signal_Flag_Hovered;
-            if (g_ui_context->mouse_lclick)
-                flags |= UI_Signal_Flag_LClicked;
-            if (g_ui_context->mouse_rclick)
-                flags |= UI_Signal_Flag_RClicked;
-        }
-    }
+        update_interaction_flags(last_area_box, &flags);
 
-    if (ui_hovered(flags))
-    {
-        last_area_box->scroll_delta.x += g_ui_context->mouse_delta.x;
-        last_area_box->scroll_delta.y += g_ui_context->mouse_delta.y;
+        /* Update scroll delta */
+        last_area_box->scroll_delta.x = evaluate_tween(&last_area_box->scroll_anim_x, now);
+        last_area_box->scroll_delta.y = evaluate_tween(&last_area_box->scroll_anim_y, now);
+
+        if (ui_hovered(flags))
+        {
+            if (g_ui_context->mouse_delta.x)
+            {
+                f32 new_target_x =
+                    last_area_box->scroll_anim_x.target + g_ui_context->mouse_delta.x * SCROLL_SENSITIVITY;
+                start_tween(&last_area_box->scroll_anim_x, last_area_box->scroll_delta.x, new_target_x, now, 0.09f);
+            }
+            if (g_ui_context->mouse_delta.y)
+            {
+                f32 new_target_y =
+                    last_area_box->scroll_anim_y.target + g_ui_context->mouse_delta.y * SCROLL_SENSITIVITY;
+                start_tween(&last_area_box->scroll_anim_y, last_area_box->scroll_delta.y, new_target_y, now, 0.09f);
+            }
+        }
     }
 
     /* Get last content box from cache to determine the box size */
@@ -1198,28 +1219,27 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
         scroll_ctx.content_result = find_or_insert_box_with_same_hash_str(content_box_hash_str);
         if (scroll_ctx.content_result.found)
         {
-            Assert(scroll_ctx.area_result.found);
-            ScrollBarFlags bar_flags = SCROLLBAR_NONE;
+            Assert(scroll_ctx.area_result.found); // ensure `last_area_box` valid
 
             /* Virtual area (content viewport), may have padding when both scrollbars present */
             Size virtual_area_size = scroll_ctx.area_result.box->size;
             Size content_size = scroll_ctx.content_result.box->size;
-            bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
-            bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
-            if (bar_flags == SCROLLBAR_BOTH)
             {
-                virtual_area_size.width -= SCROLLBAR_THICKNESS;
-                virtual_area_size.height -= SCROLLBAR_THICKNESS;
+                ScrollBarFlags bar_flags = SCROLLBAR_NONE;
+                bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
+                bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
+                if (bar_flags == SCROLLBAR_BOTH)
+                {
+                    virtual_area_size.width -= SCROLLBAR_THICKNESS;
+                    virtual_area_size.height -= SCROLLBAR_THICKNESS;
+                }
             }
 
-            /* Adjust scroll_delta */
+            /* Update scroll target */
             f32 max_scroll_x = content_size.width - virtual_area_size.width;
-            last_area_box->scroll_delta.x =
-                clamp(last_area_box->scroll_delta.x, 0, max_scroll_x > 0 ? max_scroll_x : 0);
-
             f32 max_scroll_y = content_size.height - virtual_area_size.height;
-            last_area_box->scroll_delta.y =
-                clamp(last_area_box->scroll_delta.y, 0, max_scroll_y > 0 ? max_scroll_y : 0);
+            last_area_box->scroll_anim_x.target = clamp(last_area_box->scroll_anim_x.target, 0, max_scroll_x);
+            last_area_box->scroll_anim_y.target = clamp(last_area_box->scroll_anim_y.target, 0, max_scroll_y);
         }
         scroll_ctx.delta = scroll_ctx.area_result.found ? last_area_box->scroll_delta : (Position){ 0.f, 0.f };
     }
