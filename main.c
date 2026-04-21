@@ -110,10 +110,10 @@ static void process_frame(AppContext* app_context)
             })
             {
                 ui_scrollable_area({ str("###scroll area"), (Sizing){ grow({}), grow({}) }, s_white, s_padding_small,
-                                     (Color){ 200, 200, 200, 200 } })
+                                     (Color){ 140, 140, 140, 240 } })
                 {
 
-                    ui_box({ .sizing = { fixed(1000), fixed(1800) },
+                    ui_box({ .sizing = { fixed(1000), fixed(2000) },
                              .color = s_grey,
                              .padding = s_padding_small,
                              .child_gap = s_child_gap_medium,
@@ -237,12 +237,21 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_LBUTTONDOWN:
         {
             ui_context->mouse_lclick = True;
+            ui_context->mouse_hold = True;
             return 0;
         }
 
         case WM_RBUTTONDOWN:
         {
             ui_context->mouse_rclick = True;
+            ui_context->mouse_hold = True;
+            return 0;
+        }
+
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+        {
+            ui_context->mouse_hold = False;
             return 0;
         }
 

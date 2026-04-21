@@ -14,13 +14,13 @@
 #define BOX_QUEUE_CAPACITY        2048
 
 // Widgets
-#define CHECKBOX_HEIGHT      22
-#define CHECKBOX_PAD         3
-#define SCROLLBAR_THICKNESS  8
-#define SCROLL_SENSITIVITY   4.f
-#define SCROLL_ANIM_DURATION 0.09f
-
-typedef Slice(f32*) F32PtrSlice;
+#define CHECKBOX_HEIGHT              22
+#define CHECKBOX_PAD                 3
+#define SCROLLBAR_THICKNESS          5
+#define SCROLLBAR_PADDING            (SCROLLBAR_THICKNESS * 1.6)
+#define SCROLLBAR_OPACITY_MULTIPLIER 0.5f // range: [0, 1]
+#define SCROLL_SENSITIVITY           4.f
+#define SCROLL_ANIM_DURATION         0.09f
 
 static Queue(UIBox, BOX_QUEUE_CAPACITY) ui_box_queue = { 0 };
 static Stack(UIBox*, BOX_STACK_CAPACITY) ui_box_stack = { 0 };
@@ -195,11 +195,12 @@ UIBox* ui_box_start(const BoxConfig* config)
 
     ui_box_stack.items[ui_box_stack.depth++] = box;
     memcpy(&box->config, config, sizeof(*config));
-    box->size.width = box->config.sizing.width.mode == SIZING_MODE_FIXED ? box->config.sizing.width.min_max.min : 0;
-    box->size.height = box->config.sizing.height.mode == SIZING_MODE_FIXED ? box->config.sizing.height.min_max.min : 0;
-    if (axis_has_grow_attribute(box->config.sizing.width.mode) && box->config.sizing.width.min_max.max == 0)
+    box->is_float = config->is_float;
+    box->size.width = config->sizing.width.mode == SIZING_MODE_FIXED ? config->sizing.width.min_max.min : 0;
+    box->size.height = config->sizing.height.mode == SIZING_MODE_FIXED ? config->sizing.height.min_max.min : 0;
+    if (axis_has_grow_attribute(config->sizing.width.mode) && config->sizing.width.min_max.max == 0)
         box->config.sizing.width.min_max.max = INFINITY;
-    if (axis_has_grow_attribute(box->config.sizing.height.mode) && box->config.sizing.height.min_max.max == 0)
+    if (axis_has_grow_attribute(config->sizing.height.mode) && config->sizing.height.min_max.max == 0)
         box->config.sizing.height.min_max.max = INFINITY;
 
     return box;
@@ -388,7 +389,7 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
 
     /* If the current box is a child, adjust its parent's size based on box direction. */
     UIBox* parent = box->parent;
-    if (parent)
+    if (parent && !box->is_float)
     {
         AxisContext parent_ctx = get_axis_context(parent, axis);
         if (axis_has_fit_attribute(parent_ctx.sizing_mode))
@@ -414,62 +415,76 @@ typedef enum
     SHRINK
 } DistributeMode;
 
-static void distribute_axis(f32* remaining, F32PtrSlice* items, F32PtrSlice* limits, const DistributeMode mode)
+typedef struct
+{
+    f32* value;
+    f32* limit;
+    b32 is_float;
+} DistributeAble;
+
+typedef Slice(DistributeAble) DistributeAbles;
+
+static void distribute_axis(f32* remaining, DistributeAbles ables, const DistributeMode mode)
 {
     while ((mode == GROW && *remaining > EPSILON) || (mode == SHRINK && *remaining < -EPSILON))
     {
-        if (items->len == 0)
+        if (ables.len == 0)
             break;
 
-        f32 pivot = *items->data[0];
+        f32 pivot = *ables.data[0].value;
         f32 second_pivot = mode == GROW ? INFINITY : 0;
         f32 to_add = 0;
 
         /* Find the pivot size (smallest for grow, largest for shrink) and the next pivot. */
-        for (isize i = 0; i < items->len; i++)
+        for (isize i = 0; i < ables.len; i++)
         {
-            if (mode == GROW ? (*items->data[i] < pivot) : (*items->data[i] > pivot))
+            if (mode == GROW ? (*ables.data[i].value < pivot) : (*ables.data[i].value > pivot))
             {
                 second_pivot = pivot;
-                pivot = *items->data[i];
+                pivot = *ables.data[i].value;
                 to_add = second_pivot - pivot;
             }
-            else if (mode == GROW ? (*items->data[i] > pivot) : (*items->data[i] < pivot))
+            else if (mode == GROW ? (*ables.data[i].value > pivot) : (*ables.data[i].value < pivot))
             {
-                second_pivot = mode == GROW ? min(*items->data[i], second_pivot) : max(*items->data[i], second_pivot);
+                second_pivot =
+                    mode == GROW ? min(*ables.data[i].value, second_pivot) : max(*ables.data[i].value, second_pivot);
                 to_add = second_pivot - pivot;
             }
         }
 
         /* If all items have the same size, distribute remaining space equally. */
         if ((mode == GROW && second_pivot == INFINITY) || (mode == SHRINK && second_pivot == 0))
-            to_add = *remaining / items->len;
+            to_add = *remaining / ables.len;
 
         /* Count items at the pivot and adjust to_add if it would "exceed" remaining space. */
         isize pivot_count = 0;
-        for (isize i = 0; i < items->len; i++)
-            if (fabsf(*items->data[i] - pivot) < EPSILON)
+        for (isize i = 0; i < ables.len; i++)
+            if (fabsf(*ables.data[i].value - pivot) < EPSILON)
                 pivot_count++;
         if (mode == GROW ? (to_add * pivot_count > *remaining) : (to_add * pivot_count < *remaining))
             to_add = *remaining / pivot_count;
 
         /* Distribute space among items at the pivot size.
         When an item hits its limit, clamp it and remove from further distribution. */
-        for (isize i = 0; i < items->len; i++)
+        for (isize i = 0; i < ables.len; i++)
         {
-            if (fabsf(*items->data[i] - pivot) >= EPSILON)
+            if (fabsf(*ables.data[i].value - pivot) >= EPSILON)
                 continue;
 
-            f32 size_backup = *items->data[i];
-            f32* child = items->data[i];
-            f32 limit = *limits->data[i];
+            f32 size_backup = *ables.data[i].value;
+            f32* child = ables.data[i].value;
+            f32 limit = *ables.data[i].limit;
 
             *child += to_add;
             if (mode == GROW ? (*child >= limit) : (*child <= limit))
             {
                 *child = limit;
-                items->data[i] = items->data[items->len-- - 1];
-                limits->data[i] = limits->data[limits->len-- - 1];
+                ables.data[i].value = ables.data[ables.len - 1].value;
+                ables.data[i].limit = ables.data[ables.len - 1].limit;
+                ables.data[i].is_float = ables.data[ables.len - 1].is_float;
+                ables.len--;
+                i--;
+                continue;
             }
             *remaining -= (*child - size_backup);
         }
@@ -501,52 +516,55 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
         UIBox* child = box->child_first;
         while (child)
         {
+            if (child->is_float)
+                *ctx.remaining += box->config.child_gap;
+
             AxisContext child_ctx = get_axis_context(child, axis);
 
             /* Subtract the child's determined size from the parent's remaining space. */
             if (box->config.direction == ctx.main_direction)
-                *ctx.remaining -= *child_ctx.size;
+                if (!child->is_float)
+                    *ctx.remaining -= *child_ctx.size;
 
             child = child->next;
         }
 
         /* Distribute remaining space to children (growables and shrinkables are mutually exclusive) */
-        F32PtrSlice growables = { 0 };
-        F32PtrSlice growable_limits = { 0 };
-        F32PtrSlice shrinkables = { 0 };
-        F32PtrSlice shrinkable_limits = { 0 };
+        DistributeAbles growables = { 0 };
+        DistributeAbles shrinkables = { 0 };
         child = box->child_first;
         while (child)
         {
             AxisContext child_ctx = get_axis_context(child, axis);
             if (axis_has_grow_attribute(child_ctx.sizing_mode))
             {
-                *slice_push(&growables, &g_ui_context->arena) = child_ctx.size;
-                *slice_push(&growable_limits, &g_ui_context->arena) = child_ctx.max_size;
+                DistributeAble growable = { child_ctx.size, child_ctx.max_size, child->is_float };
+                *slice_push(&g_ui_context->arena, &growables) = growable;
             }
 
             if (*child_ctx.size > *child_ctx.min_size)
             {
-                *slice_push(&shrinkables, &g_ui_context->arena) = child_ctx.size;
-                *slice_push(&shrinkable_limits, &g_ui_context->arena) = child_ctx.min_size;
+                DistributeAble shrinkable = { child_ctx.size, child_ctx.min_size, child->is_float };
+                *slice_push(&g_ui_context->arena, &shrinkables) = shrinkable;
             }
             child = child->next;
         }
         if (box->config.direction == ctx.main_direction)
         {
-            if (*ctx.remaining > 1) // NOTE: To avoid distributing meaningless slivers
-                distribute_axis(ctx.remaining, &growables, &growable_limits, GROW);
+            if (*ctx.remaining > 1) // NOTE: Use 1 instead of 0 to avoid distributing meaningless slivers
+                distribute_axis(ctx.remaining, growables, GROW);
             else if (*ctx.remaining < 0)
-                distribute_axis(ctx.remaining, &shrinkables, &shrinkable_limits, SHRINK);
+                distribute_axis(ctx.remaining, shrinkables, SHRINK);
         }
         else
         {
             if (*ctx.remaining > 0)
                 for (isize i = 0; i < growables.len; i++)
-                    *growables.data[i] = max(*growables.data[i], min(*ctx.remaining, *growable_limits.data[i]));
+                    *growables.data[i].value =
+                        max(*growables.data[i].value, min(*ctx.remaining, *growables.data[i].limit));
             for (isize i = 0; i < shrinkables.len; i++)
-                if (*ctx.remaining < *shrinkables.data[i])
-                    *shrinkables.data[i] = max(*shrinkable_limits.data[i], *ctx.remaining);
+                if (*ctx.remaining < *shrinkables.data[i].value)
+                    *shrinkables.data[i].value = max(*shrinkables.data[i].limit, *ctx.remaining);
         }
     }
     g_ui_context->arena.pos = arena_pos_backup;
@@ -602,9 +620,9 @@ static void ui_box_resolve_position(UIBox* box)
                 box->position.x += parent->data.container.remaining_space.width - box->size.width;
         }
 
-        /* Handle scroll offset */
-        box->position.x += parent->config.child_offset.x;
-        box->position.y += parent->config.child_offset.y;
+        /* Handle scroll & float offset */
+        box->position.x += parent->config.child_offset.x + (box->is_float ? box->config.float_offset.x : 0.f);
+        box->position.y += parent->config.child_offset.y + (box->is_float ? box->config.float_offset.y : 0.f);
     }
 
     if (box->type == BOX_TYPE_CONTAINER)
@@ -661,7 +679,7 @@ static void perform_text_wrapping(UIBox* text_box)
         f32 width = get_text_width(glyph_cache, str_slice(text, line_start, distance), font, font_size, dpi);
         if (width > max_width && last_break > line_start)
         {
-            *slice_push(&text_box->data.text.wrapped_lines, &g_ui_context->arena) =
+            *slice_push(&g_ui_context->arena, &text_box->data.text.wrapped_lines) =
                 str_slice(text, line_start, last_break);
 
             /* Skip space if needed */
@@ -678,7 +696,7 @@ static void perform_text_wrapping(UIBox* text_box)
     }
 
     /* Handle last line */
-    *slice_push(&text_box->data.text.wrapped_lines, &g_ui_context->arena) = str_slice(text, line_start, text.len);
+    *slice_push(&g_ui_context->arena, &text_box->data.text.wrapped_lines) = str_slice(text, line_start, text.len);
 
     text_box->size.height = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
     text_box->config.sizing.height.min_max.min = text_box->size.height;
@@ -871,7 +889,7 @@ void ui_end_frame(isize arena_pos_backup)
 }
 
 //
-// Widgets
+// Scroll Area
 //
 
 static b32 rect_contains_point(Rect r, Position p)
@@ -986,8 +1004,396 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
             *flags |= UI_Signal_Flag_LClicked;
         if (g_ui_context->mouse_rclick)
             *flags |= UI_Signal_Flag_RClicked;
+        if (g_ui_context->mouse_hold)
+            *flags |= UI_Signal_Flag_Held;
     }
 }
+
+// Diagram:
+//   Scroll (LAYOUT_LEFT_TO_RIGHT): {
+//   |   Container (LAYOUT_TOP_TO_BOTTOM): {
+//   |   |   Container Inner (used for setting back to LAYOUT_LEFT_TO_RIGHT): {
+//   |   |   | Content
+//   |   |   },
+//   |   |   Scroll Bar (horizontal)
+//   |   },
+//   |   Scroll Bar (vertical)
+//   }
+//
+//  <--------- Scroll ---------->
+//  ┏━━━━━━━━━━━━━━━━━━━━━━━━━┯━┓<-- Scroll Bar (vertical) [float]
+//  ┃ ╔═════════════════════╗ | ┃
+//  ┃ ║ +-----------------+ ║ | ┃
+//  ┃ ║ |                 | ║ |█┃
+//  ┃ ║ |     Content     | ║ |█┃<--- Thumb (vertical)
+//  ┃ ║ |                 | ║ | ┃
+//  ┃ ║ +-----------------+ ║ | ┃
+//  ┃ ║   Container Inner   ║ | ┃
+//  ┃ ╚═════════════════════╝ | ┃
+//  ┠-------------------------+-┨  And...
+//  ┃            ▓▓▓▓▓▓▓      | ┃    Scroll Bar (horizontal) [float]
+//  ┗━━━━━━━━━━━━━━━━━━━━━━━━━┷━┛    Thumb (horizontal)
+//  <-------- Container -------->
+
+typedef enum
+{
+    // clang-format off
+    SCROLLBAR_NONE       = 0b00,
+    SCROLLBAR_HORIZONTAL = 0b01,
+    SCROLLBAR_VERTICAL   = 0b10,
+    SCROLLBAR_BOTH       = 0b11,
+    // clang-format on
+} ScrollBarFlags;
+
+static void start_tween(TweenAnimation* anim, f32 current_pos, f32 new_target, f64 now, f32 duration)
+{
+    anim->start = current_pos;
+    anim->target = new_target;
+    anim->started_at = now;
+    anim->duration = duration;
+}
+
+static f32 evaluate_tween(const TweenAnimation* anim, f64 now)
+{
+    Assert(anim->duration >= 0.f);
+    if (anim->duration > 0.f)
+    {
+        f32 progress = (f32)((now - anim->started_at) / anim->duration); // range: [0, 1]
+        if (progress >= 1.0)
+            return anim->target;
+        return anim->start + (anim->target - anim->start) * progress;
+    }
+    return anim->target;
+}
+
+ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
+{
+    f64 now = g_ui_context->current_time;
+    ScrollContext scroll_ctx = { 0 };
+    scroll_ctx.text_with_hash_str = config->text_with_hash_str;
+
+    /* Create area box */
+    scroll_ctx.area_box =
+        ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .enable_clip = True });
+    String area_box_hash_str = extract_hash_str(&config->text_with_hash_str).hash_str;
+    update_box_key(scroll_ctx.area_box, area_box_hash_str);
+
+    /* Handle interaction */
+    UISignalFlags flags = UI_Signal_Flag_None;
+    scroll_ctx.area_result = find_or_insert_box_with_same_hash_str(area_box_hash_str);
+    UIBox* last_area_box = NULL;
+    if (scroll_ctx.area_result.found)
+    {
+        last_area_box = scroll_ctx.area_result.box;
+        update_interaction_flags(last_area_box, &flags);
+
+        /* Update scroll delta */
+        last_area_box->scroll_delta.x = evaluate_tween(&last_area_box->scroll_anim_x, now);
+        last_area_box->scroll_delta.y = evaluate_tween(&last_area_box->scroll_anim_y, now);
+
+        if (ui_hovered(flags))
+        {
+            if (g_ui_context->mouse_delta.x || g_ui_context->mouse_delta.y ||
+                last_area_box->scroll_anim_x.target - last_area_box->scroll_delta.x ||
+                last_area_box->scroll_anim_y.target - last_area_box->scroll_delta.y)
+            {
+                last_area_box->idle_timer = 0.f;
+                last_area_box->anim_state = TRANSITION_FORWARD;
+            }
+
+            /* Update smooth scrolling related state */
+            if (g_ui_context->mouse_scroll_delta.x)
+            {
+                f32 new_target_x =
+                    last_area_box->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
+                start_tween(&last_area_box->scroll_anim_x, last_area_box->scroll_delta.x, new_target_x, now, 0.09f);
+            }
+            if (g_ui_context->mouse_scroll_delta.y)
+            {
+                f32 new_target_y =
+                    last_area_box->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
+                start_tween(&last_area_box->scroll_anim_y, last_area_box->scroll_delta.y, new_target_y, now, 0.09f);
+            }
+        }
+
+        /* Handle scroll thumb fade-out transition */
+        if (last_area_box->anim_state == TRANSITION_FORWARD)
+            update_transition(&last_area_box->active_t, 8.f, False);
+        else if (last_area_box->anim_state == TRANSITION_REVERSE)
+            update_transition(&last_area_box->active_t, 4.f, True);
+
+        last_area_box->idle_timer += g_ui_context->frame_delta_time;
+        if (last_area_box->idle_timer > 0.75f || !ui_hovered(flags))
+            last_area_box->anim_state = TRANSITION_REVERSE;
+
+        scroll_ctx.thumb_color = config->thumb_color;
+        scroll_ctx.thumb_color.a =
+            lerp_u8(0, (u8)(config->thumb_color.a * SCROLLBAR_OPACITY_MULTIPLIER), last_area_box->active_t);
+    }
+
+    /* Get last content box from cache to determine the box size */
+    String content_box_text_with_hash_str =
+        str_concat(&g_ui_context->arena, config->text_with_hash_str, str(" (content box)"));
+    String content_box_hash_str = extract_hash_str(&content_box_text_with_hash_str).hash_str;
+    {
+        scroll_ctx.content_result = find_or_insert_box_with_same_hash_str(content_box_hash_str);
+        if (scroll_ctx.content_result.found)
+        {
+            Assert(scroll_ctx.area_result.found); // ensure `last_area_box` valid
+
+            /* Update scroll target */
+            Size virtual_area_size = scroll_ctx.area_result.box->size;
+            Size content_size = scroll_ctx.content_result.box->size;
+
+            f32 max_scroll_x = content_size.width - virtual_area_size.width;
+            f32 max_scroll_y = content_size.height - virtual_area_size.height;
+
+            last_area_box->scroll_anim_x.target = clamp(last_area_box->scroll_anim_x.target, 0, max_scroll_x);
+            last_area_box->scroll_anim_y.target = clamp(last_area_box->scroll_anim_y.target, 0, max_scroll_y);
+        }
+        scroll_ctx.delta = scroll_ctx.area_result.found ? last_area_box->scroll_delta : (Position){ 0.f, 0.f };
+    }
+
+    /* Create container & container inner & content box */
+    ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
+    ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } }); // Container Inner
+    UIBox* content_box = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
+                                                    .padding = config->padding,
+                                                    .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
+    update_box_key(content_box, content_box_hash_str);
+
+    return scroll_ctx;
+}
+
+static Color get_scrollbar_track_color(Color thumb)
+{
+    Color c = thumb;
+    c.a = (u8)(thumb.a * 0.4f);
+    return c;
+}
+
+static UIBox* scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_extent)
+{
+    /* Transition-related variables */
+    UIBox* bar = NULL;
+    f32 thickness = 0.f;
+    f32 pad_end = 0.f;
+    f32 max_thumb_thickness = SCROLLBAR_THICKNESS * 1.7;
+    f32 max_pad_end = SCROLLBAR_THICKNESS;
+    f32 max_track_thickness = max_thumb_thickness + max_pad_end;
+    Color track_color = get_scrollbar_track_color(scroll_ctx.thumb_color);
+    Color thumb_color_final = scroll_ctx.thumb_color;
+    u8 thumb_color_a = thumb_color_final.a;
+    u8 thumb_color_a_hover = (u8)(thumb_color_final.a / (SCROLLBAR_OPACITY_MULTIPLIER * 1.3f));
+    u8 thumb_color_a_active = (u8)(thumb_color_final.a / SCROLLBAR_OPACITY_MULTIPLIER);
+
+    /* Get last bar from cache */
+    UISignalFlags bar_flags = UI_Signal_Flag_None;
+    String bar_text_with_hash_str = str_concat(&g_ui_context->arena, scroll_ctx.text_with_hash_str,
+                                               is_horizontal ? str(" (hbar)") : str(" (vbar)"));
+    String bar_hash_str = extract_hash_str(&bar_text_with_hash_str).hash_str;
+    UIBoxFindResult bar_result = find_or_insert_box_with_same_hash_str(bar_hash_str);
+    if (bar_result.found)
+    {
+        UIBox* last_bar = bar_result.box;
+        update_interaction_flags(last_bar, &bar_flags);
+
+        /* Bar Transition */
+        if (ui_hovered(bar_flags))
+        {
+            scroll_ctx.area_result.box->idle_timer = 0.f;
+            last_bar->anim_state = TRANSITION_FORWARD;
+            if (last_bar->anim_state == TRANSITION_FORWARD)
+                update_transition(&last_bar->hot_t, 10.f, False);
+        }
+        else
+        {
+            if (last_bar->hot_t)
+            {
+                last_bar->anim_state = TRANSITION_REVERSE;
+                if (update_transition(&last_bar->hot_t, 8.f, True))
+                    last_bar->anim_state = TRANSITION_IDLE;
+            }
+        }
+        thickness = lerp_f32(SCROLLBAR_THICKNESS, SCROLLBAR_THICKNESS * 1.7, last_bar->hot_t);
+        pad_end = lerp_f32(SCROLLBAR_THICKNESS * 0.5, SCROLLBAR_THICKNESS, last_bar->hot_t);
+        track_color.a = lerp_u8(0, track_color.a, last_bar->hot_t);
+    }
+
+    /* Get last thumb from cache */
+    UISignalFlags thumb_flags = UI_Signal_Flag_None;
+    String thumb_text_with_hash_str = str_concat(&g_ui_context->arena, scroll_ctx.text_with_hash_str,
+                                                 is_horizontal ? str(" (hthumb)") : str(" (vthumb)"));
+    String thumb_hash_str = extract_hash_str(&thumb_text_with_hash_str).hash_str;
+    UIBoxFindResult thumb_result = find_or_insert_box_with_same_hash_str(thumb_hash_str);
+    if (thumb_result.found)
+    {
+        UIBox* last_thumb = thumb_result.box;
+        update_interaction_flags(last_thumb, &thumb_flags);
+
+        /* Thumb Transition */
+        if (ui_hovered(thumb_flags))
+        {
+            thumb_color_final.a = thumb_color_a_hover;
+        }
+        if (ui_clicked(thumb_flags) || (last_thumb->active_t > 0))
+        {
+            if (ui_clicked(thumb_flags))
+            {
+                last_thumb->active_t = 0.f;
+                last_thumb->anim_state = TRANSITION_FORWARD;
+            }
+            if (last_thumb->anim_state == TRANSITION_IDLE || last_thumb->anim_state == TRANSITION_FORWARD)
+            {
+                if (update_transition(&last_thumb->active_t, 20.f, False))
+                    last_thumb->anim_state = TRANSITION_REVERSE;
+            }
+            else
+            {
+                if (update_transition(&last_thumb->active_t, 18.f, True))
+                    last_thumb->anim_state = TRANSITION_IDLE;
+            }
+            thumb_color_final.a = lerp_u8(ui_hovered(thumb_flags) ? thumb_color_a_hover : thumb_color_a,
+                                          thumb_color_a_active, last_thumb->active_t);
+        }
+    }
+
+    /* Create scroll bar */
+    if (is_horizontal)
+    {
+        UIBox* bar_container = ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(max_track_thickness) },
+                                                          .is_float = True,
+                                                          .float_offset = (Position){ 0.f, -max_track_thickness },
+                                                          .direction = LAYOUT_TOP_TO_BOTTOM });
+        {
+            /* top padding */
+            ui_box_end(
+                ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(max_track_thickness - thickness - pad_end) },
+                                           .alignment = { ALIGN_START, ALIGN_CENTER } }));
+
+            /* bar */
+            UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(thickness) } });
+            ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(SCROLLBAR_PADDING), fixed(thickness) } }));
+
+            UIBox* track = ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(thickness) },
+                                                      .color = track_color,
+                                                      .rect_style = { .corner_radius = thickness } });
+            {
+                bar = ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(thickness) },
+                                                 .child_offset = { scroll_ctx.delta.x, 0 } });
+                UIBox* thumb = ui_box_start(&(BoxConfig){ .sizing = { fixed(thumb_extent), fixed(thickness) },
+                                                          .color = thumb_color_final,
+                                                          .rect_style = { .corner_radius = thickness } });
+                ui_box_end(thumb);
+                update_box_key(thumb, thumb_hash_str);
+                ui_box_end(bar);
+            }
+            ui_box_end(track);
+            ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(SCROLLBAR_PADDING), fixed(thickness) } }));
+            ui_box_end(inner_container);
+
+            /* bottom padding */
+            ui_box_end(ui_box_start(
+                &(BoxConfig){ .sizing = { grow({}), fixed(pad_end) }, .alignment = { ALIGN_END, ALIGN_CENTER } }));
+        }
+        ui_box_end(bar_container);
+        update_box_key(bar_container, bar_hash_str);
+    }
+    else
+    {
+        UIBox* bar_container = ui_box_start(&(BoxConfig){ .sizing = { fixed(max_track_thickness), grow({}) },
+                                                          .is_float = True,
+                                                          .float_offset = (Position){ -max_track_thickness, 0.f } });
+        {
+            /* left padding */
+            ui_box_end(
+                ui_box_start(&(BoxConfig){ .sizing = { fixed(max_track_thickness - thickness - pad_end), grow({}) },
+                                           .alignment = { ALIGN_START, ALIGN_CENTER } }));
+
+            /* bar */
+            UIBox* inner_container = ui_box_start(
+                &(BoxConfig){ .sizing = { fixed(thickness), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+            ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), fixed(SCROLLBAR_PADDING) } }));
+
+            UIBox* track = ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), grow({}) },
+                                                      .color = track_color,
+                                                      .rect_style = { .corner_radius = thickness } });
+            {
+                bar = ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), grow({}) },
+                                                 .child_offset = { 0, scroll_ctx.delta.y } });
+                UIBox* thumb = ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), fixed(thumb_extent) },
+                                                          .color = thumb_color_final,
+                                                          .rect_style = { .corner_radius = thickness } });
+
+                ui_box_end(thumb);
+                update_box_key(thumb, thumb_hash_str);
+                ui_box_end(bar);
+            }
+            ui_box_end(track);
+            ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), fixed(SCROLLBAR_PADDING) } }));
+            ui_box_end(inner_container);
+
+            /* right padding */
+            ui_box_end(ui_box_start(
+                &(BoxConfig){ .sizing = { fixed(pad_end), grow({}) }, .alignment = { ALIGN_END, ALIGN_CENTER } }));
+        }
+        ui_box_end(bar_container);
+        update_box_key(bar_container, bar_hash_str);
+    }
+    return bar;
+}
+
+void ui_scrollable_area_end(ScrollContext scroll_ctx)
+{
+    ScrollBarFlags bar_flags = SCROLLBAR_NONE;
+    Size thumb_size = { 0 };
+
+    /* Calculate thumb size */
+    if (scroll_ctx.content_result.found)
+    {
+        Assert(scroll_ctx.area_result.found);
+
+        // Reserve padding on both ends of the scrollbar
+        Size virtual_area_size = scroll_ctx.area_result.box->size;
+        Size bar_track_size = { virtual_area_size.width - (f32)SCROLLBAR_PADDING * 2,
+                                virtual_area_size.height - (f32)SCROLLBAR_PADDING * 2 };
+
+        Size content_size = scroll_ctx.content_result.box->size;
+        bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
+        bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
+
+        if (bar_flags & SCROLLBAR_HORIZONTAL)
+        {
+            thumb_size.width = bar_track_size.width * (bar_track_size.width / content_size.width);
+            f32 scroll_range = content_size.width - virtual_area_size.width;
+            f32 thumb_range = bar_track_size.width - thumb_size.width;
+            scroll_ctx.delta.x = (scroll_ctx.delta.x / scroll_range) * thumb_range;
+        }
+        if (bar_flags & SCROLLBAR_VERTICAL)
+        {
+            thumb_size.height = bar_track_size.height * (bar_track_size.height / content_size.height);
+            f32 scroll_range = content_size.height - virtual_area_size.height;
+            f32 thumb_range = bar_track_size.height - thumb_size.height;
+            scroll_ctx.delta.y = (scroll_ctx.delta.y / scroll_range) * thumb_range;
+        }
+    }
+
+    /* Close nested UI boxes & Create scroll bar */
+    ui_box_end(scroll_ctx.area_box->child_first->child_first->child_first); // Content Box
+    ui_box_end(scroll_ctx.area_box->child_first->child_first); // Container Inner Box
+    if (bar_flags & SCROLLBAR_HORIZONTAL)
+        if (scroll_ctx.area_result.found)
+            scroll_bar(scroll_ctx, True, thumb_size.width);
+    ui_box_end(scroll_ctx.area_box->child_first); // Container Box
+    if (bar_flags & SCROLLBAR_VERTICAL)
+        if (scroll_ctx.area_result.found)
+            scroll_bar(scroll_ctx, False, thumb_size.height);
+    ui_box_end(scroll_ctx.area_box);
+}
+
+//
+// Widgets
+//
 
 UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const Sizing sizing, const Padding padding,
                         const Color bg_color, const Color text_color, const Color bg_color_hover,
@@ -1081,7 +1487,7 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
         status_color_ok.a = lerp_u8(0, 255, last_container->active_t);
         status_color_cancel.a = lerp_u8(255, 0, last_container->active_t);
         pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, last_container->active_t);
-        shadow_offset_x = lerp_f32(1.f, -2.f, last_container->active_t);
+        shadow_offset_x = lerp_f32(1.f, -1.f, last_container->active_t);
     }
 
     /* Create checkbox */
@@ -1103,7 +1509,7 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
         ui_box_end(ui_box_start(&(BoxConfig){
             .sizing = { fixed(switch_button_radius), fixed(switch_button_radius) },
             .color = switch_button_color,
-            .rect_style = { .corner_radius = switch_button_radius, .shadow_offset = { shadow_offset_x, 0 } } }));
+            .rect_style = { .corner_radius = switch_button_radius, .shadow_offset = { shadow_offset_x, 1.f } } }));
 
         /* right padding */
         UIBox* pad_right = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },
@@ -1118,234 +1524,4 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
     ui_box_end(container);
 
     return flags;
-}
-
-//
-// Situation 1 - only height exceed                   |  Situation 2 - both height and width exceed
-// ================================                   |  ==========================================
-//                                                    |  NOTE: Container Box's layout direction is top to bottom.
-//                                                    |
-//  <------ Scroll Box ------->                       |  <------- Scroll Box -------->
-//  ┏━━━━━━━━━━━━━━━━━┳━━━━━┳━┓<-- Scroll Bar         |  ┏━━━━━━━━━━━━━━━━━━━━━━━━━┳━┓<-- Scroll Bar (Vertical)
-//  ┃ +-------------+ ┃     ┃ ┃                       |  ┃ ╔═════════════════════╗ ┃ ┃
-//  ┃ |             | ┃     ┃█┃                       |  ┃ ║ +-----------------+ ║ ┃ ┃
-//  ┃ |   Content   | ┃ Gap ┃█┃<--- Scroll Bar Thumb  |  ┃ ║ |     Content     | ║ ┃█┃
-//  ┃ |     Box     | ┃ Box ┃ ┃                       |  ┃ ║ |       Box       | ║ ┃█┃<--- Scroll Bar Thumb (Vertical)
-//  ┃ |             | ┃     ┃ ┃                       |  ┃ ║ +-----------------+ ║ ┃ ┃
-//  ┃ +-------------+ ┃     ┃ ┃                       |  ┃ ║ |        ▓▓▓▓▓▓▓  | ║ ┃ ┃
-//  ┗━━━━━━━━━━━━━━━━━┻━━━━━┻━┛                       |  ┃ ║ +-----------------+ ║ ┃ ┃
-//  <- Container Box ->                               |  ┃ ╚═════════════════════╝ ┣━┫<--- Scroll Bar Pad (Vertical)
-//                                                    |  ┗━━━━━━━━━━━━━━━━━━━━━━━━━┻━┛
-//                                                    |    < Container Inner Box >       And...
-//                                                    |  <----- Container Box ----->       Scroll Bar Thumb (Horizontal)
-//                                                    |                                    Scroll Bar (Horizontal)
-//
-typedef enum
-{
-    // clang-format off
-    SCROLLBAR_NONE       = 0b00,
-    SCROLLBAR_HORIZONTAL = 0b01,
-    SCROLLBAR_VERTICAL   = 0b10,
-    SCROLLBAR_BOTH       = 0b11,
-    // clang-format on
-} ScrollBarFlags;
-
-static void start_tween(TweenAnimation* anim, f32 current_pos, f32 new_target, f64 now, f32 duration)
-{
-    anim->start = current_pos;
-    anim->target = new_target;
-    anim->started_at = now;
-    anim->duration = duration;
-}
-
-static f32 evaluate_tween(const TweenAnimation* anim, f64 now)
-{
-    Assert(anim->duration >= 0.f);
-    if (anim->duration > 0.f)
-    {
-        f32 progress = (f32)((now - anim->started_at) / anim->duration); // range: [0, 1]
-        if (progress >= 1.0)
-            return anim->target;
-        return anim->start + (anim->target - anim->start) * progress;
-    }
-    return anim->target;
-}
-
-ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
-{
-    f64 now = g_ui_context->current_time;
-    ScrollContext scroll_ctx = { 0 };
-
-    /* Create area box */
-    scroll_ctx.area_box =
-        ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .enable_clip = True });
-    String area_box_hash_str = extract_hash_str(&config->text_with_hash_str).hash_str;
-    update_box_key(scroll_ctx.area_box, area_box_hash_str);
-
-    /* Handle interaction */
-    UISignalFlags flags = UI_Signal_Flag_None;
-    scroll_ctx.area_result = find_or_insert_box_with_same_hash_str(area_box_hash_str);
-    UIBox* last_area_box = NULL;
-    if (scroll_ctx.area_result.found)
-    {
-        last_area_box = scroll_ctx.area_result.box;
-        update_interaction_flags(last_area_box, &flags);
-
-        /* Update scroll delta */
-        last_area_box->scroll_delta.x = evaluate_tween(&last_area_box->scroll_anim_x, now);
-        last_area_box->scroll_delta.y = evaluate_tween(&last_area_box->scroll_anim_y, now);
-
-        if (ui_hovered(flags))
-        {
-            if (g_ui_context->mouse_delta.x || g_ui_context->mouse_delta.y ||
-                last_area_box->scroll_anim_x.target - last_area_box->scroll_delta.x ||
-                last_area_box->scroll_anim_y.target - last_area_box->scroll_delta.y)
-            {
-                last_area_box->idle_timer = 0.f;
-                last_area_box->anim_state = TRANSITION_FORWARD;
-            }
-
-            /* Update smooth scrolling related state */
-            if (g_ui_context->mouse_scroll_delta.x)
-            {
-                f32 new_target_x =
-                    last_area_box->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
-                start_tween(&last_area_box->scroll_anim_x, last_area_box->scroll_delta.x, new_target_x, now, 0.09f);
-            }
-            if (g_ui_context->mouse_scroll_delta.y)
-            {
-                f32 new_target_y =
-                    last_area_box->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
-                start_tween(&last_area_box->scroll_anim_y, last_area_box->scroll_delta.y, new_target_y, now, 0.09f);
-            }
-        }
-
-        /* Handle scroll thumb fade-out transition */
-        if (last_area_box->anim_state == TRANSITION_FORWARD)
-            update_transition(&last_area_box->active_t, 8.f, False);
-        else if (last_area_box->anim_state == TRANSITION_REVERSE)
-            update_transition(&last_area_box->active_t, 2.f, True);
-
-        last_area_box->idle_timer += g_ui_context->frame_delta_time;
-        if (last_area_box->idle_timer > 1.f || !ui_hovered(flags))
-            last_area_box->anim_state = TRANSITION_REVERSE;
-
-        scroll_ctx.thumb_color = config->thumb_color;
-        scroll_ctx.thumb_color.a = lerp_u8(0, config->thumb_color.a, last_area_box->active_t);
-    }
-
-    /* Get last content box from cache to determine the box size */
-    String content_box_text_with_hash_str =
-        str_concat(&g_ui_context->arena, config->text_with_hash_str, str(" (content box)"));
-    String content_box_hash_str = extract_hash_str(&content_box_text_with_hash_str).hash_str;
-    {
-        scroll_ctx.content_result = find_or_insert_box_with_same_hash_str(content_box_hash_str);
-        if (scroll_ctx.content_result.found)
-        {
-            Assert(scroll_ctx.area_result.found); // ensure `last_area_box` valid
-
-            /* Virtual area (content viewport), may have padding when both scrollbars present */
-            Size virtual_area_size = scroll_ctx.area_result.box->size;
-            Size content_size = scroll_ctx.content_result.box->size;
-            {
-                ScrollBarFlags bar_flags = SCROLLBAR_NONE;
-                bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
-                bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
-                if (bar_flags == SCROLLBAR_BOTH)
-                {
-                    virtual_area_size.width -= SCROLLBAR_THICKNESS;
-                    virtual_area_size.height -= SCROLLBAR_THICKNESS;
-                }
-            }
-
-            /* Update scroll target */
-            f32 max_scroll_x = content_size.width - virtual_area_size.width;
-            f32 max_scroll_y = content_size.height - virtual_area_size.height;
-            last_area_box->scroll_anim_x.target = clamp(last_area_box->scroll_anim_x.target, 0, max_scroll_x);
-            last_area_box->scroll_anim_y.target = clamp(last_area_box->scroll_anim_y.target, 0, max_scroll_y);
-        }
-        scroll_ctx.delta = scroll_ctx.area_result.found ? last_area_box->scroll_delta : (Position){ 0.f, 0.f };
-    }
-
-    /* Create content box */
-    ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
-    ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } }); // Container Inner
-    UIBox* content_box = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
-                                                    .padding = config->padding,
-                                                    .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
-    update_box_key(content_box, content_box_hash_str);
-
-    return scroll_ctx;
-}
-
-static void scroll_bar(const b32 is_horizontal, const f32 delta, const f32 thickness, const f32 thumb_extent,
-                       const Color thumb_color)
-{
-    if (is_horizontal)
-    {
-        UIBox* bar =
-            ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(thickness) }, .child_offset = { delta, 0 } });
-        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(thumb_extent), fixed(thickness) },
-                                              .color = thumb_color,
-                                              .rect_style = { .corner_radius = SCROLLBAR_THICKNESS } }));
-        ui_box_end(bar);
-    }
-    else
-    {
-        UIBox* bar =
-            ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), grow({}) }, .child_offset = { 0, delta } });
-        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(thickness), fixed(thumb_extent) },
-                                              .color = thumb_color,
-                                              .rect_style = { .corner_radius = SCROLLBAR_THICKNESS } }));
-        ui_box_end(bar);
-    }
-}
-
-void ui_scrollable_area_end(ScrollContext scroll_ctx)
-{
-    ScrollBarFlags bar_flags = SCROLLBAR_NONE;
-    Size thumb_size = { 0 };
-
-    /* Calculate thumb size */
-    if (scroll_ctx.content_result.found)
-    {
-        Assert(scroll_ctx.area_result.found);
-        Size virtual_area_size = scroll_ctx.area_result.box->size;
-        Size content_size = scroll_ctx.content_result.box->size;
-        bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
-        bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
-        if (bar_flags == SCROLLBAR_BOTH)
-        {
-            virtual_area_size.width -= SCROLLBAR_THICKNESS;
-            virtual_area_size.height -= SCROLLBAR_THICKNESS;
-        }
-        if (bar_flags & SCROLLBAR_HORIZONTAL)
-        {
-            thumb_size.width = virtual_area_size.width * (virtual_area_size.width / content_size.width);
-            scroll_ctx.delta.x = scroll_ctx.delta.x * (virtual_area_size.width / content_size.width);
-        }
-        if (bar_flags & SCROLLBAR_VERTICAL)
-        {
-            thumb_size.height = virtual_area_size.height * (virtual_area_size.height / content_size.height);
-            scroll_ctx.delta.y = scroll_ctx.delta.y * (virtual_area_size.height / content_size.height);
-        }
-    }
-
-    /* Close nested UI boxes & Create scroll bar */
-    ui_box_end(scroll_ctx.area_box->child_first->child_first->child_first); // Content Box
-    ui_box_end(scroll_ctx.area_box->child_first->child_first); // Container Inner Box
-    if (bar_flags & SCROLLBAR_HORIZONTAL)
-        scroll_bar(True, scroll_ctx.delta.x, SCROLLBAR_THICKNESS, thumb_size.width, scroll_ctx.thumb_color);
-    ui_box_end(scroll_ctx.area_box->child_first); // Container Box
-    if (bar_flags == SCROLLBAR_BOTH)
-    {
-        UIBox* vbar_container = ui_box_start(
-            &(BoxConfig){ .sizing = { fixed(SCROLLBAR_THICKNESS), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
-        scroll_bar(False, scroll_ctx.delta.y, SCROLLBAR_THICKNESS, thumb_size.height, scroll_ctx.thumb_color);
-        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(SCROLLBAR_THICKNESS), fixed(SCROLLBAR_THICKNESS) } }));
-        ui_box_end(vbar_container);
-    }
-    else if (bar_flags & SCROLLBAR_VERTICAL)
-        scroll_bar(False, scroll_ctx.delta.y, SCROLLBAR_THICKNESS, thumb_size.height, scroll_ctx.thumb_color);
-    ui_box_end(scroll_ctx.area_box);
 }

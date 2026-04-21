@@ -47,6 +47,7 @@ typedef enum
     UI_Signal_Flag_Hovered  = (1 << 0),
     UI_Signal_Flag_LClicked = (1 << 1),
     UI_Signal_Flag_RClicked = (1 << 2),
+    UI_Signal_Flag_Held     = (1 << 3),
     // clang-format on
 } UISignalFlags;
 
@@ -54,6 +55,7 @@ typedef enum
 #define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
 #define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
 #define ui_clicked(signal_flags)  (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
+#define ui_held(signal_flags)     (signal_flags & UI_Signal_Flag_Held)
 
 //
 // Command
@@ -174,6 +176,8 @@ typedef struct
     Alignment alignment;
     LayoutDirection direction;
     b32 enable_clip;
+    b32 is_float;
+    Position float_offset;
 } BoxConfig;
 
 typedef struct
@@ -243,6 +247,7 @@ struct UIBox
 
     BoxType type;
     BoxConfig config;
+    b32 is_float;
 
     /* layout tree */
     UIBox* parent;
@@ -329,6 +334,7 @@ typedef struct
     Position mouse_scroll_delta;
     b32 mouse_lclick;
     b32 mouse_rclick;
+    b32 mouse_hold;
 
     /* ui */
     UIBox* root;
@@ -352,6 +358,7 @@ typedef struct
 
 typedef struct
 {
+    String text_with_hash_str;
     Position delta;
     UIBox* area_box;
     UIBoxFindResult area_result;

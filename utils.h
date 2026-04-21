@@ -142,7 +142,7 @@ void arena_pop(Arena* arena, const isize size, const isize count);
 // slice
 //
 
-#define slice_push(s, arena)                                                                                           \
+#define slice_push(arena, s)                                                                                           \
     ((s)->len >= (s)->capacity ? slice_grow(arena, s, sizeof(*(s)->data)),                                             \
      (s)->data + (s)->len++    : (s)->data + (s)->len++)
 
