@@ -361,8 +361,9 @@ typedef struct
     String text_with_hash_str;
     Position delta;
     UIBox* area_box;
-    UIBoxFindResult area_result;
-    UIBoxFindResult content_result;
+    UISignalFlags area_flags;
+    UIBoxFindResult last_area_result;
+    UIBoxFindResult last_content_result;
     Color thumb_color;
 } ScrollContext;
 
@@ -395,7 +396,7 @@ void ui_end_frame(isize arena_pos_backup);
 UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const Sizing sizing, const Padding padding,
                         const Color bg_color, const Color text_color, const Color bg_color_hover,
                         const Color bg_color_press);
-UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, const Color bg_color,
+UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, Color bg_color,
                            const Color switch_button_color, const Color bg_color_active);
 
 ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
