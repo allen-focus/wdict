@@ -1,12 +1,23 @@
 # Build
 
+To build the binary from source code, have [Visual Studio][VS] installed first, then you can use either of the following methods:
+
+**Option 1**: build script
+
+Simply run `build.bat`. The following commands are supported:
+
+- `build` – equivalent to `build release`
+- `build release`
+- `build debug`
+
+**Option 2**: CMake with Ninja (recommended for advanced configuration)
+
 ```
 cmake -B build -G "Ninja Multi-Config"
 cmake --build build --config release
 ```
 
 `--config` can be `release`, `debug`, or `profile`.
-
 
 # License
 

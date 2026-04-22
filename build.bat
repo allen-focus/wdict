@@ -1,8 +1,15 @@
+:: This is a simple build script. 
+:: For more advanced configuration options, please use CMake and refer to the CMakeLists.txt file.
+::
+:: Usage:
+::   `build` (equivalent to `build release`)
+::   `build release`
+::   `build debug`
+
 @echo off
 setlocal enabledelayedexpansion
 
 set ARGS=%*
-:: Use `build` or `build release` to build in release mode, `build debug` to build in debug mode
 if "%ARGS:release=%" neq "!ARGS!" (
     set IsRelease=1
     echo === Build in release mode ===
@@ -45,15 +52,14 @@ where /Q cl.exe || (
 :: Set compiler and linker flags
 :: ---------------------------------------------------------
 
-set CommonCompilerFlags=/nologo /W3 /WX /MP /D_CRT_SECURE_NO_WARNINGS
-:: Comment sanitize flag as it is too slow
+:: NOTE: Comment sanitize flag as it is too slow
 :: set CompilerDebugFlags=/Od /Zi /RTC1 /fsanitize=address
-set CompilerDebugFlags=/Od /Zi /RTC1
-:: set CompilerReleaseFlags=/O2 /GS- /DNDEBUG (CRT-free)
-set CompilerReleaseFlags=/O2 /DNDEBUG
 
-:: set LinkerReleaseFlags=/fixed /incremental:no /opt:icf /opt:ref /subsystem:windows (CRT-free)
-set LinkerReleaseFlags=/incremental:no /opt:icf /opt:ref
+set CommonCompilerFlags=/nologo /W3 /WX /MP /D_CRT_SECURE_NO_WARNINGS
+set CompilerDebugFlags=/Od /Zi /RTC1
+set CompilerReleaseFlags=/O2 /GS- /DNDEBUG
+
+set LinkerReleaseFlags=/fixed /incremental:no /opt:icf /opt:ref /subsystem:windows
 set LinkerDebugFlags=
 
 if %IsRelease%==1 (
