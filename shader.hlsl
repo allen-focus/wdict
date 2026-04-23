@@ -262,7 +262,7 @@ float4 ps(PS_INPUT input) : SV_TARGET
         // No border - use only texture color
         base_linear = texture_linear;
     }
-    float base_alpha = input.color.a * is_outer;
+    float base_alpha = lerp(input.border_color.a, input.color.a, is_inner) * is_outer;
 
     // Calculate shadow
     float shadow_alpha = 0;
