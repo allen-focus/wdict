@@ -124,7 +124,7 @@ static void process_frame(AppContext* app_context)
                         /* button 1 */
                         ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = s_child_gap_small })
                         {
-                            UISignalFlags flags = ui_button(str("hello##world"), font_zh, 
+                            UISignalFlags flags = ui_button(str("hello##world"), font_zh, 12,
                                                             (Sizing){ fit_grow({ .max = 70 }), fit({}) }, s_padding_small,
                                                             s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
                             if (ui_hovered(flags))
@@ -137,15 +137,15 @@ static void process_frame(AppContext* app_context)
                         }
 
                         /* button 2 */
-                        ui_button(str("goodbye I don't know it##world2"), font_mono, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                        ui_button(str("goodbye I don't know it##world2"), font_mono, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
                                   s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
                         
                         /* button 3 */
-                        ui_button(str("今天天气怎么样？何时去爬山？##zh"), font_zh, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                        ui_button(str("今天天气怎么样？何时去爬山？##zh"), font_zh, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
                                   s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
 
                         /* button 4 */
-                        ui_button(str("我歌月徘徊，我舞影零乱##zh2"), font_zh, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                        ui_button(str("我歌月徘徊，我舞影零乱##zh2"), font_zh, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
                                   s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
 
                         ui_box({ .sizing = { fixed(400), fit({}) }, .child_gap = 20, .direction = LAYOUT_TOP_TO_BOTTOM })

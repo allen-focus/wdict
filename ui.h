@@ -399,8 +399,8 @@ UIBox* ui_text(const String text, const TextConfig* text_config);
 isize ui_begin_frame(UIContext* ui_context);
 void ui_end_frame(isize arena_pos_backup);
 
-UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const Sizing sizing, const Padding padding,
-                        const Color bg_color, const Color text_color, const Color bg_color_hover,
+UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
+                        const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
                         const Color bg_color_press);
 UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, Color bg_color,
                            const Color switch_button_color, const Color bg_color_active);

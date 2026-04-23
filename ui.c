@@ -1469,8 +1469,8 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
 // Widgets
 //
 
-UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const Sizing sizing, const Padding padding,
-                        const Color bg_color, const Color text_color, const Color bg_color_hover,
+UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
+                        const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
                         const Color bg_color_press)
 {
     /* Transition-related variables */
@@ -1520,7 +1520,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                                             .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
     update_box_key(box, text_hash.hash_str);
     ui_text(text_hash.display_str,
-            &(TextConfig){ .font = font, .font_size = 12, .color = text_color, .line_height = 12 });
+            &(TextConfig){ .font = font, .font_size = font_size, .color = text_color, .line_height = font_size });
     ui_box_end(box);
 
     return flags;
