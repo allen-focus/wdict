@@ -1121,6 +1121,12 @@ static ScrollBarLayout make_scrollbar_layout(b32 is_horizontal, f32 thumb_thickn
     };
 }
 
+static void ui_update_last_active_scroll_thumb_key(UIContext* ui_context, const String thumb_hash_str)
+{
+    memcpy(g_ui_context->last_active_scroll_thumb_key.str, thumb_hash_str.data, thumb_hash_str.len);
+    g_ui_context->last_active_scroll_thumb_key.len = thumb_hash_str.len;
+}
+
 static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_extent)
 {
     /* Transition-related variables */
@@ -1133,53 +1139,45 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
     track_color.a = (u8)(scroll_ctx.thumb_color.a * SCROLLBAR_THUMB_OPACITY_TRACK);
     Color thumb_color = scroll_ctx.thumb_color;
 
-    /* [WHOLE BAR] Handle interaction and transition */
+    /* Get last bar and thumb box from cache */
     UISignalFlags bar_flags = UI_Signal_Flag_None;
     String bar_text_with_hash_str = str_concat(&g_ui_context->arena, scroll_ctx.text_with_hash_str,
                                                is_horizontal ? str(" (hbar)") : str(" (vbar)"));
     String bar_hash_str = extract_hash_str(&bar_text_with_hash_str).hash_str;
     UIBoxFindResult bar_result = find_or_insert_box_with_same_hash_str(bar_hash_str);
-    if (bar_result.found)
-    {
-        UIBox* last_bar = bar_result.box;
-        update_interaction_flags(last_bar, &bar_flags);
 
-        /* Expand scrollbar (track & thumb) with a fade-out transition when mouse hovers over it */
-        if (ui_hovered(bar_flags))
-        {
-            scroll_ctx.last_area_result.box->idle_timer = 0.f; // to suppress thumb auto-hide transition
-            last_bar->anim_state = TRANSITION_FORWARD;
-            if (last_bar->anim_state == TRANSITION_FORWARD)
-                update_transition(&last_bar->hot_t, 10.f, 1.f);
-        }
-        else
-        {
-            if (last_bar->hot_t)
-            {
-                last_bar->anim_state = TRANSITION_REVERSE;
-                if (update_transition(&last_bar->hot_t, 8.f, 0.f))
-                    last_bar->anim_state = TRANSITION_IDLE;
-            }
-        }
-        thickness = lerp_f32(SCROLLBAR_THICKNESS_MIN, SCROLLBAR_THICKNESS_MAX, last_bar->hot_t);
-        padding_end = lerp_f32(SCROLLBAR_PADDING_END_MIN, SCROLLBAR_PADDING_END_MAX, last_bar->hot_t);
-        track_color.a = lerp_u8(0, track_color.a, last_bar->hot_t);
-    }
-
-    /* [THUMB] Handle interaction and transition */
     UISignalFlags thumb_flags = UI_Signal_Flag_None;
     String thumb_text_with_hash_str = str_concat(&g_ui_context->arena, scroll_ctx.text_with_hash_str,
                                                  is_horizontal ? str(" (hthumb)") : str(" (vthumb)"));
     String thumb_hash_str = extract_hash_str(&thumb_text_with_hash_str).hash_str;
     UIBoxFindResult thumb_result = find_or_insert_box_with_same_hash_str(thumb_hash_str);
+
+    /* [THUMB] Handle interaction and transition */
     if (thumb_result.found)
     {
         UIBox* last_area = scroll_ctx.last_area_result.box;
         UIBox* last_thumb = thumb_result.box;
-        update_interaction_flags(last_thumb, &thumb_flags);
 
-        /* click/press/drag state and transition */
-        if (ui_hovered(thumb_flags) && (ui_pressed(thumb_flags) || last_thumb->active_t == 1.f))
+        /* Update interaction flags */
+        update_interaction_flags(last_thumb, &thumb_flags);
+        String last_active_scroll_thumb_hash_str = { g_ui_context->last_active_scroll_thumb_key.str,
+                                                     g_ui_context->last_active_scroll_thumb_key.len };
+        if (str_compare(last_active_scroll_thumb_hash_str, thumb_hash_str) && g_ui_context->mouse_press)
+            thumb_flags |= UI_Signal_Flag_Pressed;
+
+        /* Update last area scroll delta if thumb is dragged */
+        if (ui_pressed(thumb_flags))
+        {
+            last_area->scroll_delta.x += g_ui_context->mouse_delta.x / (SCROLL_SENSITIVITY * 10);
+            last_area->scroll_delta.y += g_ui_context->mouse_delta.y / (SCROLL_SENSITIVITY * 10);
+            start_tween(&last_area->scroll_anim_x, last_area->scroll_delta.x, last_area->scroll_delta.x,
+                        g_ui_context->current_time, 0.f);
+            start_tween(&last_area->scroll_anim_y, last_area->scroll_delta.y, last_area->scroll_delta.y,
+                        g_ui_context->current_time, 0.f);
+        }
+
+        /* Handle transition */
+        if (ui_pressed(thumb_flags) || (ui_hovered(thumb_flags) && last_thumb->active_t == 1.f))
         {
             if (ui_clicked(thumb_flags))
             {
@@ -1188,6 +1186,7 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
             }
             if (ui_pressed(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
             {
+                ui_update_last_active_scroll_thumb_key(g_ui_context, thumb_hash_str); /* important */
                 if (update_transition(&last_thumb->hot_t, 20.f, 1.f))
                     last_thumb->anim_state = TRANSITION_REVERSE;
             }
@@ -1200,18 +1199,16 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
             /* use `active_t == 1.f` to indicate the this transition is still active */
             last_thumb->active_t = 1.f;
         }
-        /* hover state and transition */
         else if (ui_hovered(thumb_flags))
         {
-            last_thumb->active_t = 0.f;
             last_thumb->anim_state = TRANSITION_FORWARD;
             update_transition(&last_thumb->hot_t, 14.f, SCROLLBAR_THUMB_OPACITY_HOVER);
+
+            last_thumb->active_t = 0.f;
         }
-        /* Hide/show the thumb with a fade-out transition when moving/idle mouse or scrolling in the scroll area */
         else
         {
-            last_thumb->active_t = 0.f;
-
+            // Hide/show the thumb with a fade-out transition when moving/idle mouse or scrolling in the scroll area
             if (ui_hovered(scroll_ctx.area_flags))
                 if (g_ui_context->mouse_delta.x || g_ui_context->mouse_delta.y ||
                     last_area->scroll_anim_x.target - last_area->scroll_delta.x ||
@@ -1230,8 +1227,38 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
             else if (last_thumb->anim_state == TRANSITION_REVERSE)
                 if (update_transition(&last_thumb->hot_t, 4.f, 0.f))
                     last_thumb->anim_state = TRANSITION_IDLE;
+
+            last_thumb->active_t = 0.f;
         }
         thumb_color.a = lerp_u8(0, scroll_ctx.thumb_color.a, last_thumb->hot_t);
+    }
+
+    /* [WHOLE BAR] Handle interaction and transition */
+    if (bar_result.found)
+    {
+        UIBox* last_bar = bar_result.box;
+        update_interaction_flags(last_bar, &bar_flags);
+
+        /* Expand scrollbar (track & thumb) with a fade-out transition when mouse hovers over it */
+        if (ui_pressed(thumb_flags) || ui_hovered(bar_flags))
+        {
+            scroll_ctx.last_area_result.box->idle_timer = 0.f; // to suppress thumb auto-hide transition
+            last_bar->anim_state = TRANSITION_FORWARD;
+            if (last_bar->anim_state == TRANSITION_FORWARD)
+                update_transition(&last_bar->hot_t, 14.f, 1.f);
+        }
+        else
+        {
+            if (last_bar->hot_t)
+            {
+                last_bar->anim_state = TRANSITION_REVERSE;
+                if (update_transition(&last_bar->hot_t, 12.f, 0.f))
+                    last_bar->anim_state = TRANSITION_IDLE;
+            }
+        }
+        thickness = lerp_f32(SCROLLBAR_THICKNESS_MIN, SCROLLBAR_THICKNESS_MAX, last_bar->hot_t);
+        padding_end = lerp_f32(SCROLLBAR_PADDING_END_MIN, SCROLLBAR_PADDING_END_MAX, last_bar->hot_t);
+        track_color.a = lerp_u8(0, track_color.a, last_bar->hot_t);
     }
 
     // clang-format off
@@ -1282,23 +1309,29 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
     scroll_ctx.thumb_color = config->thumb_color;
 
     /* Create area box */
-    scroll_ctx.area_box =
+    scroll_ctx.area =
         ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .enable_clip = True });
-    String area_box_hash_str = extract_hash_str(&config->text_with_hash_str).hash_str;
-    update_box_key(scroll_ctx.area_box, area_box_hash_str);
+    String area_hash_str = extract_hash_str(&config->text_with_hash_str).hash_str;
+    update_box_key(scroll_ctx.area, area_hash_str);
+
+    /* Get last content box */
+    String content_text_with_hash_str =
+        str_concat(&g_ui_context->arena, config->text_with_hash_str, str(" (content box)"));
+    String content_hash_str = extract_hash_str(&content_text_with_hash_str).hash_str;
 
     /* Handle interaction and animation */
     scroll_ctx.area_flags = UI_Signal_Flag_None;
-    scroll_ctx.last_area_result = find_or_insert_box_with_same_hash_str(area_box_hash_str);
-    UIBox* last_area_box = NULL;
+    scroll_ctx.last_area_result = find_or_insert_box_with_same_hash_str(area_hash_str);
+    UIBox* last_area = NULL;
     if (scroll_ctx.last_area_result.found)
     {
-        last_area_box = scroll_ctx.last_area_result.box;
-        update_interaction_flags(last_area_box, &scroll_ctx.area_flags);
+        last_area = scroll_ctx.last_area_result.box;
+        update_interaction_flags(last_area, &scroll_ctx.area_flags);
 
         /* Update scroll delta */
-        last_area_box->scroll_delta.x = evaluate_tween(&last_area_box->scroll_anim_x, now);
-        last_area_box->scroll_delta.y = evaluate_tween(&last_area_box->scroll_anim_y, now);
+        last_area->scroll_delta.x = evaluate_tween(&last_area->scroll_anim_x, now);
+        last_area->scroll_delta.y = evaluate_tween(&last_area->scroll_anim_y, now);
+        scroll_ctx.delta = last_area->scroll_delta;
 
         /* Update smooth scrolling related state */
         if (ui_hovered(scroll_ctx.area_flags))
@@ -1306,48 +1339,38 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
             if (g_ui_context->mouse_scroll_delta.x)
             {
                 f32 new_target_x =
-                    last_area_box->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
-                start_tween(&last_area_box->scroll_anim_x, last_area_box->scroll_delta.x, new_target_x, now, 0.09f);
+                    last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
+                start_tween(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target_x, now, 0.09f);
             }
             if (g_ui_context->mouse_scroll_delta.y)
             {
                 f32 new_target_y =
-                    last_area_box->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
-                start_tween(&last_area_box->scroll_anim_y, last_area_box->scroll_delta.y, new_target_y, now, 0.09f);
+                    last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
+                start_tween(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target_y, now, 0.09f);
             }
         }
-    }
 
-    /* Update scroll target position and delta */
-    String content_box_text_with_hash_str =
-        str_concat(&g_ui_context->arena, config->text_with_hash_str, str(" (content box)"));
-    String content_box_hash_str = extract_hash_str(&content_box_text_with_hash_str).hash_str;
-    {
-        scroll_ctx.last_content_result = find_or_insert_box_with_same_hash_str(content_box_hash_str);
-        if (scroll_ctx.last_content_result.found)
-        {
-            Assert(scroll_ctx.last_area_result.found); // ensure `last_area_box` valid
+        /* Update scroll target position and delta */
+        scroll_ctx.last_content_result = find_or_insert_box_with_same_hash_str(content_hash_str);
+        Assert(scroll_ctx.last_content_result.found);
 
-            /* Update scroll target */
-            Size virtual_area_size = scroll_ctx.last_area_result.box->size;
-            Size content_size = scroll_ctx.last_content_result.box->size;
+        Size virtual_area_size = scroll_ctx.last_area_result.box->size;
+        Size content_size = scroll_ctx.last_content_result.box->size;
 
-            f32 max_scroll_x = content_size.width - virtual_area_size.width;
-            f32 max_scroll_y = content_size.height - virtual_area_size.height;
+        f32 max_scroll_x = content_size.width - virtual_area_size.width;
+        f32 max_scroll_y = content_size.height - virtual_area_size.height;
 
-            last_area_box->scroll_anim_x.target = clamp(last_area_box->scroll_anim_x.target, 0, max_scroll_x);
-            last_area_box->scroll_anim_y.target = clamp(last_area_box->scroll_anim_y.target, 0, max_scroll_y);
-        }
-        scroll_ctx.delta = scroll_ctx.last_area_result.found ? last_area_box->scroll_delta : (Position){ 0.f, 0.f };
+        last_area->scroll_anim_x.target = clamp(last_area->scroll_anim_x.target, 0, max_scroll_x);
+        last_area->scroll_anim_y.target = clamp(last_area->scroll_anim_y.target, 0, max_scroll_y);
     }
 
     /* Create container & inner container & content box */
     ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
     ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } }); // Inner Container
-    UIBox* content_box = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
-                                                    .padding = config->padding,
-                                                    .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
-    update_box_key(content_box, content_box_hash_str);
+    UIBox* content = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
+                                                .padding = config->padding,
+                                                .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
+    update_box_key(content, content_hash_str);
 
     return scroll_ctx;
 }
@@ -1390,18 +1413,16 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
     }
 
     /* Close nested UI boxes & Create scrollbar */
-    ui_box_end(scroll_ctx.area_box->child_first->child_first->child_first); // Content
-    ui_box_end(scroll_ctx.area_box->child_first->child_first); // Inner Container
-    // if (bar_flags & SCROLLBAR_HORIZONTAL || scroll_ctx.area_box->idle_timer)
+    ui_box_end(scroll_ctx.area->child_first->child_first->child_first); // Content
+    ui_box_end(scroll_ctx.area->child_first->child_first); // Inner Container
     if (bar_flags & SCROLLBAR_HORIZONTAL)
         if (scroll_ctx.last_area_result.found)
             scroll_bar(scroll_ctx, True, thumb_size.width);
-    ui_box_end(scroll_ctx.area_box->child_first); // Container Box
-    // if (bar_flags & SCROLLBAR_VERTICAL || scroll_ctx.area_box->idle_timer)
+    ui_box_end(scroll_ctx.area->child_first); // Container
     if (bar_flags & SCROLLBAR_VERTICAL)
         if (scroll_ctx.last_area_result.found)
             scroll_bar(scroll_ctx, False, thumb_size.height);
-    ui_box_end(scroll_ctx.area_box);
+    ui_box_end(scroll_ctx.area);
 }
 
 //

@@ -218,7 +218,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_context->mouse_pos.x = LOWORD(lparam) / dpi_scale;
             ui_context->mouse_pos.y = HIWORD(lparam) / dpi_scale;
             ui_context->mouse_delta.x = ui_context->mouse_pos.x - mouse_pos_backup.x;
-            ui_context->mouse_delta.y = ui_context->mouse_pos.x - mouse_pos_backup.y;
+            ui_context->mouse_delta.y = ui_context->mouse_pos.y - mouse_pos_backup.y;
             return 0;
         }
 

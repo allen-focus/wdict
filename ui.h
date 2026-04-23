@@ -10,9 +10,9 @@
          ui_box_end(box), box = NULL)
 
 #define ui_scrollable_area(...)                                                                                                    \
-    for (ScrollContext scroll_context = ui_scrollable_area_start(&(ScrollableAreaConfig)__VA_ARGS__);                                                           \
-         scroll_context.area_box != NULL;                                                                                                  \
-         ui_scrollable_area_end(scroll_context), scroll_context.area_box = NULL)
+    for (ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig)__VA_ARGS__);                                                           \
+         scroll_ctx.area != NULL;                                                                                                  \
+         ui_scrollable_area_end(scroll_ctx), scroll_ctx.area = NULL)
 // clang-format on
 
 // NOTE: In FIT mode, min/max constraints act as bounds on content wrapping:
@@ -339,6 +339,7 @@ typedef struct
     /* ui */
     UIBox* root;
     UIBoxCache box_cache;
+    BoxKey last_active_scroll_thumb_key;
 
     /* render */
     GlyphCache glyph_cache;
@@ -360,7 +361,7 @@ typedef struct
 {
     String text_with_hash_str;
     Position delta;
-    UIBox* area_box;
+    UIBox* area;
     UISignalFlags area_flags;
     UIBoxFindResult last_area_result;
     UIBoxFindResult last_content_result;
