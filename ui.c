@@ -823,17 +823,24 @@ static Rect intersect_rects(Rect r1, Rect r2)
 static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 {
     f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
-    Rect box_rect = (Rect){
+    Rect rect = {
         box->position.x * dpi_scale,
         box->position.y * dpi_scale,
         (box->position.x + box->size.width) * dpi_scale,
         (box->position.y + box->size.height) * dpi_scale,
     };
+    RectStyle rect_style = { .border_color = box->config.rect_style.border_color,
+                             .border_thickness = box->config.rect_style.border_thickness * dpi_scale,
+                             .corner_radius = box->config.rect_style.corner_radius * dpi_scale,
+                             .shadow_offset = {
+                                 box->config.rect_style.shadow_offset.x * dpi_scale,
+                                 box->config.rect_style.shadow_offset.y * dpi_scale,
+                             } };
 
     /* If clip is enabled, push a clip */
     Rect new_clip = clip;
     if (box->config.enable_clip)
-        new_clip = intersect_rects(clip, box_rect);
+        new_clip = intersect_rects(clip, rect);
 
     // clang-format off
     /* Draw box rect/text */
@@ -845,9 +852,9 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 
             cmd->rect.base.type = UI_COMMAND_RECT;
             cmd->rect.base.size = sizeof(UICommandRect);
-            cmd->rect.rect      = box_rect;
+            cmd->rect.rect      = rect;
             cmd->rect.color     = box->config.color;
-            cmd->rect.style     = box->config.rect_style;
+            cmd->rect.style     = rect_style;
             cmd->rect.clip      = clip;
         }
         break;
@@ -1305,7 +1312,7 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
             UIBox* track = ui_box_start(&(BoxConfig){
                 .sizing = L.track_sizing,
                 .color = track_color,
-                .rect_style = { .corner_radius = thickness }
+                .rect_style = { .corner_radius = thickness / 2 }
             });
             {
                 UIBox* thumb_container = ui_box_start(&(BoxConfig){
@@ -1315,7 +1322,7 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
                 UIBox* thumb = ui_box_start(&(BoxConfig){
                     .sizing = L.thumb_sizing,
                     .color = thumb_color,
-                    .rect_style = { .corner_radius = thickness }
+                    .rect_style = { .corner_radius = thickness / 2 }
                 });
                 ui_box_end(thumb);
                 update_box_key(thumb, thumb_hash_str);
@@ -1508,7 +1515,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
     /* Create button box and text */
     UIBox* box = ui_box_start(&(BoxConfig){ .sizing = sizing,
                                             .color = bg_color_final,
-                                            .rect_style = { .corner_radius = 8 },
+                                            .rect_style = { .corner_radius = 4 },
                                             .padding = padding,
                                             .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
     update_box_key(box, text_hash.hash_str);
@@ -1559,7 +1566,7 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
     /* Create checkbox */
     UIBox* container = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT * 2), fixed(CHECKBOX_HEIGHT) },
                                                   .color = bg_color,
-                                                  .rect_style = { .corner_radius = CHECKBOX_HEIGHT },
+                                                  .rect_style = { .corner_radius = CHECKBOX_HEIGHT / 2 },
                                                   .padding = { CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD },
                                                   .alignment = { ALIGN_START, ALIGN_CENTER } });
     {
@@ -1571,11 +1578,11 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
         ui_box_end(pad_left);
 
         /* switch button */
-        f32 switch_button_radius = CHECKBOX_HEIGHT - CHECKBOX_PAD * 2;
+        f32 switch_button_width = CHECKBOX_HEIGHT - CHECKBOX_PAD * 2;
         ui_box_end(ui_box_start(&(BoxConfig){
-            .sizing = { fixed(switch_button_radius), fixed(switch_button_radius) },
+            .sizing = { fixed(switch_button_width), fixed(switch_button_width) },
             .color = switch_button_color,
-            .rect_style = { .corner_radius = switch_button_radius, .shadow_offset = { shadow_offset_x, 1.f } } }));
+            .rect_style = { .corner_radius = switch_button_width / 2, .shadow_offset = { shadow_offset_x, 1.f } } }));
 
         /* right padding */
         UIBox* pad_right = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },
