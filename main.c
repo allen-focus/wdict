@@ -237,21 +237,21 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_LBUTTONDOWN:
         {
             ui_context->mouse_lclick = True;
-            ui_context->mouse_hold = True;
+            ui_context->mouse_press = True;
             return 0;
         }
 
         case WM_RBUTTONDOWN:
         {
             ui_context->mouse_rclick = True;
-            ui_context->mouse_hold = True;
+            ui_context->mouse_press = True;
             return 0;
         }
 
         case WM_LBUTTONUP:
         case WM_RBUTTONUP:
         {
-            ui_context->mouse_hold = False;
+            ui_context->mouse_press = False;
             return 0;
         }
 

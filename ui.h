@@ -47,7 +47,7 @@ typedef enum
     UI_Signal_Flag_Hovered  = (1 << 0),
     UI_Signal_Flag_LClicked = (1 << 1),
     UI_Signal_Flag_RClicked = (1 << 2),
-    UI_Signal_Flag_Held     = (1 << 3),
+    UI_Signal_Flag_Pressed    = (1 << 3),
     // clang-format on
 } UISignalFlags;
 
@@ -55,7 +55,7 @@ typedef enum
 #define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
 #define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
 #define ui_clicked(signal_flags)  (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
-#define ui_held(signal_flags)     (signal_flags & UI_Signal_Flag_Held)
+#define ui_pressed(signal_flags)  (signal_flags & UI_Signal_Flag_Pressed)
 
 //
 // Command
@@ -334,7 +334,7 @@ typedef struct
     Position mouse_scroll_delta;
     b32 mouse_lclick;
     b32 mouse_rclick;
-    b32 mouse_hold;
+    b32 mouse_press;
 
     /* ui */
     UIBox* root;
@@ -385,7 +385,6 @@ extern UIContext* g_ui_context;
 void ui_init(const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi,
              UIRenderFunc render_fn);
 
-void ui_reset();
 UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
 UIBox* ui_text(const String text, const TextConfig* text_config);

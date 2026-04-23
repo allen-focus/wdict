@@ -15,20 +15,19 @@
 
 // Widgets
 
-#define ALPHA_MULTIPLIER_TRACK    0.4f
-#define ALPHA_MULTIPLIER_INACTIVE 0.5f // range: [0, 1]
-#define ALPHA_MULTIPLIER_HOVER    0.65f
-
 #define CHECKBOX_HEIGHT 22
 #define CHECKBOX_PAD    3
 
-#define SCROLLBAR_THICKNESS_MIN   5
-#define SCROLLBAR_THICKNESS_MAX   8.5
-#define SCROLLBAR_PADDING_END_MIN SCROLLBAR_THICKNESS_MIN * 0.5
-#define SCROLLBAR_PADDING_END_MAX SCROLLBAR_THICKNESS_MIN
-#define SCROLLBAR_SPACER          (SCROLLBAR_THICKNESS_MIN * 1.6)
-#define SCROLL_SENSITIVITY        4.f
-#define SCROLL_ANIM_DURATION      0.09f
+#define SCROLLBAR_THICKNESS_MIN          5
+#define SCROLLBAR_THICKNESS_MAX          8.5
+#define SCROLLBAR_PADDING_END_MIN        SCROLLBAR_THICKNESS_MIN * 0.5
+#define SCROLLBAR_PADDING_END_MAX        SCROLLBAR_THICKNESS_MIN
+#define SCROLLBAR_SPACER                 (SCROLLBAR_THICKNESS_MIN * 1.6)
+#define SCROLLBAR_THUMB_OPACITY_TRACK    0.4f
+#define SCROLLBAR_THUMB_OPACITY_INACTIVE 0.5f // range: [0, 1]
+#define SCROLLBAR_THUMB_OPACITY_HOVER    0.75f
+#define SCROLL_SENSITIVITY               4.f
+#define SCROLL_ANIM_DURATION             0.09f
 
 ///
 
@@ -187,15 +186,6 @@ void ui_deinit(UIContext* ui_context)
 //
 // Basic
 //
-
-void ui_reset()
-{
-    Assert(ui_box_stack.depth == 0);
-    memset(&ui_box_queue, 0, sizeof(ui_box_queue));
-    memset(&g_ui_context->command_queue, 0, sizeof(g_ui_context->command_queue));
-    g_ui_context->mouse_lclick = False;
-    g_ui_context->mouse_rclick = False;
-}
 
 static UIBox* ui_box_new()
 {
@@ -935,11 +925,18 @@ void ui_end_frame(isize arena_pos_backup)
     u32 physical_client_height = (u32)(g_ui_context->client_height * dpi_scale);
     g_ui_context->render_fn.flush_and_present(physical_client_width, physical_client_height);
 
-    ui_reset();
+    /* Reset state */
+    Assert(ui_box_stack.depth == 0);
+    memset(&ui_box_queue, 0, sizeof(ui_box_queue));
+    memset(&g_ui_context->command_queue, 0, sizeof(g_ui_context->command_queue));
     box_cache_remove_unused();
-    g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
-    g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
-    g_ui_context->frame_index++;
+    {
+        g_ui_context->mouse_lclick = False;
+        g_ui_context->mouse_rclick = False;
+        g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
+        g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
+        g_ui_context->frame_index++;
+    }
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
 }
@@ -969,8 +966,8 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
             *flags |= UI_Signal_Flag_LClicked;
         if (g_ui_context->mouse_rclick)
             *flags |= UI_Signal_Flag_RClicked;
-        if (g_ui_context->mouse_hold)
-            *flags |= UI_Signal_Flag_Held;
+        if (g_ui_context->mouse_press)
+            *flags |= UI_Signal_Flag_Pressed;
     }
 }
 
@@ -997,28 +994,18 @@ static Color lerp_color(const Color a, const Color b, const f32 t)
     return c;
 }
 
-static b32 update_transition(f32* transition, const f32 speed, const b32 reverse)
+static b32 update_transition(f32* transition, const f32 speed, const f32 target)
 {
+    Assert(target >= 0.f && target <= 1.f);
+
     b32 is_done = False;
-    if (!reverse)
+    *transition += (target - *transition) * speed * g_ui_context->frame_delta_time;
+    *transition = clamp(*transition, 0.f, 1.f);
+
+    if (fabs(*transition - target) < 0.001f)
     {
-        *transition += (1.f - *transition) * speed * g_ui_context->frame_delta_time;
-        *transition = clamp(*transition, 0.f, 1.f);
-        if (fabs(*transition - 1.f) < 0.001f)
-        {
-            is_done = True;
-            *transition = 1.f;
-        }
-    }
-    else
-    {
-        *transition -= *transition * speed * g_ui_context->frame_delta_time;
-        *transition = clamp(*transition, 0.f, 1.f);
-        if (fabs(*transition - 0.f) < 0.001f)
-        {
-            is_done = True;
-            *transition = 0.f;
-        }
+        is_done = True;
+        *transition = target;
     }
     return is_done;
 }
@@ -1141,13 +1128,10 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
     f32 padding_end = 0.f;
 
     f32 bar_thickness_max = SCROLLBAR_THICKNESS_MAX + SCROLLBAR_PADDING_END_MAX;
-    Color track_color = scroll_ctx.thumb_color;
-    track_color.a = (u8)(scroll_ctx.thumb_color.a * ALPHA_MULTIPLIER_TRACK);
 
+    Color track_color = scroll_ctx.thumb_color;
+    track_color.a = (u8)(scroll_ctx.thumb_color.a * SCROLLBAR_THUMB_OPACITY_TRACK);
     Color thumb_color = scroll_ctx.thumb_color;
-    u8 thumb_color_a_inactive = (u8)(scroll_ctx.thumb_color.a * ALPHA_MULTIPLIER_INACTIVE);
-    u8 thumb_color_a_hover = (u8)(scroll_ctx.thumb_color.a * ALPHA_MULTIPLIER_HOVER);
-    u8 thumb_color_a_active = scroll_ctx.thumb_color.a;
 
     /* [WHOLE BAR] Handle interaction and transition */
     UISignalFlags bar_flags = UI_Signal_Flag_None;
@@ -1163,17 +1147,17 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
         /* Expand scrollbar (track & thumb) with a fade-out transition when mouse hovers over it */
         if (ui_hovered(bar_flags))
         {
-            scroll_ctx.last_area_result.box->idle_timer = 0.f;
+            scroll_ctx.last_area_result.box->idle_timer = 0.f; // to suppress thumb auto-hide transition
             last_bar->anim_state = TRANSITION_FORWARD;
             if (last_bar->anim_state == TRANSITION_FORWARD)
-                update_transition(&last_bar->hot_t, 10.f, False);
+                update_transition(&last_bar->hot_t, 10.f, 1.f);
         }
         else
         {
             if (last_bar->hot_t)
             {
                 last_bar->anim_state = TRANSITION_REVERSE;
-                if (update_transition(&last_bar->hot_t, 8.f, True))
+                if (update_transition(&last_bar->hot_t, 8.f, 0.f))
                     last_bar->anim_state = TRANSITION_IDLE;
             }
         }
@@ -1190,60 +1174,64 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
     UIBoxFindResult thumb_result = find_or_insert_box_with_same_hash_str(thumb_hash_str);
     if (thumb_result.found)
     {
+        UIBox* last_area = scroll_ctx.last_area_result.box;
         UIBox* last_thumb = thumb_result.box;
         update_interaction_flags(last_thumb, &thumb_flags);
 
-        /* Hide/show the thumb with a fade-out transition when moving/idle mouse in the scroll area */
-        UIBox* last_area = scroll_ctx.last_area_result.box;
+        /* click/press/drag state and transition */
+        if (ui_hovered(thumb_flags) && (ui_pressed(thumb_flags) || last_thumb->active_t == 1.f))
         {
+            if (ui_clicked(thumb_flags))
+            {
+                last_thumb->anim_state = TRANSITION_FORWARD;
+                last_thumb->hot_t = SCROLLBAR_THUMB_OPACITY_HOVER;
+            }
+            if (ui_pressed(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
+            {
+                if (update_transition(&last_thumb->hot_t, 20.f, 1.f))
+                    last_thumb->anim_state = TRANSITION_REVERSE;
+            }
+            else
+            {
+                if (update_transition(&last_thumb->hot_t, 18.f, SCROLLBAR_THUMB_OPACITY_HOVER))
+                    last_thumb->anim_state = TRANSITION_IDLE;
+            }
+
+            /* use `active_t == 1.f` to indicate the this transition is still active */
+            last_thumb->active_t = 1.f;
+        }
+        /* hover state and transition */
+        else if (ui_hovered(thumb_flags))
+        {
+            last_thumb->active_t = 0.f;
+            last_thumb->anim_state = TRANSITION_FORWARD;
+            update_transition(&last_thumb->hot_t, 14.f, SCROLLBAR_THUMB_OPACITY_HOVER);
+        }
+        /* Hide/show the thumb with a fade-out transition when moving/idle mouse or scrolling in the scroll area */
+        else
+        {
+            last_thumb->active_t = 0.f;
+
             if (ui_hovered(scroll_ctx.area_flags))
                 if (g_ui_context->mouse_delta.x || g_ui_context->mouse_delta.y ||
                     last_area->scroll_anim_x.target - last_area->scroll_delta.x ||
                     last_area->scroll_anim_y.target - last_area->scroll_delta.y)
                 {
                     last_area->idle_timer = 0.f;
-                    last_area->anim_state = TRANSITION_FORWARD;
+                    last_thumb->anim_state = TRANSITION_FORWARD;
                 }
 
-            if (last_area->anim_state == TRANSITION_FORWARD)
-                update_transition(&last_area->active_t, 8.f, False);
-            else if (last_area->anim_state == TRANSITION_REVERSE)
-                update_transition(&last_area->active_t, 4.f, True);
-
             last_area->idle_timer += g_ui_context->frame_delta_time;
-            if (last_area->idle_timer > 0.75f || !ui_hovered(scroll_ctx.area_flags))
-                last_area->anim_state = TRANSITION_REVERSE;
+            if (last_area->idle_timer > 1.5f || !ui_hovered(scroll_ctx.area_flags))
+                last_thumb->anim_state = TRANSITION_REVERSE;
 
-            thumb_color.a = lerp_u8(0, thumb_color_a_inactive, last_area->active_t);
-        }
-
-        /* hover state and transition */
-        if (ui_hovered(thumb_flags))
-        {
-            thumb_color.a = thumb_color_a_hover;
-        }
-
-        /* click/press/drag state and transition */
-        if (ui_clicked(thumb_flags) || (last_thumb->active_t > 0))
-        {
-            if (ui_clicked(thumb_flags))
-            {
-                last_thumb->active_t = 0.f;
-                last_thumb->anim_state = TRANSITION_FORWARD;
-            }
-            if (last_thumb->anim_state == TRANSITION_IDLE || last_thumb->anim_state == TRANSITION_FORWARD)
-            {
-                if (update_transition(&last_thumb->active_t, 20.f, False))
-                    last_thumb->anim_state = TRANSITION_REVERSE;
-            }
-            else
-            {
-                if (update_transition(&last_thumb->active_t, 18.f, True))
+            if (last_thumb->anim_state == TRANSITION_FORWARD)
+                update_transition(&last_thumb->hot_t, 8.f, SCROLLBAR_THUMB_OPACITY_INACTIVE);
+            else if (last_thumb->anim_state == TRANSITION_REVERSE)
+                if (update_transition(&last_thumb->hot_t, 4.f, 0.f))
                     last_thumb->anim_state = TRANSITION_IDLE;
-            }
-            thumb_color.a = lerp_u8(ui_hovered(thumb_flags) ? thumb_color_a_hover : thumb_color_a_inactive,
-                                    thumb_color_a_active, last_thumb->active_t);
         }
+        thumb_color.a = lerp_u8(0, scroll_ctx.thumb_color.a, last_thumb->hot_t);
     }
 
     // clang-format off
@@ -1283,7 +1271,7 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
     }
     ui_box_end(bar_container);
     update_box_key(bar_container, bar_hash_str);
-    // clang-format off
+    // clang-format on
 }
 
 ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
@@ -1404,10 +1392,12 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
     /* Close nested UI boxes & Create scrollbar */
     ui_box_end(scroll_ctx.area_box->child_first->child_first->child_first); // Content
     ui_box_end(scroll_ctx.area_box->child_first->child_first); // Inner Container
+    // if (bar_flags & SCROLLBAR_HORIZONTAL || scroll_ctx.area_box->idle_timer)
     if (bar_flags & SCROLLBAR_HORIZONTAL)
         if (scroll_ctx.last_area_result.found)
             scroll_bar(scroll_ctx, True, thumb_size.width);
     ui_box_end(scroll_ctx.area_box->child_first); // Container Box
+    // if (bar_flags & SCROLLBAR_VERTICAL || scroll_ctx.area_box->idle_timer)
     if (bar_flags & SCROLLBAR_VERTICAL)
         if (scroll_ctx.last_area_result.found)
             scroll_bar(scroll_ctx, False, thumb_size.height);
@@ -1443,17 +1433,17 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
         {
             if (ui_clicked(flags))
             {
-                last_box->active_t = 0.f;
                 last_box->anim_state = TRANSITION_FORWARD;
+                last_box->active_t = 0.f;
             }
             if (last_box->anim_state == TRANSITION_IDLE || last_box->anim_state == TRANSITION_FORWARD)
             {
-                if (update_transition(&last_box->active_t, 30.f, False))
+                if (update_transition(&last_box->active_t, 30.f, 1.f))
                     last_box->anim_state = TRANSITION_REVERSE;
             }
             else
             {
-                if (update_transition(&last_box->active_t, 24.f, True))
+                if (update_transition(&last_box->active_t, 24.f, 0.f))
                     last_box->anim_state = TRANSITION_IDLE;
             }
             bg_color_final =
@@ -1502,7 +1492,7 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
                 last_container->anim_state = *check ? TRANSITION_REVERSE : TRANSITION_FORWARD;
             if (last_container->anim_state != TRANSITION_IDLE)
                 if (update_transition(&last_container->active_t, 18.f,
-                                      last_container->anim_state == TRANSITION_REVERSE))
+                                      last_container->anim_state == TRANSITION_REVERSE ? 0.f : 1.f))
                     last_container->anim_state = TRANSITION_IDLE;
         }
         bg_color = lerp_color(bg_color, bg_color_active, last_container->active_t);
