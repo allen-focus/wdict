@@ -211,6 +211,12 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     // Handle message
     switch (message)
     {
+        case WM_SETCURSOR:
+        {
+            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            return 0;
+        }
+
         case WM_MOUSEMOVE:
         {
             f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
@@ -238,6 +244,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ui_context->mouse_lclick = True;
             ui_context->mouse_press = True;
+            SetCapture(window);
             return 0;
         }
 
@@ -245,6 +252,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ui_context->mouse_rclick = True;
             ui_context->mouse_press = True;
+            SetCapture(window);
             return 0;
         }
 
@@ -252,7 +260,14 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_RBUTTONUP:
         {
             ui_context->mouse_press = False;
+            ReleaseCapture();
             return 0;
+        }
+
+        case WM_CAPTURECHANGED:
+        {
+            ui_context->mouse_press = False;
+            ReleaseCapture();
         }
 
         case WM_KEYDOWN:

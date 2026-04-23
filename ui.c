@@ -22,7 +22,7 @@
 #define SCROLLBAR_THICKNESS_MAX          8.5
 #define SCROLLBAR_PADDING_END_MIN        SCROLLBAR_THICKNESS_MIN * 0.5
 #define SCROLLBAR_PADDING_END_MAX        SCROLLBAR_THICKNESS_MIN
-#define SCROLLBAR_SPACER                 (SCROLLBAR_THICKNESS_MIN * 1.6)
+#define SCROLLBAR_SPACER                 (SCROLLBAR_THICKNESS_MIN * 2.25)
 #define SCROLLBAR_THUMB_OPACITY_TRACK    0.4f
 #define SCROLLBAR_THUMB_OPACITY_INACTIVE 0.5f // range: [0, 1]
 #define SCROLLBAR_THUMB_OPACITY_HOVER    0.75f
@@ -930,13 +930,12 @@ void ui_end_frame(isize arena_pos_backup)
     memset(&ui_box_queue, 0, sizeof(ui_box_queue));
     memset(&g_ui_context->command_queue, 0, sizeof(g_ui_context->command_queue));
     box_cache_remove_unused();
-    {
-        g_ui_context->mouse_lclick = False;
-        g_ui_context->mouse_rclick = False;
-        g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
-        g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
-        g_ui_context->frame_index++;
-    }
+
+    g_ui_context->mouse_lclick = False;
+    g_ui_context->mouse_rclick = False;
+    g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
+    g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
+    g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
 }
@@ -1121,10 +1120,15 @@ static ScrollBarLayout make_scrollbar_layout(b32 is_horizontal, f32 thumb_thickn
     };
 }
 
-static void ui_update_last_active_scroll_thumb_key(UIContext* ui_context, const String thumb_hash_str)
+static void update_last_active_scroll_thumb_key(BoxKey* last_thumb_key, const String thumb_hash_str)
 {
-    memcpy(g_ui_context->last_active_scroll_thumb_key.str, thumb_hash_str.data, thumb_hash_str.len);
-    g_ui_context->last_active_scroll_thumb_key.len = thumb_hash_str.len;
+    memcpy(last_thumb_key->str, thumb_hash_str.data, thumb_hash_str.len);
+    last_thumb_key->len = thumb_hash_str.len;
+}
+
+static void clear_last_active_scroll_thumb_key(BoxKey* last_thumb_key)
+{
+    last_thumb_key->len = 0;
 }
 
 static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_extent)
@@ -1158,35 +1162,52 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
         UIBox* last_area = scroll_ctx.last_area_result.box;
         UIBox* last_thumb = thumb_result.box;
 
+        // clang-format off
+        f32 mouse_pos                      = is_horizontal ? g_ui_context->mouse_pos.x                      : g_ui_context->mouse_pos.y;
+        f32 scroll_max_delta               = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
+        f32 scroll_thumb_delta_scale       = is_horizontal ? scroll_ctx.thumb_delta_scale.x                 : scroll_ctx.thumb_delta_scale.y;
+        f32* scroll_delta                  = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
+        TweenAnimation* scroll_anim        = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
+        f32* last_drag_anchor_mouse_pos    = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_pos.x    : &g_ui_context->last_drag_anchor_mouse_pos.y;
+        f32* last_drag_anchor_mouse_scroll = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_scroll.x : &g_ui_context->last_drag_anchor_mouse_scroll.y;
+        BoxKey* last_thumb_key             = is_horizontal ? &g_ui_context->last_active_scroll_thumb_x_key  : &g_ui_context->last_active_scroll_thumb_y_key;
+        // clang-format on
+
         /* Update interaction flags */
         update_interaction_flags(last_thumb, &thumb_flags);
-        String last_active_scroll_thumb_hash_str = { g_ui_context->last_active_scroll_thumb_key.str,
-                                                     g_ui_context->last_active_scroll_thumb_key.len };
+        String last_active_scroll_thumb_hash_str = { last_thumb_key->str, last_thumb_key->len };
         if (str_compare(last_active_scroll_thumb_hash_str, thumb_hash_str) && g_ui_context->mouse_press)
             thumb_flags |= UI_Signal_Flag_Pressed;
 
-        /* Update last area scroll delta if thumb is dragged */
-        if (ui_pressed(thumb_flags))
+        /* Reset cached active scroll state */
+        if (!ui_pressed(thumb_flags))
         {
-            last_area->scroll_delta.x += g_ui_context->mouse_delta.x / (SCROLL_SENSITIVITY * 10);
-            last_area->scroll_delta.y += g_ui_context->mouse_delta.y / (SCROLL_SENSITIVITY * 10);
-            start_tween(&last_area->scroll_anim_x, last_area->scroll_delta.x, last_area->scroll_delta.x,
-                        g_ui_context->current_time, 0.f);
-            start_tween(&last_area->scroll_anim_y, last_area->scroll_delta.y, last_area->scroll_delta.y,
-                        g_ui_context->current_time, 0.f);
+            clear_last_active_scroll_thumb_key(last_thumb_key);
+            *last_drag_anchor_mouse_pos = 0;
+            *last_drag_anchor_mouse_scroll = 0;
         }
 
         /* Handle transition */
         if (ui_pressed(thumb_flags) || (ui_hovered(thumb_flags) && last_thumb->active_t == 1.f))
         {
-            if (ui_clicked(thumb_flags))
+            if (ui_lclicked(thumb_flags))
             {
                 last_thumb->anim_state = TRANSITION_FORWARD;
                 last_thumb->hot_t = SCROLLBAR_THUMB_OPACITY_HOVER;
+
+                *last_drag_anchor_mouse_pos = mouse_pos;
+                *last_drag_anchor_mouse_scroll = *scroll_delta;
             }
             if (ui_pressed(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
             {
-                ui_update_last_active_scroll_thumb_key(g_ui_context, thumb_hash_str); /* important */
+                if (ui_pressed(thumb_flags))
+                {
+                    update_last_active_scroll_thumb_key(last_thumb_key, thumb_hash_str);
+                    f32 mouse_drag_delta = mouse_pos - *last_drag_anchor_mouse_pos;
+                    f32 target = *last_drag_anchor_mouse_scroll + mouse_drag_delta * scroll_thumb_delta_scale;
+                    *scroll_delta = clamp(target, 0.f, scroll_max_delta);
+                    start_tween(scroll_anim, *scroll_delta, *scroll_delta, g_ui_context->current_time, 0.f);
+                }
                 if (update_transition(&last_thumb->hot_t, 20.f, 1.f))
                     last_thumb->anim_state = TRANSITION_REVERSE;
             }
@@ -1263,7 +1284,7 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
 
     // clang-format off
     /* Create scrollbar */
-    ScrollBarLayout L = make_scrollbar_layout(is_horizontal, thickness, padding_end, bar_thickness_max, thumb_extent, scroll_ctx.delta);
+    ScrollBarLayout L = make_scrollbar_layout(is_horizontal, thickness, padding_end, bar_thickness_max, thumb_extent, scroll_ctx.thumb_delta);
     UIBox* bar_container = ui_box_start(&(BoxConfig){ .sizing = L.container_sizing, .is_float = True, .float_offset = L.float_offset, .direction = L.padding_direction });
     {
         // `padding-start` and `padding-end` is used to do the transition of scrollbar expanding
@@ -1357,11 +1378,11 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
         Size virtual_area_size = scroll_ctx.last_area_result.box->size;
         Size content_size = scroll_ctx.last_content_result.box->size;
 
-        f32 max_scroll_x = content_size.width - virtual_area_size.width;
-        f32 max_scroll_y = content_size.height - virtual_area_size.height;
+        scroll_ctx.max_delta.x = content_size.width - virtual_area_size.width;
+        scroll_ctx.max_delta.y = content_size.height - virtual_area_size.height;
 
-        last_area->scroll_anim_x.target = clamp(last_area->scroll_anim_x.target, 0, max_scroll_x);
-        last_area->scroll_anim_y.target = clamp(last_area->scroll_anim_y.target, 0, max_scroll_y);
+        last_area->scroll_anim_x.target = clamp(last_area->scroll_anim_x.target, 0, scroll_ctx.max_delta.x);
+        last_area->scroll_anim_y.target = clamp(last_area->scroll_anim_y.target, 0, scroll_ctx.max_delta.y);
     }
 
     /* Create container & inner container & content box */
@@ -1380,7 +1401,7 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
     ScrollBarFlags bar_flags = SCROLLBAR_NONE;
     Size thumb_size = { 0 };
 
-    /* Calculate thumb size */
+    /* Calculate thumb delta and size */
     if (scroll_ctx.last_content_result.found)
     {
         Assert(scroll_ctx.last_area_result.found);
@@ -1401,14 +1422,16 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
             thumb_size.width = bar_track_size.width * (bar_track_size.width / content_size.width);
             f32 scroll_range = content_size.width - virtual_area_size.width;
             f32 thumb_range = bar_track_size.width - thumb_size.width;
-            scroll_ctx.delta.x = (scroll_ctx.delta.x / scroll_range) * thumb_range;
+            scroll_ctx.thumb_delta_scale.x = scroll_range / thumb_range;
+            scroll_ctx.thumb_delta.x = (scroll_ctx.delta.x / scroll_range) * thumb_range;
         }
         if (bar_flags & SCROLLBAR_VERTICAL)
         {
             thumb_size.height = bar_track_size.height * (bar_track_size.height / content_size.height);
             f32 scroll_range = content_size.height - virtual_area_size.height;
             f32 thumb_range = bar_track_size.height - thumb_size.height;
-            scroll_ctx.delta.y = (scroll_ctx.delta.y / scroll_range) * thumb_range;
+            scroll_ctx.thumb_delta_scale.y = scroll_range / thumb_range;
+            scroll_ctx.thumb_delta.y = (scroll_ctx.delta.y / scroll_range) * thumb_range;
         }
     }
 

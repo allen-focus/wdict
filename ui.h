@@ -339,7 +339,10 @@ typedef struct
     /* ui */
     UIBox* root;
     UIBoxCache box_cache;
-    BoxKey last_active_scroll_thumb_key;
+    BoxKey last_active_scroll_thumb_x_key;
+    BoxKey last_active_scroll_thumb_y_key;
+    Position last_drag_anchor_mouse_pos;
+    Position last_drag_anchor_mouse_scroll;
 
     /* render */
     GlyphCache glyph_cache;
@@ -361,6 +364,9 @@ typedef struct
 {
     String text_with_hash_str;
     Position delta;
+    Position max_delta;
+    Position thumb_delta;
+    Vec2F32 thumb_delta_scale;
     UIBox* area;
     UISignalFlags area_flags;
     UIBoxFindResult last_area_result;

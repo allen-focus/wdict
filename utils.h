@@ -75,6 +75,11 @@ typedef int32_t       b32; // bool
 typedef struct
 {
     f32 x, y;
+} Vec2F32;
+
+typedef struct
+{
+    f32 x, y;
 } Position;
 
 typedef struct
