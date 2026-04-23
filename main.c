@@ -251,7 +251,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_RBUTTONDOWN:
         {
             ui_context->mouse_rclick = True;
-            ui_context->mouse_press = True;
             SetCapture(window);
             return 0;
         }

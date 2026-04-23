@@ -1133,12 +1133,24 @@ static void clear_last_active_scroll_thumb_key(BoxKey* last_thumb_key)
 
 static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_extent)
 {
+
+    UIBox* last_area = scroll_ctx.last_area_result.box;
+
+    // clang-format off
+    f32 mouse_pos                      = is_horizontal ? g_ui_context->mouse_pos.x                      : g_ui_context->mouse_pos.y;
+    f32 thumb_delta_scale              = is_horizontal ? scroll_ctx.thumb_delta_scale.x                 : scroll_ctx.thumb_delta_scale.y;
+    f32 scroll_max_delta               = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
+    f32* scroll_delta                  = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
+    TweenAnimation* scroll_anim        = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
+    f32* last_drag_anchor_mouse_pos    = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_pos.x    : &g_ui_context->last_drag_anchor_mouse_pos.y;
+    f32* last_drag_anchor_mouse_scroll = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_scroll.x : &g_ui_context->last_drag_anchor_mouse_scroll.y;
+    BoxKey* last_thumb_key             = is_horizontal ? &g_ui_context->last_active_scroll_thumb_x_key  : &g_ui_context->last_active_scroll_thumb_y_key;
+    // clang-format on
+
     /* Transition-related variables */
     f32 thickness = 0.f;
     f32 padding_end = 0.f;
-
     f32 bar_thickness_max = SCROLLBAR_THICKNESS_MAX + SCROLLBAR_PADDING_END_MAX;
-
     Color track_color = scroll_ctx.thumb_color;
     track_color.a = (u8)(scroll_ctx.thumb_color.a * SCROLLBAR_THUMB_OPACITY_TRACK);
     Color thumb_color = scroll_ctx.thumb_color;
@@ -1159,19 +1171,7 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
     /* [THUMB] Handle interaction and transition */
     if (thumb_result.found)
     {
-        UIBox* last_area = scroll_ctx.last_area_result.box;
         UIBox* last_thumb = thumb_result.box;
-
-        // clang-format off
-        f32 mouse_pos                      = is_horizontal ? g_ui_context->mouse_pos.x                      : g_ui_context->mouse_pos.y;
-        f32 scroll_max_delta               = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
-        f32 scroll_thumb_delta_scale       = is_horizontal ? scroll_ctx.thumb_delta_scale.x                 : scroll_ctx.thumb_delta_scale.y;
-        f32* scroll_delta                  = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
-        TweenAnimation* scroll_anim        = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
-        f32* last_drag_anchor_mouse_pos    = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_pos.x    : &g_ui_context->last_drag_anchor_mouse_pos.y;
-        f32* last_drag_anchor_mouse_scroll = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_scroll.x : &g_ui_context->last_drag_anchor_mouse_scroll.y;
-        BoxKey* last_thumb_key             = is_horizontal ? &g_ui_context->last_active_scroll_thumb_x_key  : &g_ui_context->last_active_scroll_thumb_y_key;
-        // clang-format on
 
         /* Update interaction flags */
         update_interaction_flags(last_thumb, &thumb_flags);
@@ -1200,11 +1200,11 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
             }
             if (ui_pressed(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
             {
-                if (ui_pressed(thumb_flags))
+                if (ui_pressed(thumb_flags) && *last_drag_anchor_mouse_pos)
                 {
                     update_last_active_scroll_thumb_key(last_thumb_key, thumb_hash_str);
                     f32 mouse_drag_delta = mouse_pos - *last_drag_anchor_mouse_pos;
-                    f32 target = *last_drag_anchor_mouse_scroll + mouse_drag_delta * scroll_thumb_delta_scale;
+                    f32 target = *last_drag_anchor_mouse_scroll + mouse_drag_delta * thumb_delta_scale;
                     *scroll_delta = clamp(target, 0.f, scroll_max_delta);
                     start_tween(scroll_anim, *scroll_delta, *scroll_delta, g_ui_context->current_time, 0.f);
                 }
@@ -1267,6 +1267,16 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
             last_bar->anim_state = TRANSITION_FORWARD;
             if (last_bar->anim_state == TRANSITION_FORWARD)
                 update_transition(&last_bar->hot_t, 14.f, 1.f);
+
+            /* Click to jump to clicked position */
+            if (ui_lclicked(bar_flags) && !ui_pressed(thumb_flags))
+            {
+                Assert(thumb_result.box);
+                f32 last_bar_position = is_horizontal ? last_bar->position.x : last_bar->position.y;
+                f32 last_thumb_size = is_horizontal ? thumb_result.box->size.width : thumb_result.box->size.height;
+                f32 target = (mouse_pos - last_bar_position - last_thumb_size / 2) * thumb_delta_scale;
+                start_tween(scroll_anim, *scroll_delta, target, g_ui_context->current_time, SCROLL_ANIM_DURATION);
+            }
         }
         else
         {
@@ -1357,18 +1367,18 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
         /* Update smooth scrolling related state */
         if (ui_hovered(scroll_ctx.area_flags))
         {
+            // clang-format off
             if (g_ui_context->mouse_scroll_delta.x)
             {
-                f32 new_target_x =
-                    last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
-                start_tween(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target_x, now, 0.09f);
+                f32 new_target_x = last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
+                start_tween(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target_x, now, SCROLL_ANIM_DURATION);
             }
             if (g_ui_context->mouse_scroll_delta.y)
             {
-                f32 new_target_y =
-                    last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
-                start_tween(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target_y, now, 0.09f);
+                f32 new_target_y = last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
+                start_tween(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target_y, now, SCROLL_ANIM_DURATION);
             }
+            // clang-format on
         }
 
         /* Update scroll target position and delta */
