@@ -23,7 +23,7 @@ u32 fnv1a_hash(const void* data, isize size)
 //   1. No check for the string buffer’s capacity.
 //   2. No validation of continuation‑byte format (the prefix should be 10xxx).
 //   3. Does not support multi‑codepoint sequences.
-byte* utf8_decode(byte* str, u32* codepoint)
+UnicodeDecode utf8_decode(const byte* str)
 {
     // clang-format off
     u8 length_table[] = {
@@ -39,14 +39,14 @@ byte* utf8_decode(byte* str, u32* codepoint)
 
     u8 length = length_table[str[0] >> 3];
     Assert(length > 0);
-    *codepoint = (str[0] & mask[length]) << 18;
+    u32 codepoint = (str[0] & mask[length]) << 18;
     switch (length) {
-        case 4: *codepoint |= str[3] & 0x3F;
-        case 3: *codepoint |= (str[2] & 0x3F) << 6;
-        case 2: *codepoint |= (str[1] & 0x3F) << 12;
-        default: *codepoint >>= shift[length];
+        case 4: codepoint |= str[3] & 0x3F;
+        case 3: codepoint |= (str[2] & 0x3F) << 6;
+        case 2: codepoint |= (str[1] & 0x3F) << 12;
+        default: codepoint >>= shift[length];
     }
-    return str + length;
+    return (UnicodeDecode){ codepoint, str + length };
     // clang-format on
 }
 

@@ -109,7 +109,13 @@ u32 fnv1a_hash(const void* data, isize size);
 // unicode
 //
 
-byte* utf8_decode(byte* str, u32* codepoint);
+typedef struct
+{
+    u32 codepoint;
+    const byte* next_p;
+} UnicodeDecode;
+
+UnicodeDecode utf8_decode(const byte* str);
 isize utf8_encode(byte* str, const u32 codepoint);
 
 //

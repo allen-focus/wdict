@@ -293,24 +293,22 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
     isize word_count = 0;
     {
         String text = text_box->data.text.content;
-        Assert(text.len == 0 || (text.data[0] != ' ' && text.data[text.len - 1] != ' '));
+        Assert(text.len == 0 || (text.data[0] != ' '));
 
         isize start = 0;
-        u32 start_codepoint = 0;
-
-        u32 current_codepoint = 0;
-        byte* ptr = text.data;
-        while (ptr - text.data < text.len)
+        const byte* ptr = text.data;
+        do
         {
-            byte* next = utf8_decode(ptr, &current_codepoint);
-            if (current_codepoint == ' ' || current_codepoint > 127)
+            UnicodeDecode res_current = utf8_decode(ptr);
+            const byte* next = res_current.next_p;
+            if (res_current.codepoint == ' ' || res_current.codepoint > 127)
             {
-                utf8_decode(&text.data[start], &start_codepoint);
-                if (start_codepoint != ' ')
+                UnicodeDecode res_start = utf8_decode(&text.data[start]);
+                if (res_start.codepoint != ' ')
                 {
                     /* For ASCII: measure up to current position (word boundary before delimiter).
                     For non-ASCII: include this character itself, treating it as a single-word unit. */
-                    isize end = start_codepoint < 127 ? ptr - text.data : next - text.data;
+                    isize end = res_start.codepoint < 127 ? ptr - text.data : next - text.data;
                     f32 word_width = get_text_width(glyph_cache, str_slice(text, start, end), text_box->data.text.font,
                                                     text_box->data.text.font_size, dpi);
                     min_width = max(min_width, word_width);
@@ -319,13 +317,16 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
                 start = next - text.data;
             }
             ptr = next;
-        }
+        } while (ptr - text.data < text.len);
 
         /* Handle last word */
-        f32 word_width = get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font,
-                                        text_box->data.text.font_size, dpi);
-        min_width = max(min_width, word_width);
-        word_count++;
+        if (text.data[start] != ' ')
+        {
+            f32 word_width = get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font,
+                                            text_box->data.text.font_size, dpi);
+            min_width = max(min_width, word_width);
+            word_count++;
+        }
 
         whole_text_width = get_text_width(glyph_cache, text_box->data.text.content, text_box->data.text.font,
                                           text_box->data.text.font_size, dpi);
@@ -714,11 +715,11 @@ static void perform_text_wrapping(UIBox* text_box)
     isize line_start = 0;
     isize last_break = 0;
 
-    byte* ptr = text.data;
+    const byte* ptr = text.data;
     while (ptr - text.data < text.len)
     {
-        u32 codepoint;
-        byte* next = utf8_decode(ptr, &codepoint);
+        UnicodeDecode res = utf8_decode(ptr);
+        const byte* next = res.next_p;
         isize distance = ptr - text.data;
 
         /* Check width */
@@ -735,7 +736,7 @@ static void perform_text_wrapping(UIBox* text_box)
         }
 
         /* Update break position */
-        if (codepoint == ' ' || codepoint > 127)
+        if (res.codepoint == ' ' || res.codepoint > 127)
             last_break = distance;
 
         ptr = next;

@@ -592,15 +592,15 @@ f32 renderer_get_text_width_for_dpi(GlyphCache* glyph_cache, const String text, 
                                     const u32 dpi)
 {
     f32 text_width = 0;
-    u32 codepoint = 0;
-    byte* p = text.data;
+    const byte* p = text.data;
     while (p - text.data < text.len)
     {
-        p = utf8_decode(p, &codepoint);
+        UnicodeDecode res = utf8_decode(p);
+        p = res.next_p;
 
-        GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, codepoint, font, font_size);
+        GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, res.codepoint, font, font_size);
         if (result.signal == LRU_SIGNAL_TOINSERT || result.signal == LRU_SIGNAL_TOEVICT)
-            renderer_update_glyph(glyph_cache, result.info, font, font_size, codepoint, dpi);
+            renderer_update_glyph(glyph_cache, result.info, font, font_size, res.codepoint, dpi);
 
         text_width += result.info->xadvance;
     }
@@ -613,8 +613,7 @@ f32 renderer_get_text_width_for_dpi(GlyphCache* glyph_cache, const String text, 
 f32 renderer_get_text_height_for_dpi(GlyphCache* glyph_cache, const String text, const Font* font, const f32 font_size,
                                      const u32 dpi)
 {
-    u32 codepoint = 0;
-    utf8_decode(text.data, &codepoint); // Get first glyph codepoint of the text
+    u32 codepoint = utf8_decode(text.data).codepoint; // Get first glyph codepoint of the text
     Assert(codepoint);
 
     GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, codepoint, font, font_size);
@@ -663,15 +662,15 @@ void renderer_draw_text(GlyphCache* glyph_cache, String text, const Position pos
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     f32 position_y = position.y + renderer_get_text_height_for_dpi(glyph_cache, text, font, font_size, dpi) * dpi_scale;
 
-    u32 codepoint = 0;
-    byte* p = text.data;
+    const byte* p = text.data;
     while (p - text.data < text.len)
     {
-        p = utf8_decode(p, &codepoint);
+        UnicodeDecode res = utf8_decode(p);
+        p = res.next_p;
 
-        GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, codepoint, font, font_size);
+        GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, res.codepoint, font, font_size);
         if (result.signal == LRU_SIGNAL_TOINSERT || result.signal == LRU_SIGNAL_TOEVICT)
-            renderer_update_glyph(glyph_cache, result.info, font, font_size, codepoint, dpi);
+            renderer_update_glyph(glyph_cache, result.info, font, font_size, res.codepoint, dpi);
 
         Rect target_rect = {
             .xmin = next_position_x + (f32)result.info->xoff,
