@@ -115,8 +115,14 @@ typedef struct
     const byte* next_p;
 } UnicodeDecode;
 
+b32 is_high_surrogate(const u16 c);
+b32 is_low_surrogate(const u16 c);
+
 UnicodeDecode utf8_decode(const byte* str);
 isize utf8_encode(byte* str, const u32 codepoint);
+
+UnicodeDecode utf16_decode(const u16* str);
+isize utf16_encode(u16* str, const u32 codepoint);
 
 //
 // arena

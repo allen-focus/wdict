@@ -89,6 +89,65 @@ isize utf8_encode(byte* str, const u32 codepoint)
     return length;
 }
 
+b32 is_high_surrogate(const u16 c)
+{
+    return c >= 0xD800 && c <= 0xDBFF;
+}
+
+b32 is_low_surrogate(const u16 c)
+{
+    return c >= 0xDC00 && c <= 0xDFFF;
+}
+
+// NOTE:
+//   1. No check for the string buffer’s capacity.
+//   2. Does not support multi‑codepoint sequences.
+UnicodeDecode utf16_decode(const u16* str)
+{
+    Assert(!is_low_surrogate(str[0]));
+
+    u32 codepoint = 0;
+    const u16* next_p = str;
+    if (is_high_surrogate(str[0]))
+    {
+        Assert(is_low_surrogate(str[1]));
+        codepoint += 0x10000;
+        codepoint += (str[0] - 0xD800) << 10;
+        codepoint += str[1] - 0xDC00;
+        next_p += 2;
+    }
+    else
+    {
+        codepoint = *str;
+        next_p += 1;
+    }
+    return (UnicodeDecode){ codepoint, (const byte*)next_p };
+}
+
+// NOTE:
+//   1. No check for the string buffer’s capacity.
+//   2. Does not support multi‑codepoint sequences.
+isize utf16_encode(u16* str, const u32 codepoint)
+{
+    isize length = 0;
+    if (codepoint <= 0xFFFF)
+    {
+        Assert(!(codepoint >= 0xD800 && codepoint <= 0xDFFF));
+        str[0] = (u16)codepoint;
+        length = 1;
+    }
+    else if (codepoint <= 0x10FFFF)
+    {
+        u32 v = codepoint - 0x10000;
+        str[0] = 0xD800 + (v >> 10);
+        str[1] = 0xDC00 + (v & 0x3FF);
+        length = 2;
+    }
+    else
+        Assert(0); // Invalid unicode
+    return length;
+}
+
 //
 // arena
 //
