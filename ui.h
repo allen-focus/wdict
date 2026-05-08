@@ -227,14 +227,13 @@ typedef enum
     TRANSITION_REVERSE,
 } TransitionState;
 
-// tween: in-between
 typedef struct
 {
     f32 start;
     f32 target;
     f64 started_at;
     f64 duration;
-} TweenAnimation;
+} TimedLerpAnimation;
 
 typedef struct UIBox UIBox;
 struct UIBox
@@ -274,8 +273,8 @@ struct UIBox
     f32 hot_t;
     f32 active_t;
     TransitionState anim_state;
-    TweenAnimation scroll_anim_x;
-    TweenAnimation scroll_anim_y;
+    TimedLerpAnimation scroll_anim_x;
+    TimedLerpAnimation scroll_anim_y;
 };
 
 //
@@ -401,8 +400,8 @@ UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
 UIBox* ui_text(const String text, const TextConfig* text_config);
 
-isize ui_begin_frame(UIContext* ui_context);
-void ui_end_frame(isize arena_pos_backup);
+isize ui_frame_begin(UIContext* ui_context);
+void ui_frame_end(isize arena_pos_backup);
 
 ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
 void ui_scrollable_area_end(ScrollContext scroll_ctx);

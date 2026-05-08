@@ -105,7 +105,7 @@ static void process_frame(AppContext* app_context)
     Font* font_symbol = &app_context->fonts[FONT_INDEX_ICON];
 
     TracyCZone(ctx, 1);
-    isize arena_pos_backup = ui_begin_frame(ui_context);
+    isize arena_pos_backup = ui_frame_begin(ui_context);
     {
         ui_box({
             .sizing = { fixed((f32)ui_context->client_width), fixed((f32)ui_context->client_height) },
@@ -182,7 +182,7 @@ static void process_frame(AppContext* app_context)
             }
         }
     }
-    ui_end_frame(arena_pos_backup);
+    ui_frame_end(arena_pos_backup);
     TracyCZoneEnd(ctx);
 }
 

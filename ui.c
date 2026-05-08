@@ -40,14 +40,6 @@ UIContext* g_ui_context = NULL;
 // Box cache
 //
 
-static b32 is_same_box_key(const BoxKey* a, const BoxKey* b)
-{
-    Assert(!a->len && !b->len);
-    if (a->len != b->len)
-        return False;
-    return memcmp(a->str, b->str, a->len) == 0;
-}
-
 static b32 is_same_box_key_void_version(const void* a, const void* b, isize size)
 {
     Assert(size == (sizeof(u8) * HASH_STR_MAX_LENGTH + sizeof(isize)));
@@ -819,7 +811,7 @@ static f64 get_current_time(u64 frame_index)
     return (f64)current_time.QuadPart / freq.QuadPart;
 }
 
-isize ui_begin_frame(UIContext* ui_context)
+isize ui_frame_begin(UIContext* ui_context)
 {
     g_ui_context = ui_context;
     if (g_ui_context->frame_index > 0)
@@ -920,7 +912,7 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
     }
 }
 
-void ui_end_frame(isize arena_pos_backup)
+void ui_frame_end(isize arena_pos_backup)
 {
     GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
     u32 dpi = g_ui_context->dpi;
@@ -1044,7 +1036,7 @@ static b32 update_transition(f32* transition, const f32 speed, const f32 target)
     return is_done;
 }
 
-static void start_tween(TweenAnimation* anim, f32 current_pos, f32 new_target, f64 now, f32 duration)
+static void start_timed_lerp(TimedLerpAnimation* anim, f32 current_pos, f32 new_target, f64 now, f32 duration)
 {
     anim->start = current_pos;
     anim->target = new_target;
@@ -1052,7 +1044,7 @@ static void start_tween(TweenAnimation* anim, f32 current_pos, f32 new_target, f
     anim->duration = duration;
 }
 
-static f32 evaluate_tween(const TweenAnimation* anim, f64 now)
+static f32 evaluate_timed_lerp(const TimedLerpAnimation* anim, f64 now)
 {
     Assert(anim->duration >= 0.f);
     if (anim->duration > 0.f)
@@ -1122,7 +1114,7 @@ typedef struct
 } ScrollBarLayout;
 
 static ScrollBarLayout make_scrollbar_layout(b32 is_horizontal, f32 thumb_thickness, f32 padding_end,
-                                             f32 bar_thickness_max, f32 thumb_extent, Position delta)
+                                             f32 bar_thickness_max, f32 thumb_size, Position delta)
 {
     if (is_horizontal)
         return (ScrollBarLayout){
@@ -1137,7 +1129,7 @@ static ScrollBarLayout make_scrollbar_layout(b32 is_horizontal, f32 thumb_thickn
             .track_sizing = { grow({}), fixed(thumb_thickness) },
             .thumb_container_sizing = { grow({}), fixed(thumb_thickness) },
             .thumb_container_child_offset = { delta.x, 0 },
-            .thumb_sizing = { fixed(thumb_extent), fixed(thumb_thickness) },
+            .thumb_sizing = { fixed(thumb_size), fixed(thumb_thickness) },
         };
     return (ScrollBarLayout){
         .container_sizing = { fixed(bar_thickness_max), grow({}) },
@@ -1151,11 +1143,11 @@ static ScrollBarLayout make_scrollbar_layout(b32 is_horizontal, f32 thumb_thickn
         .track_sizing = { fixed(thumb_thickness), grow({}) },
         .thumb_container_sizing = { fixed(thumb_thickness), grow({}) },
         .thumb_container_child_offset = { 0, delta.y },
-        .thumb_sizing = { fixed(thumb_thickness), fixed(thumb_extent) },
+        .thumb_sizing = { fixed(thumb_thickness), fixed(thumb_size) },
     };
 }
 
-static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_extent)
+static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_size)
 {
 
     UIBox* last_area = scroll_ctx.last_area_result.box;
@@ -1165,7 +1157,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     f32 thumb_delta_scale                  = is_horizontal ? scroll_ctx.thumb_delta_scale.x                 : scroll_ctx.thumb_delta_scale.y;
     f32 scroll_max_delta                   = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
     f32* scroll_delta                      = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
-    TweenAnimation* scroll_anim            = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
+    TimedLerpAnimation* scroll_anim            = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
     f32* ctx_last_drag_anchor_mouse_pos    = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_pos.x    : &g_ui_context->last_drag_anchor_mouse_pos.y;
     f32* ctx_last_drag_anchor_mouse_scroll = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_scroll.x : &g_ui_context->last_drag_anchor_mouse_scroll.y;
     BoxKey* ctx_last_thumb_key             = is_horizontal ? &g_ui_context->last_pressed_scroll_thumb_x_key  : &g_ui_context->last_pressed_scroll_thumb_y_key;
@@ -1232,7 +1224,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                     f32 mouse_drag_delta = mouse_pos - *ctx_last_drag_anchor_mouse_pos;
                     f32 target = *ctx_last_drag_anchor_mouse_scroll + mouse_drag_delta * thumb_delta_scale;
                     *scroll_delta = clamp(target, 0.f, scroll_max_delta);
-                    start_tween(scroll_anim, *scroll_delta, *scroll_delta, g_ui_context->current_time, 0.f);
+                    start_timed_lerp(scroll_anim, *scroll_delta, *scroll_delta, g_ui_context->current_time, 0.f);
                 }
                 if (update_transition(&last_thumb->hot_t, 20.f, 1.f))
                     last_thumb->anim_state = TRANSITION_REVERSE;
@@ -1301,7 +1293,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                 f32 last_bar_position = is_horizontal ? last_bar->position.x : last_bar->position.y;
                 f32 last_thumb_size = is_horizontal ? thumb_result.box->size.width : thumb_result.box->size.height;
                 f32 target = (mouse_pos - last_bar_position - last_thumb_size / 2) * thumb_delta_scale;
-                start_tween(scroll_anim, *scroll_delta, target, g_ui_context->current_time, SCROLL_ANIM_DURATION);
+                start_timed_lerp(scroll_anim, *scroll_delta, target, g_ui_context->current_time, SCROLL_ANIM_DURATION);
             }
         }
         else
@@ -1320,11 +1312,11 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
 
     // clang-format off
     /* Create scrollbar */
-    ScrollBarLayout L = make_scrollbar_layout(is_horizontal, thickness, padding_end, bar_thickness_max, thumb_extent, scroll_ctx.thumb_delta);
+    ScrollBarLayout L = make_scrollbar_layout(is_horizontal, thickness, padding_end, bar_thickness_max, thumb_size, scroll_ctx.thumb_delta);
     UIBox* bar_container = ui_box_start(&(BoxConfig){ .sizing = L.container_sizing, .is_float = True, .float_offset = L.float_offset, .direction = L.padding_direction });
     {
         // `padding-start` and `padding-end` is used to do the transition of scrollbar expanding
-        ui_box_end( ui_box_start(&(BoxConfig){ .sizing = L.padding_start_sizing, .alignment = { ALIGN_START, ALIGN_CENTER } }));
+        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.padding_start_sizing, .alignment = { ALIGN_START, ALIGN_CENTER } }));
         UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = L.inner_container_sizing, .direction = L.spacer_direction });
         {
             ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.spacer_sizing }));
@@ -1351,7 +1343,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
             ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.spacer_sizing }));
         }
         ui_box_end(inner_container);
-        ui_box_end( ui_box_start(&(BoxConfig){ .sizing = L.padding_end_sizing, .alignment = { ALIGN_END, ALIGN_CENTER } }));
+        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.padding_end_sizing, .alignment = { ALIGN_END, ALIGN_CENTER } }));
     }
     ui_box_end(bar_container);
     update_box_key(bar_container, bar_hash_str);
@@ -1382,11 +1374,11 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
 
         /* Update scroll delta */
         // NOTE: Order matters
-        //   evaluate_tween(now) must run BEFORE start_tween().
-        //   start_tween resets start_time = now, so evaluating after it
+        //   evaluate_timed_lerp(now) must run BEFORE start_timed_lerp().
+        //   start_timed_lerp resets start_time = now, so evaluating after it
         //   in the same frame yields t = 0 → no progress (thumb appears frozen).
-        last_area->scroll_delta.x = evaluate_tween(&last_area->scroll_anim_x, now);
-        last_area->scroll_delta.y = evaluate_tween(&last_area->scroll_anim_y, now);
+        last_area->scroll_delta.x = evaluate_timed_lerp(&last_area->scroll_anim_x, now);
+        last_area->scroll_delta.y = evaluate_timed_lerp(&last_area->scroll_anim_y, now);
         scroll_ctx.delta = last_area->scroll_delta;
 
         /* Update smooth scrolling related state */
@@ -1396,12 +1388,12 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
             if (g_ui_context->mouse_scroll_delta.x)
             {
                 f32 new_target_x = last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
-                start_tween(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target_x, now, SCROLL_ANIM_DURATION);
+                start_timed_lerp(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target_x, now, SCROLL_ANIM_DURATION);
             }
             if (g_ui_context->mouse_scroll_delta.y)
             {
                 f32 new_target_y = last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
-                start_tween(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target_y, now, SCROLL_ANIM_DURATION);
+                start_timed_lerp(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target_y, now, SCROLL_ANIM_DURATION);
             }
             // clang-format on
         }
