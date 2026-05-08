@@ -1,3 +1,6 @@
+#pragma comment(lib, "kernel32")
+#pragma comment(lib, "user32")
+
 #include "glyph_cache.h"
 #include "renderer.h"
 #include "ui.h"

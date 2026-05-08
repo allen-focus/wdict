@@ -1,4 +1,15 @@
-#include "pch.h" // IWYU pragma: keep
+#pragma comment(lib, "d3d11")
+#pragma comment(lib, "dxguid")
+#pragma comment(lib, "dxgi")
+#pragma comment(lib, "d3dcompiler")
+
+#define COBJMACROS
+#include <d3d11.h>
+#include <d3dcompiler.h>
+#include <dxgi1_3.h>
+#include <dxgidebug.h>
+#include <windows.h>
+
 #include "glyph_cache.h"
 #include "math.h"
 #include "shaders/d3d11_pshader.h"

@@ -3,7 +3,6 @@
 /resources/
 
 /.cache/
-/compile_commands.json
 
 /.zed/
 /.overseer.lua

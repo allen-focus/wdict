@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(ui C CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 #
 # Compiler / platform guard
@@ -32,7 +33,6 @@ endif()
 #
 
 file(GLOB C_SOURCES CONFIGURE_DEPENDS "*.c")
-
 add_executable(${PROJECT_NAME} ${C_SOURCES})
 
 #

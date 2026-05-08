@@ -1,8 +1,8 @@
 #pragma once
 
-#include "pch.h" // IWYU pragma: keep
 #include "glyph_cache.h"
 #include "utils.h"
+#include <windows.h>
 
 ///
 
