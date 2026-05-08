@@ -663,7 +663,8 @@ static void ui_box_resolve_position(UIBox* box)
         if (parent->config.direction == LAYOUT_LEFT_TO_RIGHT)
         {
             box->position.x += parent_data->next_child_offset_x;
-            parent_data->next_child_offset_x += box->size.width + parent->config.child_gap;
+            if (!box->is_float)
+                parent_data->next_child_offset_x += box->size.width + parent->config.child_gap;
 
             if (parent->config.alignment.x == ALIGN_CENTER)
                 box->position.x += parent->data.container.remaining_space.width / 2;
@@ -678,7 +679,8 @@ static void ui_box_resolve_position(UIBox* box)
         else
         {
             box->position.y += parent_data->next_child_offset_y;
-            parent_data->next_child_offset_y += box->size.height + parent->config.child_gap;
+            if (!box->is_float)
+                parent_data->next_child_offset_y += box->size.height + parent->config.child_gap;
 
             if (parent->config.alignment.y == ALIGN_CENTER)
                 box->position.y += parent->data.container.remaining_space.height / 2;
