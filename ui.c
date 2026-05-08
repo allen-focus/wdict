@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "glyph_cache.h"
 #include "utils.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -1305,8 +1306,17 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                     last_bar->anim_state = TRANSITION_IDLE;
             }
         }
-        thickness = lerp_f32(SCROLLBAR_THICKNESS_MIN, SCROLLBAR_THICKNESS_MAX, last_bar->hot_t);
-        padding_end = lerp_f32(SCROLLBAR_PADDING_END_MIN, SCROLLBAR_PADDING_END_MAX, last_bar->hot_t);
+
+        if (scroll_ctx.fixed_track)
+        {
+            thickness = SCROLLBAR_THICKNESS_MIN;
+            padding_end = SCROLLBAR_PADDING_END_MIN;
+        }
+        else
+        {
+            thickness = lerp_f32(SCROLLBAR_THICKNESS_MIN, SCROLLBAR_THICKNESS_MAX, last_bar->hot_t);
+            padding_end = lerp_f32(SCROLLBAR_PADDING_END_MIN, SCROLLBAR_PADDING_END_MAX, last_bar->hot_t);
+        }
         track_color.a = lerp_u8(0, track_color.a, last_bar->hot_t);
     }
 
@@ -1356,6 +1366,7 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
     ScrollContext scroll_ctx = { 0 };
     scroll_ctx.hash_str = config->hash_str;
     scroll_ctx.thumb_color = config->thumb_color;
+    scroll_ctx.fixed_track = config->fixed_track;
 
     /* Create area box */
     scroll_ctx.area =
