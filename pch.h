@@ -11,6 +11,7 @@
 // Win32
 #define COBJMACROS
 #include <windows.h>
+#include <windowsx.h>
 
 // DirectX
 #include <d3d11.h>

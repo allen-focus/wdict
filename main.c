@@ -6,6 +6,7 @@
 #include <math.h>
 #include <wchar.h>
 #include <windows.h>
+#include <windowsx.h>
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
 
@@ -221,8 +222,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
             Position mouse_pos_backup = ui_context->mouse_pos;
-            ui_context->mouse_pos.x = LOWORD(lparam) / dpi_scale;
-            ui_context->mouse_pos.y = HIWORD(lparam) / dpi_scale;
+            ui_context->mouse_pos.x = GET_X_LPARAM(lparam) / dpi_scale;
+            ui_context->mouse_pos.y = GET_Y_LPARAM(lparam) / dpi_scale;
             ui_context->mouse_delta.x = ui_context->mouse_pos.x - mouse_pos_backup.x;
             ui_context->mouse_delta.y = ui_context->mouse_pos.y - mouse_pos_backup.y;
             return 0;
