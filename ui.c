@@ -40,7 +40,15 @@ UIContext* g_ui_context = NULL;
 // Box cache
 //
 
-static b32 is_same_box_key(const void* a, const void* b, isize size)
+static b32 is_same_box_key(const BoxKey* a, const BoxKey* b)
+{
+    Assert(!a->len && !b->len);
+    if (a->len != b->len)
+        return False;
+    return memcmp(a->str, b->str, a->len) == 0;
+}
+
+static b32 is_same_box_key_void_version(const void* a, const void* b, isize size)
 {
     Assert(size == (sizeof(u8) * HASH_STR_MAX_LENGTH + sizeof(isize)));
     String str_a = { .data = (u8*)a, .len = *(isize*)((u8*)a + HASH_STR_MAX_LENGTH) };
@@ -52,7 +60,7 @@ static void box_cache_init(UIBoxCache* box_cache)
 {
     box_cache->arena = arena_new(BOX_CACHE_ARENA_CAPACITY);
     box_cache->lru_cache = lru_cache_create(&box_cache->arena, (BOX_CACHE_CAPACITY >> 1), BOX_CACHE_CAPACITY,
-                                            sizeof(BoxKey), sizeof(UIBox), fnv1a_hash, is_same_box_key);
+                                            sizeof(BoxKey), sizeof(UIBox), fnv1a_hash, is_same_box_key_void_version);
 }
 
 static void box_cache_deinit(UIBoxCache* box_cache)
@@ -101,10 +109,20 @@ static TextHash extract_hash_str(const String* text)
     return text_hash;
 }
 
-static void update_box_key(UIBox* box, String box_hash_str)
+static void update_box_key(UIBox* box, String hash_str)
 {
-    memcpy(box->key.str, box_hash_str.data, box_hash_str.len);
-    box->key.len = box_hash_str.len;
+    Assert(hash_str.len <= HASH_STR_MAX_LENGTH);
+    memcpy(box->key.str, hash_str.data, hash_str.len);
+    box->key.len = hash_str.len;
+}
+
+static BoxKey generate_box_key(String hash_str)
+{
+    Assert(hash_str.len <= HASH_STR_MAX_LENGTH);
+    BoxKey key = { 0 };
+    memcpy(key.str, hash_str.data, hash_str.len);
+    key.len = hash_str.len;
+    return key;
 }
 
 static UIBoxFindResult find_or_insert_box_with_same_hash_str(const String hash_str)
@@ -1128,31 +1146,20 @@ static ScrollBarLayout make_scrollbar_layout(b32 is_horizontal, f32 thumb_thickn
     };
 }
 
-static void update_last_active_scroll_thumb_key(BoxKey* last_thumb_key, const String thumb_hash_str)
-{
-    memcpy(last_thumb_key->str, thumb_hash_str.data, thumb_hash_str.len);
-    last_thumb_key->len = thumb_hash_str.len;
-}
-
-static void clear_last_active_scroll_thumb_key(BoxKey* last_thumb_key)
-{
-    last_thumb_key->len = 0;
-}
-
-static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_extent)
+static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_extent)
 {
 
     UIBox* last_area = scroll_ctx.last_area_result.box;
 
     // clang-format off
-    f32 mouse_pos                      = is_horizontal ? g_ui_context->mouse_pos.x                      : g_ui_context->mouse_pos.y;
-    f32 thumb_delta_scale              = is_horizontal ? scroll_ctx.thumb_delta_scale.x                 : scroll_ctx.thumb_delta_scale.y;
-    f32 scroll_max_delta               = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
-    f32* scroll_delta                  = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
-    TweenAnimation* scroll_anim        = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
-    f32* last_drag_anchor_mouse_pos    = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_pos.x    : &g_ui_context->last_drag_anchor_mouse_pos.y;
-    f32* last_drag_anchor_mouse_scroll = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_scroll.x : &g_ui_context->last_drag_anchor_mouse_scroll.y;
-    BoxKey* last_thumb_key             = is_horizontal ? &g_ui_context->last_active_scroll_thumb_x_key  : &g_ui_context->last_active_scroll_thumb_y_key;
+    f32 mouse_pos                          = is_horizontal ? g_ui_context->mouse_pos.x                      : g_ui_context->mouse_pos.y;
+    f32 thumb_delta_scale                  = is_horizontal ? scroll_ctx.thumb_delta_scale.x                 : scroll_ctx.thumb_delta_scale.y;
+    f32 scroll_max_delta                   = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
+    f32* scroll_delta                      = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
+    TweenAnimation* scroll_anim            = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
+    f32* ctx_last_drag_anchor_mouse_pos    = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_pos.x    : &g_ui_context->last_drag_anchor_mouse_pos.y;
+    f32* ctx_last_drag_anchor_mouse_scroll = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_scroll.x : &g_ui_context->last_drag_anchor_mouse_scroll.y;
+    BoxKey* ctx_last_thumb_key             = is_horizontal ? &g_ui_context->last_pressed_scroll_thumb_x_key  : &g_ui_context->last_pressed_scroll_thumb_y_key;
     // clang-format on
 
     /* Transition-related variables */
@@ -1165,34 +1172,36 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
 
     /* Get last bar and thumb box from cache */
     UISignalFlags bar_flags = UI_Signal_Flag_None;
-    String bar_text_with_hash_str = str_concat(&g_ui_context->arena, scroll_ctx.text_with_hash_str,
-                                               is_horizontal ? str(" (hbar)") : str(" (vbar)"));
-    String bar_hash_str = extract_hash_str(&bar_text_with_hash_str).hash_str;
+    String bar_hash_str =
+        str_concat(&g_ui_context->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hbar)") : str(" (vbar)"));
     UIBoxFindResult bar_result = find_or_insert_box_with_same_hash_str(bar_hash_str);
 
     UISignalFlags thumb_flags = UI_Signal_Flag_None;
-    String thumb_text_with_hash_str = str_concat(&g_ui_context->arena, scroll_ctx.text_with_hash_str,
-                                                 is_horizontal ? str(" (hthumb)") : str(" (vthumb)"));
-    String thumb_hash_str = extract_hash_str(&thumb_text_with_hash_str).hash_str;
+    String thumb_hash_str =
+        str_concat(&g_ui_context->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hthumb)") : str(" (vthumb)"));
     UIBoxFindResult thumb_result = find_or_insert_box_with_same_hash_str(thumb_hash_str);
 
     /* [THUMB] Handle interaction and transition */
     if (thumb_result.found)
     {
         UIBox* last_thumb = thumb_result.box;
-
-        /* Update interaction flags */
+        String last_pressed_scroll_thumb_hash_str = { ctx_last_thumb_key->str, ctx_last_thumb_key->len };
         update_interaction_flags(last_thumb, &thumb_flags);
-        String last_active_scroll_thumb_hash_str = { last_thumb_key->str, last_thumb_key->len };
-        if (str_compare(last_active_scroll_thumb_hash_str, thumb_hash_str) && g_ui_context->mouse_press)
-            thumb_flags |= UI_Signal_Flag_Pressed;
 
-        /* Reset cached active scroll state */
-        if (!ui_pressed(thumb_flags))
+        if (str_compare(last_pressed_scroll_thumb_hash_str, thumb_hash_str))
         {
-            clear_last_active_scroll_thumb_key(last_thumb_key);
-            *last_drag_anchor_mouse_pos = 0;
-            *last_drag_anchor_mouse_scroll = 0;
+            if (g_ui_context->mouse_press)
+            {
+                /* Mark as pressed if this thumb was being dragged even if not hovering */
+                thumb_flags |= UI_Signal_Flag_Pressed;
+            }
+            else if (!ui_pressed(thumb_flags))
+            {
+                /* Reset cached active scroll state */
+                ctx_last_thumb_key->len = 0;
+                *ctx_last_drag_anchor_mouse_pos = 0;
+                *ctx_last_drag_anchor_mouse_scroll = 0;
+            }
         }
 
         /* Handle transition */
@@ -1203,16 +1212,16 @@ static void scroll_bar(ScrollContext scroll_ctx, const b32 is_horizontal, const 
                 last_thumb->anim_state = TRANSITION_FORWARD;
                 last_thumb->hot_t = SCROLLBAR_THUMB_OPACITY_HOVER;
 
-                *last_drag_anchor_mouse_pos = mouse_pos;
-                *last_drag_anchor_mouse_scroll = *scroll_delta;
+                *ctx_last_drag_anchor_mouse_pos = mouse_pos;
+                *ctx_last_drag_anchor_mouse_scroll = *scroll_delta;
             }
             if (ui_pressed(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
             {
-                if (ui_pressed(thumb_flags) && *last_drag_anchor_mouse_pos)
+                if (ui_pressed(thumb_flags) && *ctx_last_drag_anchor_mouse_pos)
                 {
-                    update_last_active_scroll_thumb_key(last_thumb_key, thumb_hash_str);
-                    f32 mouse_drag_delta = mouse_pos - *last_drag_anchor_mouse_pos;
-                    f32 target = *last_drag_anchor_mouse_scroll + mouse_drag_delta * thumb_delta_scale;
+                    *ctx_last_thumb_key = generate_box_key(thumb_hash_str);
+                    f32 mouse_drag_delta = mouse_pos - *ctx_last_drag_anchor_mouse_pos;
+                    f32 target = *ctx_last_drag_anchor_mouse_scroll + mouse_drag_delta * thumb_delta_scale;
                     *scroll_delta = clamp(target, 0.f, scroll_max_delta);
                     start_tween(scroll_anim, *scroll_delta, *scroll_delta, g_ui_context->current_time, 0.f);
                 }
@@ -1344,23 +1353,18 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
 {
     f64 now = g_ui_context->current_time;
     ScrollContext scroll_ctx = { 0 };
-    scroll_ctx.text_with_hash_str = config->text_with_hash_str;
+    scroll_ctx.hash_str = config->hash_str;
     scroll_ctx.thumb_color = config->thumb_color;
 
     /* Create area box */
     scroll_ctx.area =
         ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .enable_clip = True });
-    String area_hash_str = extract_hash_str(&config->text_with_hash_str).hash_str;
-    update_box_key(scroll_ctx.area, area_hash_str);
-
-    /* Get last content box */
-    String content_text_with_hash_str =
-        str_concat(&g_ui_context->arena, config->text_with_hash_str, str(" (content box)"));
-    String content_hash_str = extract_hash_str(&content_text_with_hash_str).hash_str;
+    update_box_key(scroll_ctx.area, config->hash_str);
 
     /* Handle interaction and animation */
     scroll_ctx.area_flags = UI_Signal_Flag_None;
-    scroll_ctx.last_area_result = find_or_insert_box_with_same_hash_str(area_hash_str);
+    scroll_ctx.last_area_result = find_or_insert_box_with_same_hash_str(config->hash_str);
+    String content_hash_str = str_concat(&g_ui_context->arena, config->hash_str, str(" (content box)"));
     UIBox* last_area = NULL;
     if (scroll_ctx.last_area_result.found)
     {
@@ -1368,6 +1372,10 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
         update_interaction_flags(last_area, &scroll_ctx.area_flags);
 
         /* Update scroll delta */
+        // NOTE: Order matters
+        //   evaluate_tween(now) must run BEFORE start_tween().
+        //   start_tween resets start_time = now, so evaluating after it
+        //   in the same frame yields t = 0 → no progress (thumb appears frozen).
         last_area->scroll_delta.x = evaluate_tween(&last_area->scroll_anim_x, now);
         last_area->scroll_delta.y = evaluate_tween(&last_area->scroll_anim_y, now);
         scroll_ctx.delta = last_area->scroll_delta;
@@ -1458,11 +1466,11 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
     ui_box_end(scroll_ctx.area->child_first->child_first); // Inner Container
     if (bar_flags & SCROLLBAR_HORIZONTAL)
         if (scroll_ctx.last_area_result.found)
-            scroll_bar(scroll_ctx, True, thumb_size.width);
+            scrollbar(scroll_ctx, True, thumb_size.width);
     ui_box_end(scroll_ctx.area->child_first); // Container
     if (bar_flags & SCROLLBAR_VERTICAL)
         if (scroll_ctx.last_area_result.found)
-            scroll_bar(scroll_ctx, False, thumb_size.height);
+            scrollbar(scroll_ctx, False, thumb_size.height);
     ui_box_end(scroll_ctx.area);
 }
 
@@ -1474,8 +1482,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                         const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
                         const Color bg_color_press)
 {
-    /* Transition-related variables */
-    Color bg_color_final = bg_color;
+    Color bg_color_transition = bg_color;
 
     /* Get last button from cache */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
@@ -1490,7 +1497,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
 
         /* Transition */
         if (ui_hovered(flags))
-            bg_color_final = bg_color_hover;
+            bg_color_transition = bg_color_hover;
         if (ui_clicked(flags) || (last_box->active_t > 0))
         {
             if (ui_clicked(flags))
@@ -1508,14 +1515,14 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                 if (update_transition(&last_box->active_t, 24.f, 0.f))
                     last_box->anim_state = TRANSITION_IDLE;
             }
-            bg_color_final =
+            bg_color_transition =
                 lerp_color(ui_hovered(flags) ? bg_color_hover : bg_color, bg_color_press, last_box->active_t);
         }
     }
 
     /* Create button box and text */
     UIBox* box = ui_box_start(&(BoxConfig){ .sizing = sizing,
-                                            .color = bg_color_final,
+                                            .color = bg_color_transition,
                                             .rect_style = { .corner_radius = 4 },
                                             .padding = padding,
                                             .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
@@ -1527,18 +1534,18 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
     return flags;
 }
 
-UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, Color bg_color,
+UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color bg_color_active)
 {
     /* Transition-related variables */
+    Color bg_color_transition = bg_color;
     Color status_color_ok = switch_button_color;
     Color status_color_cancel = switch_button_color;
     f32 pad_width = 0.f;
     f32 shadow_offset_x = 0.f;
 
     /* Get last button from cache */
-    TextHash text_hash = extract_hash_str(&text_with_hash_str);
-    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
+    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(hash_str);
 
     /* Handle interaction and transition */
     UISignalFlags flags = UI_Signal_Flag_None;
@@ -1557,7 +1564,7 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
                                       last_container->anim_state == TRANSITION_REVERSE ? 0.f : 1.f))
                     last_container->anim_state = TRANSITION_IDLE;
         }
-        bg_color = lerp_color(bg_color, bg_color_active, last_container->active_t);
+        bg_color_transition = lerp_color(bg_color_transition, bg_color_active, last_container->active_t);
         status_color_ok.a = lerp_u8(0, 255, last_container->active_t);
         status_color_cancel.a = lerp_u8(255, 0, last_container->active_t);
         pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, last_container->active_t);
@@ -1566,7 +1573,7 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
 
     /* Create checkbox */
     UIBox* container = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT * 2), fixed(CHECKBOX_HEIGHT) },
-                                                  .color = bg_color,
+                                                  .color = bg_color_transition,
                                                   .rect_style = { .corner_radius = CHECKBOX_HEIGHT / 2 },
                                                   .padding = { CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD },
                                                   .alignment = { ALIGN_START, ALIGN_CENTER } });
@@ -1593,8 +1600,7 @@ UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b3
         ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(6), grow({}) } }));
         ui_box_end(pad_right);
     }
-    text_hash = extract_hash_str(&text_with_hash_str);
-    update_box_key(container, text_hash.hash_str);
+    update_box_key(container, hash_str);
     ui_box_end(container);
 
     return flags;

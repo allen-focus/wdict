@@ -339,8 +339,8 @@ typedef struct
     /* ui */
     UIBox* root;
     UIBoxCache box_cache;
-    BoxKey last_active_scroll_thumb_x_key;
-    BoxKey last_active_scroll_thumb_y_key;
+    BoxKey last_pressed_scroll_thumb_x_key;
+    BoxKey last_pressed_scroll_thumb_y_key;
     Position last_drag_anchor_mouse_pos;
     Position last_drag_anchor_mouse_scroll;
 
@@ -362,7 +362,7 @@ typedef struct
 
 typedef struct
 {
-    String text_with_hash_str;
+    String hash_str;
     Position delta;
     Position max_delta;
     Position thumb_delta;
@@ -376,7 +376,7 @@ typedef struct
 
 typedef struct
 {
-    String text_with_hash_str;
+    String hash_str;
     Sizing sizing;
     Color bg_color;
     Padding padding;
@@ -399,11 +399,11 @@ UIBox* ui_text(const String text, const TextConfig* text_config);
 isize ui_begin_frame(UIContext* ui_context);
 void ui_end_frame(isize arena_pos_backup);
 
+ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
+void ui_scrollable_area_end(ScrollContext scroll_ctx);
+
 UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
                         const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
                         const Color bg_color_press);
-UISignalFlags ui_switchbox(const String text_with_hash_str, const Font* font, b32* check, Color bg_color,
+UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color bg_color_active);
-
-ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
-void ui_scrollable_area_end(ScrollContext scroll_ctx);
