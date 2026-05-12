@@ -1666,6 +1666,30 @@ static UTF8 pop_utf8_left(TextEditState* state)
     return utf8;
 }
 
+static isize scan_codepoint_forward(const byte* base, isize text_len, isize pos, isize count)
+{
+    while (count > 0 && pos < text_len)
+    {
+        pos++;
+        while (pos < text_len && (base[pos] & 0xC0) == 0x80)
+            pos++;
+        count--;
+    }
+    return pos;
+}
+
+static isize scan_codepoint_backward(const byte* base, isize pos, isize count)
+{
+    while (count > 0 && pos > 0)
+    {
+        pos--;
+        while (pos > 0 && (base[pos] & 0xC0) == 0x80)
+            pos--;
+        count--;
+    }
+    return pos;
+}
+
 static void cursorbar(f32 parent_height, Padding parent_padding)
 {
     f32 bar_padding = 7;
@@ -1702,11 +1726,13 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         for (isize i = 0; i < g_ui_context->text_action_queue_count; i++)
         {
             TextAction* action = &g_ui_context->text_action_queue[i];
-            isize new_cursor = state->cursor + action->delta;
-            if (new_cursor < 0)
-                new_cursor = 0;
-            if (new_cursor > state->text_len)
-                new_cursor = state->text_len;
+            isize new_cursor;
+            if (action->delta > 0)
+                new_cursor = scan_codepoint_forward(state->base, state->text_len, state->cursor, (isize)action->delta);
+            else if (action->delta < 0)
+                new_cursor = scan_codepoint_backward(state->base, state->cursor, (isize)(-action->delta));
+            else
+                new_cursor = state->cursor;
             state->cursor = new_cursor;
             if (!(action->flags & TextActionFlag_KeepMark))
                 state->mark = state->cursor;
