@@ -60,10 +60,10 @@ static f32 s_child_gap_small  = 5;
 // clang-format on
 
 #define TEXT_BUFFER_SIZE 1024
-static u8 buf_1[TEXT_BUFFER_SIZE] = { 0 };
-static u8 buf_2[TEXT_BUFFER_SIZE] = { 0 };
-static BufferCursor buf_cursor_1 = { buf_1, 0, TEXT_BUFFER_SIZE };
-static BufferCursor buf_cursor_2 = { buf_2, 0, TEXT_BUFFER_SIZE };
+static u8 s_buf_1[TEXT_BUFFER_SIZE] = { 0 };
+static u8 s_buf_2[TEXT_BUFFER_SIZE] = { 0 };
+static TextEditState s_text_edit_state_1 = { s_buf_1, TEXT_BUFFER_SIZE, 0, 0 };
+static TextEditState s_text_edit_state_2 = { s_buf_2, TEXT_BUFFER_SIZE, 0, 0 };
 
 //
 // Helper
@@ -134,8 +134,8 @@ static void process_frame(AppContext* app_context)
                         // clang-format off
 
                          /* text feild */
-                         ui_text_field(&buf_cursor_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(400), s_padding_small, s_blue, s_red, s_black);
-                         ui_text_field(&buf_cursor_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200), s_padding_small, s_blue, s_red, s_black);
+                         ui_text_field(&s_text_edit_state_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(400), s_padding_small, s_blue, s_red, s_black);
+                         ui_text_field(&s_text_edit_state_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200), s_padding_small, s_blue, s_red, s_black);
 
                         /* button */
                         ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = s_child_gap_small })

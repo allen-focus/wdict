@@ -1464,7 +1464,7 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
         Size bar_track_size = { virtual_area_size.width - (f32)SCROLLBAR_SPACER * 2,
                                 virtual_area_size.height - (f32)SCROLLBAR_SPACER * 2 };
 
-        /* Determinate whether the area need to create horizontal/vertical scrollbar */
+        /* Determine whether the area need to create horizontal/vertical scrollbar */
         bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
         bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
 
@@ -1638,31 +1638,31 @@ typedef struct
     isize len;
 } UTF8;
 
-static UTF8 pop_utf8_from_buffer_cursor(BufferCursor* buf_cursor)
+static UTF8 pop_utf8_left(TextEditState* state)
 {
     UTF8 utf8 = { 0 };
 
-    /* Early return if `pos` equals 0 */
-    Assert(buf_cursor->pos >= 0);
-    if (buf_cursor->pos == 0)
+    /* Early return if `cursor` equals 0 */
+    Assert(state->cursor >= 0);
+    if (state->cursor == 0)
         return utf8;
 
     /* Pop a utf8 char */
-    buf_cursor->pos--;
-    while (buf_cursor->pos > 0)
+    state->cursor--;
+    while (state->cursor > 0)
     {
-        u8 c = buf_cursor->base[buf_cursor->pos];
+        u8 c = state->base[state->cursor];
 
         // continuation byte: 10xxxxxx
         if ((c & 0xC0) != 0x80)
             break;
-        buf_cursor->pos--;
+        state->cursor--;
     }
 
     /* Return */
-    UnicodeDecode res = utf8_decode(&buf_cursor->base[buf_cursor->pos]);
+    UnicodeDecode res = utf8_decode(&state->base[state->cursor]);
     utf8.codepoint = res.codepoint;
-    utf8.len = res.next_p - (buf_cursor->base + buf_cursor->pos);
+    utf8.len = res.next_p - (state->base + state->cursor);
 
     return utf8;
 }
@@ -1678,7 +1678,7 @@ static void cursorbar(f32 parent_height, Padding parent_padding)
                                           .float_offset = float_offset }));
 }
 
-UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_hash_str, const Font* font,
+UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_str, const Font* font,
                             const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg_color,
                             const Color border_color, const Color text_color)
 {
@@ -1706,29 +1706,30 @@ UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_has
                 continue;
             if (codepoint == '\b')
             {
-                pop_utf8_from_buffer_cursor(buf_cursor);
+                pop_utf8_left(state);
             }
             else if (codepoint == 127) // ASCII DEL (not the 'Delete' of keyboard): Ctrl+Backspace
             {
-                UTF8 utf8 = pop_utf8_from_buffer_cursor(buf_cursor);
+                UTF8 utf8 = pop_utf8_left(state);
                 while (utf8.codepoint == ' ')
-                    utf8 = pop_utf8_from_buffer_cursor(buf_cursor);
+                    utf8 = pop_utf8_left(state);
                 while (utf8.codepoint != ' ' && utf8.len != 0)
-                    utf8 = pop_utf8_from_buffer_cursor(buf_cursor);
+                    utf8 = pop_utf8_left(state);
                 if (utf8.codepoint == ' ')
-                    buf_cursor->pos += 1;
+                    state->cursor += 1;
             }
             else
             {
                 u8 utf8[4];
                 isize len = utf8_encode(utf8, codepoint);
-                if (buf_cursor->pos + len < buf_cursor->size)
+                if (state->cursor + len < state->size)
                 {
-                    memcpy(buf_cursor->base + buf_cursor->pos, utf8, len);
-                    buf_cursor->pos += len;
+                    memcpy(state->base + state->cursor, utf8, len);
+                    state->cursor += len;
                 }
             }
         }
+        state->mark = state->cursor;
     }
 
     UISignalFlags flags = UI_Signal_Flag_None;
@@ -1766,9 +1767,10 @@ UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_has
             .fixed_track = True,
             .auto_scroll_x = True });
         {
+            /* Determine the content (inner box) width inside the scroll area */
             get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
-            b32 has_input = buf_cursor->pos > 0;
-            String content_text = has_input ? (String){ buf_cursor->base, buf_cursor->pos } : text_hash.display_str;
+            b32 has_input = state->cursor > 0;
+            String content_text = has_input ? (String){ state->base, state->cursor } : text_hash.display_str;
             f32 text_width =
                 get_text_width(&g_ui_context->glyph_cache, content_text, font, font_size, g_ui_context->dpi);
             f32 inner_width = text_width + padding.left + padding.right;
@@ -1776,9 +1778,9 @@ UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_has
             UIBox* inner =
                 ui_box_start(&(BoxConfig){ .sizing = { fixed(inner_width), fit_grow({}) }, .padding = padding });
             {
-                if (buf_cursor->pos > 0)
+                if (state->cursor > 0)
                 {
-                    String input_text = { buf_cursor->base, buf_cursor->pos };
+                    String input_text = { state->base, state->cursor };
                     text_config.color = text_color;
                     ui_text(input_text, &text_config);
                     cursorbar(text_container_height.min_max.min, padding);
