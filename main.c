@@ -40,7 +40,7 @@ typedef struct
     Font fonts[FONT_CAPACITY];
 } AppContext;
 
-static u16 utf16_pending_high = 0;
+static u16 s_utf16_pending_high = 0;
 
 // clang-format off
 static Color s_black = { 0,   0,   0,   255 };
@@ -59,11 +59,11 @@ static f32 s_child_gap_medium = 10;
 static f32 s_child_gap_small  = 5;
 // clang-format on
 
-static u8 buf_1[1024] = { 0 };
-static u8 buf_2[1024] = { 0 };
-
-static BufferCursor buf_cursor_1 = { buf_1, 0, 1024 };
-static BufferCursor buf_cursor_2 = { buf_2, 0, 1024 };
+#define TEXT_BUFFER_SIZE 1024
+static u8 buf_1[TEXT_BUFFER_SIZE] = { 0 };
+static u8 buf_2[TEXT_BUFFER_SIZE] = { 0 };
+static BufferCursor buf_cursor_1 = { buf_1, 0, TEXT_BUFFER_SIZE };
+static BufferCursor buf_cursor_2 = { buf_2, 0, TEXT_BUFFER_SIZE };
 
 //
 // Helper
@@ -101,7 +101,7 @@ static void process_frame(AppContext* app_context)
     UIContext* ui_context = &app_context->ui;
     Font* font_ui = &app_context->fonts[FONT_INDEX_UI];
     Font* font_zh = &app_context->fonts[FONT_INDEX_ZH];
-    Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
+    // Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
     Font* font_symbol = &app_context->fonts[FONT_INDEX_ICON];
 
     TracyCZone(ctx, 1);
@@ -133,9 +133,9 @@ static void process_frame(AppContext* app_context)
                     {
                         // clang-format off
 
-                        /* text feild */
-                        ui_text_field(&buf_cursor_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(200), s_padding_small, s_blue, s_red, s_black);
-                        ui_text_field(&buf_cursor_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200), s_padding_small, s_blue, s_red, s_black);
+                         /* text feild */
+                         ui_text_field(&buf_cursor_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(400), s_padding_small, s_blue, s_red, s_black);
+                         ui_text_field(&buf_cursor_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200), s_padding_small, s_blue, s_red, s_black);
 
                         /* button */
                         ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = s_child_gap_small })
@@ -283,17 +283,23 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_CHAR:
         {
             wchar_t c = (wchar_t)wparam;
+            u32 codepoint = 0;
             if (is_high_surrogate(c))
-                utf16_pending_high = c;
+            {
+                s_utf16_pending_high = c;
+            }
             else if (is_low_surrogate(c))
             {
-                Assert(utf16_pending_high);
-                u16 surrogate_pair[2] = { utf16_pending_high, c };
-                UnicodeDecode res = utf16_decode(surrogate_pair);
-                ui_context->char_input_len = utf8_encode(ui_context->char_input_utf8, res.codepoint);
+                Assert(s_utf16_pending_high);
+                u16 surrogate_pair[2] = { s_utf16_pending_high, c };
+                codepoint = utf16_decode(surrogate_pair).codepoint;
             }
             else
-                ui_context->char_input_len = utf8_encode(ui_context->char_input_utf8, utf16_decode(&c).codepoint);
+            {
+                codepoint = utf16_decode(&c).codepoint;
+            }
+            if (codepoint && ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
+                ui_context->char_input_queue[ui_context->char_input_queue_count++] = codepoint;
             return 0;
         }
 

@@ -32,8 +32,9 @@
 #define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }
 #define grow(...)     { __VA_ARGS__, SIZING_MODE_GROW }
 
-#define COMMAND_QUEUE_CAPACITY 4096
-#define HASH_STR_MAX_LENGTH    128
+#define COMMAND_QUEUE_CAPACITY    4096
+#define HASH_STR_MAX_LENGTH       128
+#define CHAR_INPUT_QUEUE_CAPACITY 64
 
 #define ICON_FONT_UTF8_OK     "\xEE\xA0\x80"
 #define ICON_FONT_UTF8_CANCEL "\xEE\xA0\x81"
@@ -340,8 +341,8 @@ typedef struct
     b32 mouse_lclick;
     b32 mouse_rclick;
     b32 mouse_press;
-    u8 char_input_utf8[4];
-    isize char_input_len;
+    u32 char_input_queue[CHAR_INPUT_QUEUE_CAPACITY];
+    isize char_input_queue_count;
 
     /* ui general */
     UIBox* root;
@@ -377,6 +378,7 @@ typedef struct
     UIBoxFindResult last_content_result;
     Color thumb_color;
     b32 fixed_track;
+    b32 auto_scroll_x;
 } ScrollContext;
 
 typedef struct
@@ -387,6 +389,7 @@ typedef struct
     Padding padding;
     Color thumb_color;
     b32 fixed_track;
+    b32 auto_scroll_x;
 } ScrollableAreaConfig;
 
 ///

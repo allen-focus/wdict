@@ -962,7 +962,7 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_context->mouse_rclick = False;
     g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
-    g_ui_context->char_input_len = 0;
+    g_ui_context->char_input_queue_count = 0;
     g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
@@ -1367,6 +1367,7 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
     scroll_ctx.hash_str = config->hash_str;
     scroll_ctx.thumb_color = config->thumb_color;
     scroll_ctx.fixed_track = config->fixed_track;
+    scroll_ctx.auto_scroll_x = config->auto_scroll_x;
 
     /* Create area box */
     scroll_ctx.area =
@@ -1436,7 +1437,8 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
         {
             if (g_ui_context->mouse_scroll_delta.x && scroll_ctx.max_delta.x > 0)
             {
-                f32 new_target = last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
+                f32 new_target =
+                    last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
                 new_target = clamp(new_target, 0, scroll_ctx.max_delta.x);
                 start_timed_lerp(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target,
                                  g_ui_context->current_time, SCROLL_ANIM_DURATION);
@@ -1444,13 +1446,19 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
             }
             if (g_ui_context->mouse_scroll_delta.y && scroll_ctx.max_delta.y > 0)
             {
-                f32 new_target = last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
+                f32 new_target =
+                    last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
                 new_target = clamp(new_target, 0, scroll_ctx.max_delta.y);
                 start_timed_lerp(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target,
                                  g_ui_context->current_time, SCROLL_ANIM_DURATION);
                 g_ui_context->mouse_scroll_delta.y = 0;
             }
         }
+
+        /* Auto-scroll to keep the trailing edge of content visible */
+        if (scroll_ctx.auto_scroll_x && scroll_ctx.max_delta.x > 0)
+            start_timed_lerp(&last_area->scroll_anim_x, last_area->scroll_delta.x, scroll_ctx.max_delta.x,
+                             g_ui_context->current_time, SCROLL_ANIM_DURATION);
 
         /* Reserve padding on both ends of the scrollbar */
         Size bar_track_size = { virtual_area_size.width - (f32)SCROLLBAR_SPACER * 2,
@@ -1624,6 +1632,52 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     return flags;
 }
 
+typedef struct
+{
+    u32 codepoint;
+    isize len;
+} UTF8;
+
+static UTF8 pop_utf8_from_buffer_cursor(BufferCursor* buf_cursor)
+{
+    UTF8 utf8 = { 0 };
+
+    /* Early return if `pos` equals 0 */
+    Assert(buf_cursor->pos >= 0);
+    if (buf_cursor->pos == 0)
+        return utf8;
+
+    /* Pop a utf8 char */
+    buf_cursor->pos--;
+    while (buf_cursor->pos > 0)
+    {
+        u8 c = buf_cursor->base[buf_cursor->pos];
+
+        // continuation byte: 10xxxxxx
+        if ((c & 0xC0) != 0x80)
+            break;
+        buf_cursor->pos--;
+    }
+
+    /* Return */
+    UnicodeDecode res = utf8_decode(&buf_cursor->base[buf_cursor->pos]);
+    utf8.codepoint = res.codepoint;
+    utf8.len = res.next_p - (buf_cursor->base + buf_cursor->pos);
+
+    return utf8;
+}
+
+static void cursorbar(f32 parent_height, Padding parent_padding)
+{
+    f32 bar_padding = 7;
+    f32 bar_height = parent_height - bar_padding * 2;
+    Position float_offset = { 0, -parent_padding.top + bar_padding };
+    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(2), fixed(bar_height) },
+                                          .color = { 0, 0, 0, 255 },
+                                          .is_float = True,
+                                          .float_offset = float_offset }));
+}
+
 UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_hash_str, const Font* font,
                             const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg_color,
                             const Color border_color, const Color text_color)
@@ -1645,12 +1699,35 @@ UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_has
     b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
     if (is_focused)
     {
-        isize* input_len = &g_ui_context->char_input_len;
-        if (*input_len > 0 && buf_cursor->pos + *input_len < buf_cursor->size)
+        for (isize i = 0; i < g_ui_context->char_input_queue_count; i++)
         {
-            memcpy(buf_cursor->base + buf_cursor->pos, g_ui_context->char_input_utf8, *input_len);
-            buf_cursor->pos += *input_len;
-            *input_len = 0;
+            u32 codepoint = g_ui_context->char_input_queue[i];
+            if (codepoint == 0)
+                continue;
+            if (codepoint == '\b')
+            {
+                pop_utf8_from_buffer_cursor(buf_cursor);
+            }
+            else if (codepoint == 127) // ASCII DEL (not the 'Delete' of keyboard): Ctrl+Backspace
+            {
+                UTF8 utf8 = pop_utf8_from_buffer_cursor(buf_cursor);
+                while (utf8.codepoint == ' ')
+                    utf8 = pop_utf8_from_buffer_cursor(buf_cursor);
+                while (utf8.codepoint != ' ' && utf8.len != 0)
+                    utf8 = pop_utf8_from_buffer_cursor(buf_cursor);
+                if (utf8.codepoint == ' ')
+                    buf_cursor->pos += 1;
+            }
+            else
+            {
+                u8 utf8[4];
+                isize len = utf8_encode(utf8, codepoint);
+                if (buf_cursor->pos + len < buf_cursor->size)
+                {
+                    memcpy(buf_cursor->base + buf_cursor->pos, utf8, len);
+                    buf_cursor->pos += len;
+                }
+            }
         }
     }
 
@@ -1684,20 +1761,32 @@ UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_has
     {
         ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig){
             .hash_str = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (scroll area)")),
-            .sizing = { fit_grow({}), fit_grow({}) },
+            .sizing = { grow({}), grow({}) },
             .thumb_color = { 140, 140, 140, 240 },
-        });
+            .fixed_track = True,
+            .auto_scroll_x = True });
         {
-            UIBox* inner = ui_box_start(&(BoxConfig){ .sizing = { fixed(1000), fit_grow({}) }, .padding = padding });
+            get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
+            b32 has_input = buf_cursor->pos > 0;
+            String content_text = has_input ? (String){ buf_cursor->base, buf_cursor->pos } : text_hash.display_str;
+            f32 text_width =
+                get_text_width(&g_ui_context->glyph_cache, content_text, font, font_size, g_ui_context->dpi);
+            f32 inner_width = text_width + padding.left + padding.right;
+
+            UIBox* inner =
+                ui_box_start(&(BoxConfig){ .sizing = { fixed(inner_width), fit_grow({}) }, .padding = padding });
             {
                 if (buf_cursor->pos > 0)
                 {
                     String input_text = { buf_cursor->base, buf_cursor->pos };
                     text_config.color = text_color;
                     ui_text(input_text, &text_config);
+                    cursorbar(text_container_height.min_max.min, padding);
                 }
                 else
                 {
+                    if (is_focused)
+                        cursorbar(text_container_height.min_max.min, padding);
                     String placeholder = text_hash.display_str;
                     text_config.color = placeholder_color;
                     ui_text(placeholder, &text_config);
