@@ -56,6 +56,12 @@ static b32 is_same_box_key_void_version(const void* a, const void* b, isize size
     return str_compare(str_a, str_b);
 }
 
+static b32 hash_str_matches_box_key(const String hash_str, const BoxKey* box_key)
+{
+    String key_str = { (u8*)box_key->str, box_key->len };
+    return str_compare(key_str, hash_str);
+}
+
 static void box_cache_init(UIBoxCache* box_cache)
 {
     box_cache->arena = arena_new(BOX_CACHE_ARENA_CAPACITY);
@@ -961,6 +967,7 @@ void ui_end_frame(isize arena_pos_backup)
     g_ui_context->mouse_rclick = False;
     g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
+    g_ui_context->char_input_len = 0;
     g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
@@ -1602,6 +1609,95 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     }
     update_box_key(container, hash_str);
     ui_box_end(container);
+
+    return flags;
+}
+
+UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_hash_str, const Font* font,
+                            const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg_color,
+                            const Color border_color, const Color text_color)
+{
+    // clang-format off
+    get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
+    f32 text_height = get_text_height(&g_ui_context->glyph_cache, text_with_hash_str, font, font_size, g_ui_context->dpi);
+    SizingAxis text_container_height = fixed(text_height + padding.top + padding.bottom);
+    Color placeholder_color = { text_color.r, text_color.g, text_color.b, text_color.a / 2 };
+    TextConfig text_config = { .font = font, .font_size = font_size, .line_height = font_size };
+    // clang-format on
+
+    /* Transition-related variables */
+    Color border_color_transition = border_color;
+
+    /* Handle interaction and transition */
+    TextHash text_hash = extract_hash_str(&text_with_hash_str);
+    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
+    b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
+    if (is_focused)
+    {
+        isize* input_len = &g_ui_context->char_input_len;
+        if (*input_len > 0 && buf_cursor->pos + *input_len < buf_cursor->size)
+        {
+            memcpy(buf_cursor->base + buf_cursor->pos, g_ui_context->char_input_utf8, *input_len);
+            buf_cursor->pos += *input_len;
+            *input_len = 0;
+        }
+    }
+
+    UISignalFlags flags = UI_Signal_Flag_None;
+    if (result.found)
+    {
+        UIBox* last_box = result.box;
+        update_interaction_flags(last_box, &flags);
+
+        /* Transition */
+        if (ui_lclicked(flags) || is_focused)
+        {
+            if (ui_lclicked(flags))
+                g_ui_context->focused_box_key = generate_box_key(text_hash.hash_str);
+            update_transition(&last_box->active_t, 20.f, 1.f);
+        }
+        else
+        {
+            update_transition(&last_box->active_t, 18.f, 0.f);
+        }
+        border_color_transition.a = lerp_u8(0, border_color.a, last_box->active_t);
+    }
+
+    /* Create text feild box and text */
+    UIBox* box = ui_box_start(&(BoxConfig){
+        .sizing = { sizing_x, text_container_height },
+        .rect_style = { .corner_radius = 4, .border_color = border_color_transition, .border_thickness = 2 },
+        .color = bg_color,
+        .enable_clip = True,
+    });
+    {
+        ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig){
+            .hash_str = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (scroll area)")),
+            .sizing = { fit_grow({}), fit_grow({}) },
+            .thumb_color = { 140, 140, 140, 240 },
+        });
+        {
+            UIBox* inner = ui_box_start(&(BoxConfig){ .sizing = { fixed(1000), fit_grow({}) }, .padding = padding });
+            {
+                if (buf_cursor->pos > 0)
+                {
+                    String input_text = { buf_cursor->base, buf_cursor->pos };
+                    text_config.color = text_color;
+                    ui_text(input_text, &text_config);
+                }
+                else
+                {
+                    String placeholder = text_hash.display_str;
+                    text_config.color = placeholder_color;
+                    ui_text(placeholder, &text_config);
+                }
+            }
+            ui_box_end(inner);
+        }
+        ui_scrollable_area_end(scroll_ctx);
+    }
+    ui_box_end(box);
+    update_box_key(box, text_hash.hash_str);
 
     return flags;
 }

@@ -74,6 +74,13 @@ typedef int32_t       b32; // bool
 
 typedef struct
 {
+    byte* base;
+    isize pos;
+    isize size;
+} BufferCursor;
+
+typedef struct
+{
     f32 x, y;
 } Vec2F32;
 

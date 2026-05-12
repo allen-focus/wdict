@@ -36,6 +36,8 @@ typedef struct
     Font fonts[FONT_CAPACITY];
 } AppContext;
 
+static u16 utf16_pending_high = 0;
+
 // clang-format off
 static Color s_black = { 0,   0,   0,   255 };
 static Color s_grey  = { 244, 244, 244, 255 };
@@ -52,6 +54,12 @@ static f32 s_child_gap_big    = 20;
 static f32 s_child_gap_medium = 10;
 static f32 s_child_gap_small  = 5;
 // clang-format on
+
+static u8 buf_1[1024] = { 0 };
+static u8 buf_2[1024] = { 0 };
+
+static BufferCursor buf_cursor_1 = { buf_1, 0, 1024 };
+static BufferCursor buf_cursor_2 = { buf_2, 0, 1024 };
 
 //
 // Helper
@@ -109,7 +117,7 @@ static void process_frame(AppContext* app_context)
                 .padding = s_padding_medium,
             })
             {
-                ui_scrollable_area({ str("###scroll area"), (Sizing){ grow({}), grow({}) }, s_white, s_padding_small,
+                ui_scrollable_area({ str("scroll area"), (Sizing){ grow({}), grow({}) }, s_white, s_padding_small,
                                      (Color){ 140, 140, 140, 240 } })
                 {
 
@@ -121,33 +129,25 @@ static void process_frame(AppContext* app_context)
                     {
                         // clang-format off
 
-                        /* button 1 */
+                        /* text feild */
+                        ui_text_field(&buf_cursor_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(200), s_padding_small, s_blue, s_red, s_black);
+                        ui_text_field(&buf_cursor_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200), s_padding_small, s_blue, s_red, s_black);
+
+                        /* button */
                         ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = s_child_gap_small })
                         {
                             UISignalFlags flags = ui_button(str("hello##world"), font_zh, 12,
                                                             (Sizing){ fit_grow({ .max = 70 }), fit({}) }, s_padding_small,
-                                                            s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
+                                                            (Color){ 120,  220, 255, 255 }, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
                             if (ui_hovered(flags))
                                 ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = s_red }) {}
                             if (ui_lclicked(flags))
                                 set_app_title(app_context, str("Left Click"));
                             if (ui_rclicked(flags))
                                 set_app_title(app_context, str("Right Click"));
-
                         }
 
-                        /* button 2 */
-                        ui_button(str("goodbye I don't know it##world2"), font_mono, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                  s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
-                        
-                        /* button 3 */
-                        ui_button(str("今天天气怎么样？何时去爬山？##zh"), font_zh, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                  s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
-
-                        /* button 4 */
-                        ui_button(str("我歌月徘徊，我舞影零乱##zh2"), font_zh, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                  s_blue, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
-
+                        /* text */
                         ui_box({ .sizing = { fixed(400), fit({}) }, .child_gap = 20, .direction = LAYOUT_TOP_TO_BOTTOM })
                         {
                             ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
@@ -161,7 +161,7 @@ static void process_frame(AppContext* app_context)
                         /* switch box */
                         static b32 check = False;
                         UISignalFlags flags = ui_switchbox(
-                            str("good##bye"),
+                            str("switch box"),
                             font_symbol,
                             &check,
                             (Color){ 200, 200, 200, 255 },
@@ -273,6 +273,23 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             if (wparam == VK_ESCAPE)
                 DestroyWindow(window);
+            return 0;
+        }
+
+        case WM_CHAR:
+        {
+            wchar_t c = (wchar_t)wparam;
+            if (is_high_surrogate(c))
+                utf16_pending_high = c;
+            else if (is_low_surrogate(c))
+            {
+                Assert(utf16_pending_high);
+                u16 surrogate_pair[2] = { utf16_pending_high, c };
+                UnicodeDecode res = utf16_decode(surrogate_pair);
+                ui_context->char_input_len = utf8_encode(ui_context->char_input_utf8, res.codepoint);
+            }
+            else
+                ui_context->char_input_len = utf8_encode(ui_context->char_input_utf8, utf16_decode(&c).codepoint);
             return 0;
         }
 

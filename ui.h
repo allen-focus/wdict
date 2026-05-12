@@ -335,10 +335,15 @@ typedef struct
     b32 mouse_lclick;
     b32 mouse_rclick;
     b32 mouse_press;
+    u8 char_input_utf8[4];
+    isize char_input_len;
 
-    /* ui */
+    /* ui general */
     UIBox* root;
     UIBoxCache box_cache;
+    BoxKey focused_box_key;
+
+    /* scroll area */
     BoxKey last_pressed_scroll_thumb_x_key;
     BoxKey last_pressed_scroll_thumb_y_key;
     Position last_drag_anchor_mouse_pos;
@@ -407,3 +412,6 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                         const Color bg_color_press);
 UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color bg_color_active);
+UISignalFlags ui_text_field(BufferCursor* buf_cursor, const String text_with_hash_str, const Font* font,
+                            const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg_color,
+                            const Color border_color, const Color text_color);
