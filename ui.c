@@ -1384,43 +1384,13 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
         update_interaction_flags(last_area, &scroll_ctx.area_flags);
 
         /* Update scroll delta */
-        // NOTE: Order matters
-        //   evaluate_timed_lerp(now) must run BEFORE start_timed_lerp().
-        //   start_timed_lerp resets start_time = now, so evaluating after it
-        //   in the same frame yields t = 0 → no progress (thumb appears frozen).
         last_area->scroll_delta.x = evaluate_timed_lerp(&last_area->scroll_anim_x, now);
         last_area->scroll_delta.y = evaluate_timed_lerp(&last_area->scroll_anim_y, now);
         scroll_ctx.delta = last_area->scroll_delta;
 
-        /* Update smooth scrolling related state */
-        if (ui_hovered(scroll_ctx.area_flags))
-        {
-            // clang-format off
-            if (g_ui_context->mouse_scroll_delta.x)
-            {
-                f32 new_target_x = last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
-                start_timed_lerp(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target_x, now, SCROLL_ANIM_DURATION);
-            }
-            if (g_ui_context->mouse_scroll_delta.y)
-            {
-                f32 new_target_y = last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
-                start_timed_lerp(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target_y, now, SCROLL_ANIM_DURATION);
-            }
-            // clang-format on
-        }
-
-        /* Update scroll target position and delta */
+        /* Prepare content result for _end() */
         scroll_ctx.last_content_result = find_or_insert_box_with_same_hash_str(content_hash_str);
         Assert(scroll_ctx.last_content_result.found);
-
-        Size virtual_area_size = scroll_ctx.last_area_result.box->size;
-        Size content_size = scroll_ctx.last_content_result.box->size;
-
-        scroll_ctx.max_delta.x = content_size.width - virtual_area_size.width;
-        scroll_ctx.max_delta.y = content_size.height - virtual_area_size.height;
-
-        last_area->scroll_anim_x.target = clamp(last_area->scroll_anim_x.target, 0, scroll_ctx.max_delta.x);
-        last_area->scroll_anim_y.target = clamp(last_area->scroll_anim_y.target, 0, scroll_ctx.max_delta.y);
     }
 
     /* Create container & inner container & content box */
@@ -1446,11 +1416,47 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
 
         /* Reserve padding on both ends of the scrollbar */
         Size virtual_area_size = scroll_ctx.last_area_result.box->size;
+        Size content_size = scroll_ctx.last_content_result.box->size;
+
+        /* Compute max scroll delta and clamp targets */
+        scroll_ctx.max_delta.x = content_size.width - virtual_area_size.width;
+        scroll_ctx.max_delta.y = content_size.height - virtual_area_size.height;
+
+        UIBox* last_area = scroll_ctx.last_area_result.box;
+        last_area->scroll_anim_x.target = clamp(last_area->scroll_anim_x.target, 0, scroll_ctx.max_delta.x);
+        last_area->scroll_anim_y.target = clamp(last_area->scroll_anim_y.target, 0, scroll_ctx.max_delta.y);
+
+        // NOTE:
+        //   Scroll wheel is handled in _end() rather than _start() so that
+        //   deeply nested scroll areas (whose _end() runs first) consume the
+        //   scroll delta before their ancestors.  This avoids the case where
+        //   an outer and inner area both respond to the same wheel event.
+        /* Handle scroll wheel (deepest hovered area consumes scroll first) */
+        if (ui_hovered(scroll_ctx.area_flags))
+        {
+            if (g_ui_context->mouse_scroll_delta.x && scroll_ctx.max_delta.x > 0)
+            {
+                f32 new_target = last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
+                new_target = clamp(new_target, 0, scroll_ctx.max_delta.x);
+                start_timed_lerp(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target,
+                                 g_ui_context->current_time, SCROLL_ANIM_DURATION);
+                g_ui_context->mouse_scroll_delta.x = 0;
+            }
+            if (g_ui_context->mouse_scroll_delta.y && scroll_ctx.max_delta.y > 0)
+            {
+                f32 new_target = last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
+                new_target = clamp(new_target, 0, scroll_ctx.max_delta.y);
+                start_timed_lerp(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target,
+                                 g_ui_context->current_time, SCROLL_ANIM_DURATION);
+                g_ui_context->mouse_scroll_delta.y = 0;
+            }
+        }
+
+        /* Reserve padding on both ends of the scrollbar */
         Size bar_track_size = { virtual_area_size.width - (f32)SCROLLBAR_SPACER * 2,
                                 virtual_area_size.height - (f32)SCROLLBAR_SPACER * 2 };
 
         /* Determinate whether the area need to create horizontal/vertical scrollbar */
-        Size content_size = scroll_ctx.last_content_result.box->size;
         bar_flags |= content_size.height > virtual_area_size.height ? SCROLLBAR_VERTICAL : 0;
         bar_flags |= content_size.width > virtual_area_size.width ? SCROLLBAR_HORIZONTAL : 0;
 
