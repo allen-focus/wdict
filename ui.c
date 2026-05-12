@@ -310,8 +310,6 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
     isize word_count = 0;
     {
         String text = text_box->data.text.content;
-        Assert(text.len == 0 || (text.data[0] != ' '));
-
         isize start = 0;
         const byte* ptr = text.data;
         do
@@ -337,7 +335,7 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
         } while (ptr - text.data < text.len);
 
         /* Handle last word */
-        if (text.data[start] != ' ')
+        if (start < text.len && text.data[start] != ' ')
         {
             f32 word_width = get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font,
                                             text_box->data.text.font_size, dpi);
@@ -963,6 +961,7 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
     g_ui_context->char_input_queue_count = 0;
+    g_ui_context->text_action_queue_count = 0;
     g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
@@ -1693,12 +1692,27 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     /* Transition-related variables */
     Color border_color_transition = border_color;
 
-    /* Handle interaction and transition */
+    /* Handle input */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
     UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
     b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
     if (is_focused)
     {
+        /* Navigation (text action queue) */
+        for (isize i = 0; i < g_ui_context->text_action_queue_count; i++)
+        {
+            TextAction* action = &g_ui_context->text_action_queue[i];
+            isize new_cursor = state->cursor + action->delta;
+            if (new_cursor < 0)
+                new_cursor = 0;
+            if (new_cursor > state->text_len)
+                new_cursor = state->text_len;
+            state->cursor = new_cursor;
+            if (!(action->flags & TextActionFlag_KeepMark))
+                state->mark = state->cursor;
+        }
+
+        /* Text input (char queue) */
         for (isize i = 0; i < g_ui_context->char_input_queue_count; i++)
         {
             u32 codepoint = g_ui_context->char_input_queue[i];
@@ -1706,26 +1720,61 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 continue;
             if (codepoint == '\b')
             {
-                pop_utf8_left(state);
+                if (state->cursor > 0)
+                {
+                    isize old_cursor = state->cursor;
+                    UTF8 utf8 = pop_utf8_left(state);
+                    memmove(state->base + state->cursor, state->base + old_cursor, state->text_len - old_cursor);
+                    state->text_len -= utf8.len;
+                }
             }
             else if (codepoint == 127) // ASCII DEL (not the 'Delete' of keyboard): Ctrl+Backspace
             {
-                UTF8 utf8 = pop_utf8_left(state);
-                while (utf8.codepoint == ' ')
-                    utf8 = pop_utf8_left(state);
-                while (utf8.codepoint != ' ' && utf8.len != 0)
-                    utf8 = pop_utf8_left(state);
-                if (utf8.codepoint == ' ')
-                    state->cursor += 1;
+                if (state->cursor > 0)
+                {
+                    isize old_cursor = state->cursor;
+
+                    /* Skip over any spaces immediately left of cursor */
+                    while (state->cursor > 0)
+                    {
+                        isize before = state->cursor;
+                        UTF8 utf8 = pop_utf8_left(state);
+                        if (utf8.codepoint == ' ')
+                            continue;
+                        state->cursor = before; // Restore cursor, we hit non-space
+                        break;
+                    }
+
+                    /* Delete the word (non-space characters) to the left */
+                    while (state->cursor > 0)
+                    {
+                        isize before = state->cursor;
+                        UTF8 utf8 = pop_utf8_left(state);
+                        if (utf8.codepoint == ' ')
+                        {
+                            state->cursor = before; // Stop at the space before the word
+                            break;
+                        }
+                    }
+
+                    /* Shift remaining text left to close the gap */
+                    memmove(state->base + state->cursor, state->base + old_cursor, state->text_len - old_cursor);
+                    state->text_len -= old_cursor - state->cursor;
+                }
             }
             else
             {
                 u8 utf8[4];
                 isize len = utf8_encode(utf8, codepoint);
-                if (state->cursor + len < state->size)
+
+                Assert(state->text_len + len <= state->size);
+                if (state->text_len + len <= state->size)
                 {
+                    memmove(state->base + state->cursor + len, state->base + state->cursor,
+                            state->text_len - state->cursor);
                     memcpy(state->base + state->cursor, utf8, len);
                     state->cursor += len;
+                    state->text_len += len;
                 }
             }
         }
@@ -1769,21 +1818,35 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             /* Determine the content (inner box) width inside the scroll area */
             get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
-            b32 has_input = state->cursor > 0;
-            String content_text = has_input ? (String){ state->base, state->cursor } : text_hash.display_str;
-            f32 text_width =
-                get_text_width(&g_ui_context->glyph_cache, content_text, font, font_size, g_ui_context->dpi);
+            b32 has_text = state->text_len > 0;
+            String full_text = has_text ? (String){ state->base, state->text_len } : text_hash.display_str;
+            f32 text_width = get_text_width(&g_ui_context->glyph_cache, full_text, font, font_size, g_ui_context->dpi);
             f32 inner_width = text_width + padding.left + padding.right;
 
             UIBox* inner =
                 ui_box_start(&(BoxConfig){ .sizing = { fixed(inner_width), fit_grow({}) }, .padding = padding });
             {
-                if (state->cursor > 0)
+                if (has_text)
                 {
-                    String input_text = { state->base, state->cursor };
-                    text_config.color = text_color;
-                    ui_text(input_text, &text_config);
-                    cursorbar(text_container_height.min_max.min, padding);
+                    /* Text left of cursor */
+                    if (state->cursor > 0)
+                    {
+                        String left_text = { state->base, state->cursor };
+                        text_config.color = text_color;
+                        ui_text(left_text, &text_config);
+                    }
+
+                    /* Cursorbar */
+                    if (is_focused)
+                        cursorbar(text_container_height.min_max.min, padding);
+
+                    /* Text right of cursor */
+                    if (state->cursor < state->text_len)
+                    {
+                        String right_text = { state->base + state->cursor, state->text_len - state->cursor };
+                        text_config.color = text_color;
+                        ui_text(right_text, &text_config);
+                    }
                 }
                 else
                 {

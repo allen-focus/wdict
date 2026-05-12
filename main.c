@@ -62,8 +62,8 @@ static f32 s_child_gap_small  = 5;
 #define TEXT_BUFFER_SIZE 1024
 static u8 s_buf_1[TEXT_BUFFER_SIZE] = { 0 };
 static u8 s_buf_2[TEXT_BUFFER_SIZE] = { 0 };
-static TextEditState s_text_edit_state_1 = { s_buf_1, TEXT_BUFFER_SIZE, 0, 0 };
-static TextEditState s_text_edit_state_2 = { s_buf_2, TEXT_BUFFER_SIZE, 0, 0 };
+static TextEditState s_text_edit_state_1 = { s_buf_1, TEXT_BUFFER_SIZE, 0, 0, 0 };
+static TextEditState s_text_edit_state_2 = { s_buf_2, TEXT_BUFFER_SIZE, 0, 0, 0 };
 
 //
 // Helper
@@ -276,7 +276,33 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_KEYDOWN:
         {
             if (wparam == VK_ESCAPE)
+            {
                 DestroyWindow(window);
+                return 0;
+            }
+
+            TextAction action = { 0 };
+            b32 ctrl = GetKeyState(VK_CONTROL);
+            b32 shift = GetKeyState(VK_SHIFT);
+            if (ctrl)
+                action.flags |= TextActionFlag_WordScan;
+            if (shift)
+                action.flags |= TextActionFlag_KeepMark;
+
+            // clang-format off
+            switch (wparam)
+            {
+                case VK_LEFT:  action.delta = -1; break;
+                case VK_RIGHT: action.delta = +1; break;
+                case VK_HOME:  action.delta = -INT64_MAX; break;
+                case VK_END:   action.delta = +INT64_MAX; break;
+                default: return DefWindowProcW(window, message, wparam, lparam);
+            }
+            ui_context->text_action_queue[ui_context->text_action_queue_count++] = action;
+            // clang-format on
+
+            Assert(ui_context->text_action_queue_count < TEXT_ACTION_QUEUE_CAPACITY);
+
             return 0;
         }
 
@@ -398,7 +424,7 @@ i32 WinMainCRTStartup()
     renderer_init(app_context.window, &app_context.ui.glyph_cache.atlas);
 
     /* Render first frame before showing window */
-    process_frame(&app_context); // rasterize needed glyphs
+    process_frame(&app_context); // Rasterize needed glyphs
     process_frame(&app_context);
     ShowWindow(app_context.window, SW_SHOWDEFAULT);
 

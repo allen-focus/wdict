@@ -32,9 +32,10 @@
 #define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }
 #define grow(...)     { __VA_ARGS__, SIZING_MODE_GROW }
 
-#define COMMAND_QUEUE_CAPACITY    4096
-#define HASH_STR_MAX_LENGTH       128
-#define CHAR_INPUT_QUEUE_CAPACITY 64
+#define COMMAND_QUEUE_CAPACITY     4096
+#define HASH_STR_MAX_LENGTH        128
+#define CHAR_INPUT_QUEUE_CAPACITY  64
+#define TEXT_ACTION_QUEUE_CAPACITY 64
 
 #define ICON_FONT_UTF8_OK     "\xEE\xA0\x80"
 #define ICON_FONT_UTF8_CANCEL "\xEE\xA0\x81"
@@ -285,6 +286,39 @@ struct UIBox
 };
 
 //
+// Text Edit
+//
+
+typedef struct
+{
+    byte* base;
+    isize size;
+    isize cursor;
+    isize mark;
+    isize text_len;
+} TextEditState;
+
+typedef enum
+{
+    // clang-format off
+    TextActionFlag_WordScan                = (1 << 0),
+    TextActionFlag_KeepMark                = (1 << 1),
+    TextActionFlag_Delete                  = (1 << 2),
+    TextActionFlag_Copy                    = (1 << 3),
+    TextActionFlag_Paste                   = (1 << 4),
+    TextActionFlag_ZeroDeltaWithSelection  = (1 << 5),
+    TextActionFlag_DeltaPicksSelectionSide = (1 << 6),
+    // clang-format on
+} TextActionFlags;
+
+typedef struct
+{
+    TextActionFlags flags;
+    isize delta;
+    u32 codepoint;
+} TextAction;
+
+//
 // Context
 //
 
@@ -343,6 +377,8 @@ typedef struct
     b32 mouse_press;
     u32 char_input_queue[CHAR_INPUT_QUEUE_CAPACITY];
     isize char_input_queue_count;
+    TextAction text_action_queue[TEXT_ACTION_QUEUE_CAPACITY];
+    isize text_action_queue_count;
 
     /* ui general */
     UIBox* root;
@@ -391,14 +427,6 @@ typedef struct
     b32 fixed_track;
     b32 auto_scroll_x;
 } ScrollableAreaConfig;
-
-typedef struct
-{
-    byte* base;
-    isize size;
-    isize cursor;
-    isize mark;
-} TextEditState;
 
 ///
 
