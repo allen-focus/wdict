@@ -1158,10 +1158,10 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     f32 thumb_delta_scale                  = is_horizontal ? scroll_ctx.thumb_delta_scale.x                 : scroll_ctx.thumb_delta_scale.y;
     f32 scroll_max_delta                   = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
     f32* scroll_delta                      = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
-    TimedLerpAnimation* scroll_anim            = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
-    f32* ctx_last_drag_anchor_mouse_pos    = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_pos.x    : &g_ui_context->last_drag_anchor_mouse_pos.y;
-    f32* ctx_last_drag_anchor_mouse_scroll = is_horizontal ? &g_ui_context->last_drag_anchor_mouse_scroll.x : &g_ui_context->last_drag_anchor_mouse_scroll.y;
-    BoxKey* ctx_last_thumb_key             = is_horizontal ? &g_ui_context->last_pressed_scroll_thumb_x_key  : &g_ui_context->last_pressed_scroll_thumb_y_key;
+    TimedLerpAnimation* scroll_anim        = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
+    f32* ctx_last_drag_anchor_mouse_pos    = is_horizontal ? &last_area->drag_anchor_mouse_pos.x    : &last_area->drag_anchor_mouse_pos.y;
+    f32* ctx_last_drag_anchor_mouse_scroll = is_horizontal ? &last_area->drag_anchor_mouse_scroll.x : &last_area->drag_anchor_mouse_scroll.y;
+    BoxKey* ctx_last_thumb_key             = is_horizontal ? &last_area->pressed_thumb_x_key  : &last_area->pressed_thumb_y_key;
     // clang-format on
 
     /* Transition-related variables */

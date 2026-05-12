@@ -275,6 +275,12 @@ struct UIBox
     TransitionState anim_state;
     TimedLerpAnimation scroll_anim_x;
     TimedLerpAnimation scroll_anim_y;
+
+    /* scrollbar thumb drag state (lives in scroll area box so it dies with the area) */
+    BoxKey pressed_thumb_x_key;
+    BoxKey pressed_thumb_y_key;
+    Position drag_anchor_mouse_pos;
+    Position drag_anchor_mouse_scroll;
 };
 
 //
@@ -341,12 +347,6 @@ typedef struct
     UIBox* root;
     UIBoxCache box_cache;
     BoxKey focused_box_key;
-
-    /* scroll area */
-    BoxKey last_pressed_scroll_thumb_x_key;
-    BoxKey last_pressed_scroll_thumb_y_key;
-    Position last_drag_anchor_mouse_pos;
-    Position last_drag_anchor_mouse_scroll;
 
     /* render */
     GlyphCache glyph_cache;
