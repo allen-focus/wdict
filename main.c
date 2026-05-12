@@ -282,8 +282,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             }
 
             TextAction action = { 0 };
-            b32 ctrl = GetKeyState(VK_CONTROL);
-            b32 shift = GetKeyState(VK_SHIFT);
+            b32 ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            b32 shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
             if (ctrl)
                 action.flags |= TextActionFlag_WordScan;
             if (shift)

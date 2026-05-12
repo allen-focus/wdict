@@ -30,6 +30,8 @@
 #define SCROLL_SENSITIVITY               4.f
 #define SCROLL_ANIM_DURATION             0.09f
 
+#define CURSORBAR_PADDING 7
+
 ///
 
 static Queue(UIBox, BOX_QUEUE_CAPACITY) ui_box_queue = { 0 };
@@ -1692,9 +1694,8 @@ static isize scan_codepoint_backward(const byte* base, isize pos, isize count)
 
 static void cursorbar(f32 parent_height, Padding parent_padding)
 {
-    f32 bar_padding = 7;
-    f32 bar_height = parent_height - bar_padding * 2;
-    Position float_offset = { 0, -parent_padding.top + bar_padding };
+    f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
+    Position float_offset = { 0, -parent_padding.top + CURSORBAR_PADDING };
     ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(2), fixed(bar_height) },
                                           .color = { 0, 0, 0, 255 },
                                           .is_float = True,
@@ -1728,9 +1729,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             TextAction* action = &g_ui_context->text_action_queue[i];
             isize new_cursor;
             if (action->delta > 0)
-                new_cursor = scan_codepoint_forward(state->base, state->text_len, state->cursor, (isize)action->delta);
+                new_cursor = scan_codepoint_forward(state->base, state->text_len, state->cursor, action->delta);
             else if (action->delta < 0)
-                new_cursor = scan_codepoint_backward(state->base, state->cursor, (isize)(-action->delta));
+                new_cursor = scan_codepoint_backward(state->base, state->cursor, -action->delta);
             else
                 new_cursor = state->cursor;
             state->cursor = new_cursor;
@@ -1746,12 +1747,22 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 continue;
             if (codepoint == '\b')
             {
-                if (state->cursor > 0)
+                if (state->cursor != state->mark)
+                {
+                    isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
+                    isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+                    memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
+                    state->text_len -= (sel_end - sel_start);
+                    state->cursor = sel_start;
+                    state->mark = state->cursor;
+                }
+                else if (state->cursor > 0)
                 {
                     isize old_cursor = state->cursor;
                     UTF8 utf8 = pop_utf8_left(state);
                     memmove(state->base + state->cursor, state->base + old_cursor, state->text_len - old_cursor);
                     state->text_len -= utf8.len;
+                    state->mark = state->cursor;
                 }
             }
             else if (codepoint == 127) // ASCII DEL (not the 'Delete' of keyboard): Ctrl+Backspace
@@ -1786,10 +1797,22 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     /* Shift remaining text left to close the gap */
                     memmove(state->base + state->cursor, state->base + old_cursor, state->text_len - old_cursor);
                     state->text_len -= old_cursor - state->cursor;
+                    state->mark = state->cursor;
                 }
             }
             else
             {
+                /* If there is a selection, delete it first */
+                if (state->cursor != state->mark)
+                {
+                    isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
+                    isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+                    memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
+                    state->text_len -= (sel_end - sel_start);
+                    state->cursor = sel_start;
+                    state->mark = sel_start;
+                }
+
                 u8 utf8[4];
                 isize len = utf8_encode(utf8, codepoint);
 
@@ -1801,10 +1824,10 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     memcpy(state->base + state->cursor, utf8, len);
                     state->cursor += len;
                     state->text_len += len;
+                    state->mark = state->cursor;
                 }
             }
         }
-        state->mark = state->cursor;
     }
 
     UISignalFlags flags = UI_Signal_Flag_None;
@@ -1852,26 +1875,52 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             UIBox* inner =
                 ui_box_start(&(BoxConfig){ .sizing = { fixed(inner_width), fit_grow({}) }, .padding = padding });
             {
+                b32 has_selection = is_focused && state->cursor != state->mark;
+                isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
+                isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+
                 if (has_text)
                 {
-                    /* Text left of cursor */
-                    if (state->cursor > 0)
+                    /* Text before selection (or before cursor) */
+                    if (sel_start > 0)
                     {
-                        String left_text = { state->base, state->cursor };
+                        String pre_text = { state->base, sel_start };
                         text_config.color = text_color;
-                        ui_text(left_text, &text_config);
+                        ui_text(pre_text, &text_config);
                     }
 
-                    /* Cursorbar */
-                    if (is_focused)
+                    /* Selection highlight */
+                    if (has_selection)
+                    {
+                        String sel_text = { state->base + sel_start, sel_end - sel_start };
+                        f32 sel_width =
+                            get_text_width(&g_ui_context->glyph_cache, sel_text, font, font_size, g_ui_context->dpi);
+                        f32 sel_height = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
+                        Color sel_color = { 51, 153, 255, 128 };
+                        ui_box_end(ui_box_start(&(BoxConfig){
+                            .sizing = { fixed(sel_width), fixed(sel_height) },
+                            .color = sel_color,
+                            .is_float = True,
+                            .float_offset = { 0, -padding.top + CURSORBAR_PADDING },
+                        }));
+
+                        if (state->cursor == sel_start)
+                            cursorbar(text_container_height.min_max.min, padding);
+
+                        text_config.color = text_color;
+                        ui_text(sel_text, &text_config);
+                    }
+
+                    /* Cursorbar at cursor position */
+                    if (state->cursor == sel_end)
                         cursorbar(text_container_height.min_max.min, padding);
 
-                    /* Text right of cursor */
-                    if (state->cursor < state->text_len)
+                    /* Text after selection (or after cursor) */
+                    if (sel_end < state->text_len)
                     {
-                        String right_text = { state->base + state->cursor, state->text_len - state->cursor };
+                        String post_text = { state->base + sel_end, state->text_len - sel_end };
                         text_config.color = text_color;
-                        ui_text(right_text, &text_config);
+                        ui_text(post_text, &text_config);
                     }
                 }
                 else
