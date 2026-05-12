@@ -1692,6 +1692,29 @@ static isize scan_codepoint_backward(const byte* base, isize pos, isize count)
     return pos;
 }
 
+static b32 is_word_char(u32 c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+static isize scan_word_forward(const byte* base, isize text_len, isize pos)
+{
+    while (pos < text_len && is_word_char(base[pos]))
+        pos++;
+    while (pos < text_len && !is_word_char(base[pos]))
+        pos++;
+    return pos;
+}
+
+static isize scan_word_backward(const byte* base, isize pos)
+{
+    while (pos > 0 && !is_word_char(base[pos - 1]))
+        pos--;
+    while (pos > 0 && is_word_char(base[pos - 1]))
+        pos--;
+    return pos;
+}
+
 static void cursorbar(f32 parent_height, Padding parent_padding)
 {
     f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
@@ -1728,12 +1751,25 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             TextAction* action = &g_ui_context->text_action_queue[i];
             isize new_cursor;
-            if (action->delta > 0)
-                new_cursor = scan_codepoint_forward(state->base, state->text_len, state->cursor, action->delta);
-            else if (action->delta < 0)
-                new_cursor = scan_codepoint_backward(state->base, state->cursor, -action->delta);
+            if (action->flags & TextActionFlag_WordScan)
+            {
+                if (action->delta > 0)
+                    new_cursor = scan_word_forward(state->base, state->text_len, state->cursor);
+                else if (action->delta < 0)
+                    new_cursor = scan_word_backward(state->base, state->cursor);
+                else
+                    new_cursor = state->cursor;
+            }
             else
-                new_cursor = state->cursor;
+            {
+                if (action->delta > 0)
+                    new_cursor =
+                        scan_codepoint_forward(state->base, state->text_len, state->cursor, action->delta);
+                else if (action->delta < 0)
+                    new_cursor = scan_codepoint_backward(state->base, state->cursor, -action->delta);
+                else
+                    new_cursor = state->cursor;
+            }
             state->cursor = new_cursor;
             if (!(action->flags & TextActionFlag_KeepMark))
                 state->mark = state->cursor;
@@ -1765,31 +1801,41 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     state->mark = state->cursor;
                 }
             }
-            else if (codepoint == 127) // ASCII DEL (not the 'Delete' of keyboard): Ctrl+Backspace
+            else if (codepoint == 127) // Ctrl+Backspace
             {
-                if (state->cursor > 0)
+                if (state->cursor != state->mark)
+                {
+                    isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
+                    isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+                    memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
+                    state->text_len -= (sel_end - sel_start);
+                    state->cursor = sel_start;
+                    state->mark = state->cursor;
+                }
+                else if (state->cursor > 0)
                 {
                     isize old_cursor = state->cursor;
 
-                    /* Skip over any spaces immediately left of cursor */
+                    /* Skip past non-word chars immediately left of cursor */
                     while (state->cursor > 0)
                     {
                         isize before = state->cursor;
                         UTF8 utf8 = pop_utf8_left(state);
-                        if (utf8.codepoint == ' ')
-                            continue;
-                        state->cursor = before; // Restore cursor, we hit non-space
-                        break;
+                        if (is_word_char(utf8.codepoint))
+                        {
+                            state->cursor = before;
+                            break;
+                        }
                     }
 
-                    /* Delete the word (non-space characters) to the left */
+                    /* Delete word characters to the left */
                     while (state->cursor > 0)
                     {
                         isize before = state->cursor;
                         UTF8 utf8 = pop_utf8_left(state);
-                        if (utf8.codepoint == ' ')
+                        if (!is_word_char(utf8.codepoint))
                         {
-                            state->cursor = before; // Stop at the space before the word
+                            state->cursor = before;
                             break;
                         }
                     }
