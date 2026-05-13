@@ -104,6 +104,8 @@ typedef struct
     Color border_color;
     f32 corner_radius, border_thickness;
     Position shadow_offset;
+    Color corner_colors[4];
+    f32 shear;
 } RectStyle;
 
 //

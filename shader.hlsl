@@ -21,9 +21,13 @@ struct VS_Input
 {
     float4 target_rect : TARGET_RECT;
     float4 texture_rect : TEXTURE_RECT;
-    float4 color : COLOR;
+    float4 corner_color00 : COLOR0;
+    float4 corner_color10 : COLOR1;
+    float4 corner_color01 : COLOR2;
+    float4 corner_color11 : COLOR3;
     float4 border_color : BORDER_COLOR;
-    float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: enable_shadow, w: is_text
+    float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: shadow_offset_x, w: shadow_offset_y
+    float shear : SHEAR;
     float is_text : IS_TEXT;
     int clip_index : CLIP_INDEX;
     uint vertex_id : SV_VertexID;
@@ -53,7 +57,7 @@ struct PS_INPUT
 
 PS_INPUT vs(VS_Input input)
 {
-    static float2 vertices[] =
+    static float2 base_vertices[] =
     {
         { -1, -1 },
         { +1, -1 },
@@ -61,15 +65,25 @@ PS_INPUT vs(VS_Input input)
         { +1, +1 },
     };
 
+    // Apply shear to right-side vertices
+    float2 shear_offsets[] =
+    {
+        { 0, 0 },
+        { 0, input.shear },
+        { 0, 0 },
+        { 0, input.shear },
+    };
+
     // Calculate target position (screen space)
     float2 target_rect_half_size = (input.target_rect.zw - input.target_rect.xy) / 2;
     float2 target_rect_center = (input.target_rect.xy + input.target_rect.zw) / 2;
-    float2 target_position = vertices[input.vertex_id] * target_rect_half_size + target_rect_center;
+    float2 target_position = (base_vertices[input.vertex_id] * target_rect_half_size + target_rect_center)
+                             + shear_offsets[input.vertex_id] * target_rect_half_size.y;
 
     // Calculate texture position (clip space)
     float2 texture_rect_half_size = (input.texture_rect.zw - input.texture_rect.xy) / 2;
     float2 texture_rect_center = (input.texture_rect.xy + input.texture_rect.zw) / 2;
-    float2 texture_position = vertices[input.vertex_id] * texture_rect_half_size + texture_rect_center;
+    float2 texture_position = base_vertices[input.vertex_id] * texture_rect_half_size + texture_rect_center;
 
     // Calculate original rect based shadow
     float shadow_sigma = 0;
@@ -95,11 +109,20 @@ PS_INPUT vs(VS_Input input)
         original_rect_center.y -= shadow_offset.y * 0.5;
     }
 
+    float4 per_corner_color;
+    switch (input.vertex_id)
+    {
+        case 0: per_corner_color = input.corner_color00; break;
+        case 1: per_corner_color = input.corner_color10; break;
+        case 2: per_corner_color = input.corner_color01; break;
+        default: per_corner_color = input.corner_color11; break;
+    }
+
     // Output
     PS_INPUT output;
     output.position = mul(projection_matrix, float4(target_position, 0.0f, 1.0f)); // convert to clip space
     output.uv = texture_position;
-    output.color = input.color;
+    output.color = per_corner_color;
 
     output.target_rect_half_size = target_rect_half_size;
     output.target_rect_center = target_rect_center;
