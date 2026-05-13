@@ -50,6 +50,7 @@ typedef enum
     UI_Signal_Flag_LClicked = (1 << 1),
     UI_Signal_Flag_RClicked = (1 << 2),
     UI_Signal_Flag_Pressed    = (1 << 3),
+    UI_Signal_Flag_DoubleClicked = (1 << 4),
     // clang-format on
 } UISignalFlags;
 
@@ -58,6 +59,7 @@ typedef enum
 #define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
 #define ui_clicked(signal_flags)  (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
 #define ui_pressed(signal_flags)  (signal_flags & UI_Signal_Flag_Pressed)
+#define ui_double_clicked(signal_flags) (signal_flags & UI_Signal_Flag_DoubleClicked)
 
 //
 // Cursor
@@ -396,6 +398,9 @@ typedef struct
     b32 mouse_lclick;
     b32 mouse_rclick;
     b32 mouse_press;
+    b32 mouse_double_click;
+    f64 last_lclick_time;
+    Position last_lclick_pos;
     Cursor desired_cursor;
     u32 char_input_queue[CHAR_INPUT_QUEUE_CAPACITY];
     isize char_input_queue_count;

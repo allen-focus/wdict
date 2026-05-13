@@ -355,6 +355,21 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ui_context->mouse_lclick = True;
             ui_context->mouse_press = True;
+
+            f64 now = ui_context->current_time;
+            i32 click_x = GET_X_LPARAM(lparam);
+            i32 click_y = GET_Y_LPARAM(lparam);
+            f64 double_click_ms = (f64)GetDoubleClickTime() / 1000.0;
+            f32 dx = (f32)(click_x - ui_context->last_lclick_pos.x);
+            f32 dy = (f32)(click_y - ui_context->last_lclick_pos.y);
+            f32 dist = sqrtf(dx * dx + dy * dy);
+            if (now - ui_context->last_lclick_time <= double_click_ms &&
+                dist <= (f32)GetSystemMetrics(SM_CXDOUBLECLK) * 2.f)
+                ui_context->mouse_double_click = True;
+            ui_context->last_lclick_time = now;
+            ui_context->last_lclick_pos.x = (f32)click_x;
+            ui_context->last_lclick_pos.y = (f32)click_y;
+
             SetCapture(window);
             return 0;
         }

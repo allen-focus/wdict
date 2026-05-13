@@ -972,6 +972,7 @@ void ui_frame_end(isize arena_pos_backup)
 
     g_ui_context->mouse_lclick = False;
     g_ui_context->mouse_rclick = False;
+    g_ui_context->mouse_double_click = False;
     g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
     g_ui_context->char_input_queue_count = 0;
@@ -1017,6 +1018,8 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
             *flags |= UI_Signal_Flag_RClicked;
         if (g_ui_context->mouse_press)
             *flags |= UI_Signal_Flag_Pressed;
+        if (g_ui_context->mouse_double_click)
+            *flags |= UI_Signal_Flag_DoubleClicked;
     }
 }
 
@@ -1944,7 +1947,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
 
         /* Mouse drag to extend selection (only continue existing press, not new click) */
-        if (is_focused && g_ui_context->mouse_press && !g_ui_context->mouse_lclick && state->text_len > 0)
+        if (is_focused && g_ui_context->mouse_press && !g_ui_context->mouse_lclick && state->text_len > 0 &&
+            (g_ui_context->mouse_delta.x != 0.f || g_ui_context->mouse_delta.y != 0.f))
         {
             UIBoxFindResult inner_result = find_or_insert_box_with_same_hash_str(content_key);
             if (inner_result.found)
@@ -1995,6 +1999,18 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                                 find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache,
                                                  font, font_size, g_ui_context->dpi, get_text_width);
                             state->mark = state->cursor;
+
+                            if (ui_double_clicked(flags))
+                            {
+                                isize word_start = scan_word_backward(state->base, state->cursor);
+                                isize word_end = scan_word_forward(state->base, state->text_len, state->cursor);
+                                while (word_start < word_end && !is_word_char(state->base[word_start]))
+                                    word_start++;
+                                while (word_end > word_start && !is_word_char(state->base[word_end - 1]))
+                                    word_end--;
+                                state->mark = word_start;
+                                state->cursor = word_end;
+                            }
                         }
                     }
                 }
