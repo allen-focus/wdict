@@ -26,6 +26,7 @@ struct VS_Input
     float4 corner_color01 : COLOR2;
     float4 corner_color11 : COLOR3;
     float4 border_color : BORDER_COLOR;
+    float4 shadow_color : SHADOW_COLOR;
     float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: shadow_offset_x, w: shadow_offset_y
     float shear : SHEAR;
     float is_text : IS_TEXT;
@@ -43,6 +44,7 @@ struct PS_INPUT
     float2 original_rect_half_size : ORIGINAL_RECT_HALF_SIZE;
     float2 original_rect_center : ORIGINAL_RECT_CENTER;
     float4 border_color : BORDER_COLOR;
+    float4 shadow_color : SHADOW_COLOR;
     float corner_radius : CORNER_RADIUS;
     float border_thickness : BORDER_THICKNESS;
     float shadow_sigma : SHADOW_SIGMA;
@@ -131,6 +133,7 @@ PS_INPUT vs(VS_Input input)
     output.original_rect_center = original_rect_center;
 
     output.border_color = input.border_color;
+    output.shadow_color = input.shadow_color;
     output.corner_radius = input.style_params.x;
     output.border_thickness = input.style_params.y;
     output.shadow_sigma = shadow_sigma;
@@ -303,9 +306,10 @@ float4 ps(PS_INPUT input) : SV_TARGET
     }
 
     // Alpha compositing using Porter-Duff "Over" operation
-    float3 shadow_color = float3(0.1, 0.1, 0.1);
-    float3 composed_rgb_linear = base_alpha * base_linear + shadow_alpha * shadow_color * (1.0 - base_alpha);
-    float composed_alpha = base_alpha + shadow_alpha * (1.0 - base_alpha);
+    float3 shadow_color = input.shadow_color.rgb;
+    float effective_shadow_alpha = shadow_alpha * input.shadow_color.a;
+    float3 composed_rgb_linear = base_alpha * base_linear + effective_shadow_alpha * shadow_color * (1.0 - base_alpha);
+    float composed_alpha = base_alpha + effective_shadow_alpha * (1.0 - base_alpha);
 
     // Handle premultiplied alpha
     float3 final_srgb = composed_rgb_linear / max(composed_alpha, 1e-6);

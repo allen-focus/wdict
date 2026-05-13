@@ -102,8 +102,10 @@ typedef struct
 typedef struct
 {
     Color border_color;
-    f32 corner_radius, border_thickness;
+    f32 border_thickness;
+    Color shadow_color;
     Position shadow_offset;
+    f32 corner_radius;
     Color corner_colors[4];
     f32 shear;
 } RectStyle;

@@ -2,6 +2,7 @@
 #pragma comment(lib, "user32")
 
 #include "glyph_cache.h"
+#include "palette.h"
 #include "renderer.h"
 #include "ui.h"
 #include "utils.h"
@@ -30,7 +31,38 @@ typedef enum
     FONT_CAPACITY
 } FontIndex;
 
-///
+typedef struct
+{
+    Color bg_base;
+    Color bg_surface;
+    Color bg_overlay;
+
+    Color fg_primary;
+    Color fg_secondary;
+    Color fg_disabled;
+
+    Color border_normal;
+    Color border_focus;
+
+    Color accent;
+    Color accent_hover;
+    Color accent_press;
+    Color accent_fg;
+
+    Color danger;
+    Color success;
+    Color warning;
+
+    Color cursor;
+    Color selection;
+    Color selection_flash;
+    Color cursor_trail;
+
+    Color scrollbar_thumb;
+    Color scrollbar_track;
+
+    Color shadow;
+} Theme;
 
 typedef struct
 {
@@ -39,18 +71,86 @@ typedef struct
     UIContext ui;
     DWriteContext dwrite;
     Font fonts[FONT_CAPACITY];
+    Theme theme;
 } AppContext;
 
 static u16 s_utf16_pending_high = 0;
 
-// clang-format off
-static Color s_black = { 0,   0,   0,   255 };
-static Color s_grey  = { 244, 244, 244, 255 };
-static Color s_white = { 255, 255, 255, 255 };
-static Color s_red   = { 251, 147, 143, 255 };
-static Color s_green = { 253, 216, 77,  255 };
-static Color s_blue  = { 94,  203, 228, 255 };
+//
+// Static Variables: Theme
+//
 
+// clang-format off
+static const Theme s_theme_light = {
+    .bg_base         = { LIGHT_1,  255 },
+    .bg_surface      = { LIGHT_2,  255 },
+    .bg_overlay      = { LIGHT_3,  255 },
+
+    .fg_primary      = { DARK_5,   255 },
+    .fg_secondary    = { DARK_1,   255 },
+    .fg_disabled     = { LIGHT_5,  255 },
+
+    .border_normal   = { LIGHT_4,  255 },
+    .border_focus    = { BLUE_3,   255 },
+
+    .accent          = { BLUE_2,   255 },
+    .accent_hover    = { BLUE_3,   255 },
+    .accent_press    = { BLUE_4,   255 },
+    .accent_fg       = { LIGHT_1,  255 },
+
+    .danger          = { RED_3,    255 },
+    .success         = { GREEN_4,  255 },
+    .warning         = { ORANGE_3, 255 },
+
+    .cursor          = { DARK_5,   255 },
+    .selection       = { BLUE_3,   128 },
+    .selection_flash = { YELLOW_3, 255 },
+    .cursor_trail    = { DARK_5,   110 },
+
+    .scrollbar_thumb = { DARK_1,   240 },
+    .scrollbar_track = { DARK_1,   96  },
+
+    .shadow          = { DARK_5,   255 },
+};
+
+static const Theme s_theme_dark = {
+    .bg_base         = { DARK_4,   255 },
+    .bg_surface      = { DARK_3,   255 },
+    .bg_overlay      = { DARK_2,   255 },
+
+    .fg_primary      = { LIGHT_1,  255 },
+    .fg_secondary    = { LIGHT_5,  255 },
+    .fg_disabled     = { DARK_1,   255 },
+
+    .border_normal   = { DARK_2,   255 },
+    .border_focus    = { BLUE_2,   255 },
+
+    .accent          = { BLUE_2,   255 },
+    .accent_hover    = { BLUE_3,   255 },
+    .accent_press    = { BLUE_4,   255 },
+    .accent_fg       = { LIGHT_2,  255 },
+
+    .danger          = { RED_1,    255 },
+    .success         = { GREEN_2,  255 },
+    .warning         = { ORANGE_1, 255 },
+
+    .cursor          = { LIGHT_1,  255 },
+    .selection       = { BLUE_2,   128 },
+    .selection_flash = { YELLOW_2, 255 },
+    .cursor_trail    = { LIGHT_1,  110 },
+
+    .scrollbar_thumb = { LIGHT_5,  240 },
+    .scrollbar_track = { LIGHT_5,  96  },
+
+    .shadow          = { DARK_5,   255 },
+};
+// clang-format on
+
+//
+// Static Variables: Padding & Child Gap
+//
+
+// clang-format off
 static Padding s_padding_big    = { 30, 30, 30, 30 };
 static Padding s_padding_medium = { 20, 20, 20, 20 };
 static Padding s_padding_small  = { 10, 10, 10, 10 };
@@ -59,6 +159,10 @@ static f32 s_child_gap_big    = 20;
 static f32 s_child_gap_medium = 10;
 static f32 s_child_gap_small  = 5;
 // clang-format on
+
+//
+// Static Variables: Widgets Related
+//
 
 #define TEXT_BUFFER_SIZE 1024
 static u8 s_buf_1[TEXT_BUFFER_SIZE] = { 0 };
@@ -100,9 +204,10 @@ static void process_frame(AppContext* app_context)
 {
 
     UIContext* ui_context = &app_context->ui;
+    Theme* theme = &app_context->theme;
     Font* font_ui = &app_context->fonts[FONT_INDEX_UI];
     Font* font_zh = &app_context->fonts[FONT_INDEX_ZH];
-    // Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
+    Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
     Font* font_symbol = &app_context->fonts[FONT_INDEX_ICON];
 
     TracyCZone(ctx, 1);
@@ -110,7 +215,7 @@ static void process_frame(AppContext* app_context)
     {
         ui_box({
             .sizing = { fixed((f32)ui_context->client_width), fixed((f32)ui_context->client_height) },
-            .color = s_white,
+            .color = theme->bg_base,
             .padding = s_padding_big,
             .child_gap = s_child_gap_big,
             .alignment = { ALIGN_CENTER, ALIGN_CENTER },
@@ -118,34 +223,39 @@ static void process_frame(AppContext* app_context)
         {
             ui_box({
                 .sizing = { fixed(500), fixed(500) },
-                .color = s_blue,
+                .color = theme->accent,
                 .padding = s_padding_medium,
             })
             {
-                ui_scrollable_area({ str("scroll area"), (Sizing){ grow({}), grow({}) }, s_white, s_padding_small,
-                                     (Color){ 140, 140, 140, 240 } })
+                ui_scrollable_area({ str("scroll area"), (Sizing){ grow({}), grow({}) }, theme->bg_base,
+                                     s_padding_small, theme->scrollbar_thumb })
                 {
 
                     ui_box({ .sizing = { fixed(1000), fixed(2000) },
-                             .color = s_grey,
+                             .color = theme->bg_surface,
                              .padding = s_padding_small,
                              .child_gap = s_child_gap_medium,
                              .direction = LAYOUT_TOP_TO_BOTTOM })
                     {
+                        /* text feild */
+                        ui_text_field(&s_text_edit_state_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(400),
+                                      s_padding_small, theme->bg_overlay, theme->border_focus, theme->fg_primary,
+                                      theme->scrollbar_thumb, theme->cursor_trail, theme->cursor, theme->selection,
+                                      theme->selection_flash);
+                        ui_text_field(&s_text_edit_state_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200),
+                                      s_padding_small, theme->bg_overlay, theme->border_focus, theme->fg_primary,
+                                      theme->scrollbar_thumb, theme->cursor_trail, theme->cursor, theme->selection,
+                                      theme->selection_flash);
+
                         // clang-format off
-
-                         /* text feild */
-                         ui_text_field(&s_text_edit_state_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(400), s_padding_small, s_blue, s_red, s_black);
-                         ui_text_field(&s_text_edit_state_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200), s_padding_small, s_blue, s_red, s_black);
-
                         /* button */
-                        ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = s_child_gap_small })
+                        ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = 5 })
                         {
                             UISignalFlags flags = ui_button(str("hello##world"), font_zh, 12,
                                                             (Sizing){ fit_grow({ .max = 70 }), fit({}) }, s_padding_small,
-                                                            (Color){ 120,  220, 255, 255 }, s_black, (Color){ 81,  189, 255, 255 }, (Color){ 46, 143, 255, 255 });
+                                                            theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
                             if (ui_hovered(flags))
-                                ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = s_red }) {}
+                                ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = theme->danger }) {}
                             if (ui_lclicked(flags))
                                 set_app_title(app_context, str("Left Click"));
                             if (ui_rclicked(flags))
@@ -155,12 +265,12 @@ static void process_frame(AppContext* app_context)
                         /* text */
                         ui_box({ .sizing = { fixed(400), fit({}) }, .child_gap = 20, .direction = LAYOUT_TOP_TO_BOTTOM })
                         {
-                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
-                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
-                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
-                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
-                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
-                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = s_black, .line_height = 24 });
+                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
                         }
 
                         /* switch box */
@@ -169,14 +279,15 @@ static void process_frame(AppContext* app_context)
                             str("switch box"),
                             font_symbol,
                             &check,
-                            (Color){ 200, 200, 200, 255 },
-                            s_white,
-                            (Color){ 46, 143, 255, 255 }
+                            theme->border_normal,
+                            theme->accent_fg,
+                            theme->shadow,
+                            theme->accent
                         );
                         if (ui_lclicked(flags))
                             check = !check;
                         if (check)
-                            ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = s_green }) {}
+                            ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = theme->success }) {}
                         // clang-format on
                     }
                 }
@@ -355,8 +466,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 codepoint = utf16_decode(&c).codepoint;
             }
-            if (codepoint >= 0x20 && codepoint != 127
-                && ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
+            if (codepoint >= 0x20 && codepoint != 127 && ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
                 ui_context->char_input_queue[ui_context->char_input_queue_count++] = codepoint;
             return 0;
         }
@@ -412,7 +522,7 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 i32 WinMainCRTStartup()
 #endif
 {
-    AppContext app_context = { .title = L"App Title" };
+    AppContext app_context = { .title = L"App Title", .theme = s_theme_light };
 
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);

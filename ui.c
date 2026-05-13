@@ -853,11 +853,12 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
     };
     RectStyle rect_style = { .border_color = box->config.rect_style.border_color,
                              .border_thickness = box->config.rect_style.border_thickness * dpi_scale,
-                             .corner_radius = box->config.rect_style.corner_radius * dpi_scale,
+                             .shadow_color = box->config.rect_style.shadow_color,
                              .shadow_offset = {
                                  box->config.rect_style.shadow_offset.x * dpi_scale,
                                  box->config.rect_style.shadow_offset.y * dpi_scale,
                              },
+                             .corner_radius = box->config.rect_style.corner_radius * dpi_scale,
                              .corner_colors = {
                                  box->config.rect_style.corner_colors[0],
                                  box->config.rect_style.corner_colors[1],
@@ -1589,7 +1590,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
 }
 
 UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
-                           const Color switch_button_color, const Color bg_color_active)
+                           const Color switch_button_color, const Color shadow_color, const Color bg_color_active)
 {
     /* Transition-related variables */
     Color bg_color_transition = bg_color;
@@ -1641,10 +1642,11 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
 
         /* switch button */
         f32 switch_button_width = CHECKBOX_HEIGHT - CHECKBOX_PAD * 2;
-        ui_box_end(ui_box_start(&(BoxConfig){
-            .sizing = { fixed(switch_button_width), fixed(switch_button_width) },
-            .color = switch_button_color,
-            .rect_style = { .corner_radius = switch_button_width / 2, .shadow_offset = { shadow_offset_x, 1.f } } }));
+        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(switch_button_width), fixed(switch_button_width) },
+                                              .color = switch_button_color,
+                                              .rect_style = { .corner_radius = switch_button_width / 2,
+                                                              .shadow_color = shadow_color,
+                                                              .shadow_offset = { shadow_offset_x, 1.f } } }));
 
         /* right padding */
         UIBox* pad_right = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },
@@ -1753,19 +1755,19 @@ static void insert_text_at_cursor(TextEditState* state, const byte* text, const 
     state->mark = state->cursor;
 }
 
-static void cursorbar(const f32 parent_height, const Padding parent_padding, const f32 x_offset)
+static void cursor_bar(const f32 parent_height, const Padding parent_padding, const f32 x_offset, const Color color)
 {
     f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
     Position float_offset = { x_offset, -parent_padding.top + CURSORBAR_PADDING };
-    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(2), fixed(bar_height) },
-                                          .color = { 0, 0, 0, 255 },
-                                          .is_float = True,
-                                          .float_offset = float_offset }));
+    ui_box_end(ui_box_start(&(BoxConfig){
+        .sizing = { fixed(2), fixed(bar_height) }, .color = color, .is_float = True, .float_offset = float_offset }));
 }
 
 UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_str, const Font* font,
                             const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg_color,
-                            const Color border_color, const Color text_color)
+                            const Color border_color, const Color text_color, const Color thumb_color,
+                            const Color cursor_trail_color, const Color cursor_bar_color, const Color selection_color,
+                            const Color selection_flash_color)
 {
     // clang-format off
     get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
@@ -2003,7 +2005,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig){
             .hash_str = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (scroll area)")),
             .sizing = { grow({}), grow({}) },
-            .thumb_color = { 140, 140, 140, 240 },
+            .thumb_color = thumb_color,
             .fixed_track = True });
         scroll_ctx.scroll_margin = font_size * 2.f;
         if (cursor_moved && state->text_len > 0)
@@ -2046,8 +2048,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     if (t_width > 0.5f)
                     {
                         f32 trail_h = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
-                        Color base = { 0, 0, 0, 110 };
-                        Color fade = { 0, 0, 0, 25 };
+                        Color base = cursor_trail_color;
+                        Color fade = { base.r, base.g, base.b, base.a / 4 };
                         Color corners[4] = { base, base, base, base };
                         if (trail_x < glide_x)
                         {
@@ -2090,8 +2092,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         f32 sel_width =
                             get_text_width(&g_ui_context->glyph_cache, sel_text, font, font_size, g_ui_context->dpi);
                         f32 sel_height = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
-                        Color sel_color = { 51, 153, 255, 128 };
-                        Color copy_flash = { 253, 216, 77, 255 };
+                        Color sel_color = selection_color;
+                        Color copy_flash = selection_flash_color;
                         sel_color = lerp_color(sel_color, copy_flash, state->copy_t);
                         ui_box_end(ui_box_start(&(BoxConfig){
                             .sizing = { fixed(sel_width), fixed(sel_height) },
@@ -2102,7 +2104,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         }));
 
                         if (state->cursor == sel_start)
-                            cursorbar(text_container_height.min_max.min, padding, glide_offset);
+                            cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
                     }
 
                     /* Selected text (always rendered; highlight box sits behind when focused) */
@@ -2115,7 +2117,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 
                     /* Cursorbar at cursor position */
                     if (is_focused && state->cursor == sel_end)
-                        cursorbar(text_container_height.min_max.min, padding, glide_offset);
+                        cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
 
                     /* Text after selection (or after cursor) */
                     if (sel_end < state->text_len)
@@ -2128,7 +2130,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 else
                 {
                     if (is_focused)
-                        cursorbar(text_container_height.min_max.min, padding, glide_offset);
+                        cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
                     String placeholder = text_hash.display_str;
                     text_config.color = placeholder_color;
                     ui_text(placeholder, &text_config);

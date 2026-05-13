@@ -47,6 +47,7 @@ typedef struct
     Rect texture_rect;
     ColorF32 corner_colors[4];
     ColorF32 border_color;
+    ColorF32 shadow_color;
     VertexStyle style_params;
     f32 is_text;
     i32 clip_rect_index;
@@ -92,6 +93,8 @@ typedef struct
 static RendererState s_renderer_state;
 static VertexCache s_vertex_cache = { 0 };
 static ClipCache s_clip_cache = { 0 };
+
+static ColorF32 color_srgb_to_linear(Color color_srgb);
 
 void renderer_wait_for_last_submitted_frame()
 {
@@ -275,6 +278,7 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
             { "COLOR",        2,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[2]), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "COLOR",        3,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[3]), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "BORDER_COLOR", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, border_color),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "SHADOW_COLOR", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, shadow_color),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "STYLE_PARAMS", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, style_params),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "SHEAR",        0,             DXGI_FORMAT_R32_FLOAT,          0,         (UINT)(offsetof(Vertex, style_params) + offsetof(VertexStyle, shear)), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
             { "IS_TEXT",      0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, is_text),         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
@@ -393,7 +397,7 @@ void renderer_flush_and_present(const u32 client_width, const u32 client_height)
     };
 
     /* Clear screen */
-    FLOAT color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    f32 color[4] = { 0 };
     ID3D11DeviceContext_ClearRenderTargetView(s_renderer_state.context, s_renderer_state.render_target_view, color);
 
     // clang-format off
@@ -573,9 +577,11 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
 
     /* Update color & border color */
     {
-        ColorF32 c = color_srgb_to_linear(color);
-        ColorF32 bc = color_srgb_to_linear(style.border_color);
-        vertex->border_color = bc;
+        ColorF32 corner_color = color_srgb_to_linear(color);
+        ColorF32 border_color = color_srgb_to_linear(style.border_color);
+        ColorF32 shadow_color = color_srgb_to_linear(style.shadow_color);
+        vertex->border_color = border_color;
+        vertex->shadow_color = shadow_color;
         if (style.corner_colors[0].a | style.corner_colors[1].a | style.corner_colors[2].a | style.corner_colors[3].a)
         {
             for (int i = 0; i < 4; i++)
@@ -584,7 +590,7 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
         else
         {
             for (int i = 0; i < 4; i++)
-                vertex->corner_colors[i] = c;
+                vertex->corner_colors[i] = corner_color;
         }
     }
 
