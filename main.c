@@ -423,6 +423,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     action.delta = +1;
                     action.flags |= TextActionFlag_Delete | TextActionFlag_ZeroDeltaWithSelection;
                 } break;
+                case 'A':
+                    if (ctrl) action.flags |= TextActionFlag_SelectAll;
+                    else return DefWindowProcW(window, message, wparam, lparam); break;
                 case 'C': 
                     if (ctrl) action.flags |= TextActionFlag_Copy; 
                     else return DefWindowProcW(window, message, wparam, lparam); break;

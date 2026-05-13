@@ -322,6 +322,7 @@ typedef enum
     TextActionFlag_Paste                   = (1 << 4), // Ctrl+V
     TextActionFlag_ZeroDeltaWithSelection  = (1 << 5), // If selection exists, treat delta as 0 (delete selection)
     TextActionFlag_DeltaPicksSelectionSide = (1 << 6), // On selection, jump to max/min side instead of moving by delta
+    TextActionFlag_SelectAll               = (1 << 7), // Ctrl+A: select entire text
     // clang-format on
 } TextActionFlags;
 

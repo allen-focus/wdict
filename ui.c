@@ -1817,6 +1817,14 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 state->copy_t = 1.f;
             }
 
+            /* SelectAll: set cursor to end, mark to beginning */
+            if (action->flags & TextActionFlag_SelectAll)
+            {
+                state->cursor = state->text_len;
+                state->mark = 0;
+                continue;
+            }
+
             if (action->flags & TextActionFlag_Delete)
             {
                 /* ------- Deletion ------- */
