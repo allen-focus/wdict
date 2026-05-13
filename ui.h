@@ -341,17 +341,19 @@ typedef struct
 // Context
 //
 
-typedef void (*flush_and_present_fn)(const u32 client_width, const u32 client_height);
-typedef void (*on_resize_fn)(const u32 client_width, const u32 client_height);
-typedef void (*wait_for_last_submitted_frame_fn)();
-typedef f32 (*get_text_width_fn)(GlyphCache* glyph_cache, const String text, const Font* font, const f32 font_size,
-                                 const u32 dpi);
-typedef f32 (*get_text_height_fn)(GlyphCache* glyph_cache, const String text, const Font* font, const f32 font_size,
-                                  const u32 dpi);
-typedef void (*draw_rect_fn)(const GlyphCache* glyph_cache, const Rect rect, const Color color, const RectStyle style,
-                             const Rect* clip);
-typedef void (*draw_text_fn)(GlyphCache* glyph_cache, String text, const Position position, const Color color,
-                             const Font* font, const f32 font_size, const u32 dpi, const Rect* clip);
+struct Renderer;
+
+typedef void (*flush_and_present_fn)(struct Renderer* renderer, const u32 client_width, const u32 client_height);
+typedef void (*on_resize_fn)(struct Renderer* renderer, const u32 client_width, const u32 client_height);
+typedef void (*wait_for_last_submitted_frame_fn)(struct Renderer* renderer);
+typedef f32 (*get_text_width_fn)(struct Renderer* renderer, GlyphCache* glyph_cache, const String text, const Font* font,
+                                 const f32 font_size, const u32 dpi);
+typedef f32 (*get_text_height_fn)(struct Renderer* renderer, GlyphCache* glyph_cache, const String text, const Font* font,
+                                  const f32 font_size, const u32 dpi);
+typedef void (*draw_rect_fn)(struct Renderer* renderer, const GlyphCache* glyph_cache, const Rect rect,
+                             const Color color, const RectStyle style, const Rect* clip);
+typedef void (*draw_text_fn)(struct Renderer* renderer, GlyphCache* glyph_cache, String text, const Position position,
+                             const Color color, const Font* font, const f32 font_size, const u32 dpi, const Rect* clip);
 typedef void (*clipboard_copy_fn)(const HWND window, const String text);
 typedef String (*clipboard_paste_fn)(const HWND window, Arena* arena);
 
@@ -381,6 +383,9 @@ typedef struct
 {
     /* OS specific */
     HWND window;
+
+    /* renderer */
+    struct Renderer* renderer;
 
     /* basic */
     Arena arena;
@@ -472,8 +477,8 @@ extern UIContext* g_ui_context;
 
 ///
 
-void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi,
-             UIRenderFunc render_fn);
+void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_context, struct Renderer* renderer, u32 width,
+             u32 height, u32 dpi, UIRenderFunc render_fn);
 
 UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);

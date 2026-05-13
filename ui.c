@@ -185,13 +185,14 @@ static void box_cache_remove_unused()
 // Context
 //
 
-void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi,
-             UIRenderFunc render_fn)
+void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_context, struct Renderer* renderer, u32 width,
+             u32 height, u32 dpi, UIRenderFunc render_fn)
 {
     ui_context->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
     glyph_cache_init(dwrite, &ui_context->glyph_cache, GLYPHS_LENGTH);
     box_cache_init(&ui_context->box_cache);
     ui_context->window = window;
+    ui_context->renderer = renderer;
     ui_context->client_width = width;
     ui_context->client_height = height;
     ui_context->dpi = dpi;
@@ -287,10 +288,11 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
     u32 dpi = g_ui_context->dpi;
     get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
     get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
+    struct Renderer* renderer = g_ui_context->renderer;
 
-    f32 base_line_height = get_text_height(glyph_cache, text, text_config->font, text_config->font_size, dpi);
+    f32 base_line_height = get_text_height(renderer, glyph_cache, text, text_config->font, text_config->font_size, dpi);
     f32 line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
-    f32 fixed_width = get_text_width(glyph_cache, text, text_config->font, text_config->font_size, dpi);
+    f32 fixed_width = get_text_width(renderer, glyph_cache, text, text_config->font, text_config->font_size, dpi);
     BoxConfig box_config = { .sizing = { .width = { { fixed_width, fixed_width }, SIZING_MODE_FIXED },
                                          .height = { { line_height, line_height }, SIZING_MODE_FIXED } } };
 
@@ -331,8 +333,8 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
                     /* For ASCII: measure up to current position (word boundary before delimiter).
                     For non-ASCII: include this character itself, treating it as a single-word unit. */
                     isize end = res_start.codepoint < 127 ? ptr - text.data : next - text.data;
-                    f32 word_width = get_text_width(glyph_cache, str_slice(text, start, end), text_box->data.text.font,
-                                                    text_box->data.text.font_size, dpi);
+                    f32 word_width = get_text_width(renderer, glyph_cache, str_slice(text, start, end),
+                                                    text_box->data.text.font, text_box->data.text.font_size, dpi);
                     min_width = max(min_width, word_width);
                     word_count++;
                 }
@@ -344,13 +346,13 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
         /* Handle last word */
         if (start < text.len && text.data[start] != ' ')
         {
-            f32 word_width = get_text_width(glyph_cache, str_slice(text, start, text.len), text_box->data.text.font,
-                                            text_box->data.text.font_size, dpi);
+            f32 word_width = get_text_width(renderer, glyph_cache, str_slice(text, start, text.len),
+                                            text_box->data.text.font, text_box->data.text.font_size, dpi);
             min_width = max(min_width, word_width);
             word_count++;
         }
 
-        whole_text_width = get_text_width(glyph_cache, text_box->data.text.content, text_box->data.text.font,
+        whole_text_width = get_text_width(renderer, glyph_cache, text_box->data.text.content, text_box->data.text.font,
                                           text_box->data.text.font_size, dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
@@ -727,13 +729,14 @@ static void perform_text_wrapping(UIBox* text_box)
     u32 dpi = g_ui_context->dpi;
     GlyphCache* glyph_cache = &g_ui_context->glyph_cache;
     get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
+    struct Renderer* renderer = g_ui_context->renderer;
 
     const Font* font = text_box->data.text.font;
     f32 font_size = text_box->data.text.font_size;
     String text = text_box->data.text.content;
     f32 max_width = text_box->size.width;
 
-    if (get_text_width(glyph_cache, text, font, font_size, dpi) <= max_width)
+    if (get_text_width(renderer, glyph_cache, text, font, font_size, dpi) <= max_width)
         return;
 
     isize line_start = 0;
@@ -747,7 +750,7 @@ static void perform_text_wrapping(UIBox* text_box)
         isize distance = ptr - text.data;
 
         /* Check width */
-        f32 width = get_text_width(glyph_cache, str_slice(text, line_start, distance), font, font_size, dpi);
+        f32 width = get_text_width(renderer, glyph_cache, str_slice(text, line_start, distance), font, font_size, dpi);
         if (width > max_width && last_break > line_start)
         {
             *slice_push(&g_ui_context->arena, &text_box->data.text.wrapped_lines) =
@@ -821,7 +824,7 @@ isize ui_frame_begin(UIContext* ui_context)
 {
     g_ui_context = ui_context;
     if (g_ui_context->frame_index > 0)
-        g_ui_context->render_fn.wait_for_last_submitted_frame();
+        g_ui_context->render_fn.wait_for_last_submitted_frame(g_ui_context->renderer);
     f64 last_time = g_ui_context->current_time;
     g_ui_context->current_time = get_current_time(g_ui_context->frame_index);
     g_ui_context->frame_delta_time = (f32)(g_ui_context->current_time - last_time);
@@ -949,13 +952,14 @@ void ui_frame_end(isize arena_pos_backup)
         {
             case UI_COMMAND_RECT:
                 clip = memcmp(&cmd->rect.clip, &no_clip, sizeof(no_clip)) == 0 ? NULL : &cmd->rect.clip;
-                render_fn->draw_rect(glyph_cache, cmd->rect.rect, cmd->rect.color, cmd->rect.style, clip);
+                render_fn->draw_rect(g_ui_context->renderer, glyph_cache, cmd->rect.rect, cmd->rect.color,
+                                     cmd->rect.style, clip);
                 break;
             case UI_COMMAND_TEXT:
                 UICommandText* text = &cmd->text;
                 clip = memcmp(&cmd->text.clip, &no_clip, sizeof(no_clip)) == 0 ? NULL : &cmd->text.clip;
-                render_fn->draw_text(glyph_cache, text->content, text->position, text->color, text->font,
-                                     text->font_size, dpi, clip);
+                render_fn->draw_text(g_ui_context->renderer, glyph_cache, text->content, text->position, text->color,
+                                     text->font, text->font_size, dpi, clip);
                 break;
             default:
                 Assert(0);
@@ -965,7 +969,7 @@ void ui_frame_end(isize arena_pos_backup)
     /* Present */
     u32 physical_client_width = (u32)(g_ui_context->client_width * dpi_scale);
     u32 physical_client_height = (u32)(g_ui_context->client_height * dpi_scale);
-    g_ui_context->render_fn.flush_and_present(physical_client_width, physical_client_height);
+    g_ui_context->render_fn.flush_and_present(g_ui_context->renderer, physical_client_width, physical_client_height);
 
     /* Reset state */
     Assert(ui_box_stack.depth == 0);
@@ -1731,7 +1735,7 @@ static isize scan_word_backward(const byte* base, isize pos)
 
 static isize find_cursor_at_x(byte* base, const isize text_len, const f32 target_x, GlyphCache* glyph_cache,
                               const Font* font, const f32 font_size, const u32 dpi,
-                              const get_text_width_fn get_text_width)
+                              const get_text_width_fn get_text_width, struct Renderer* renderer)
 {
     if (text_len == 0 || target_x <= 0.f)
         return 0;
@@ -1740,11 +1744,11 @@ static isize find_cursor_at_x(byte* base, const isize text_len, const f32 target
     {
         isize next = scan_codepoint_forward(base, text_len, pos, 1);
         String to_next = { base, next };
-        if (get_text_width(glyph_cache, to_next, font, font_size, dpi) >= target_x)
+        if (get_text_width(renderer, glyph_cache, to_next, font, font_size, dpi) >= target_x)
         {
             String to_pos = { base, pos };
-            f32 w_pos = get_text_width(glyph_cache, to_pos, font, font_size, dpi);
-            f32 w_next = get_text_width(glyph_cache, to_next, font, font_size, dpi);
+            f32 w_pos = get_text_width(renderer, glyph_cache, to_pos, font, font_size, dpi);
+            f32 w_next = get_text_width(renderer, glyph_cache, to_next, font, font_size, dpi);
             return (target_x - w_pos >= w_next - target_x) ? next : pos;
         }
         pos = next;
@@ -1792,7 +1796,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     // clang-format off
     get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
     get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
-    f32 text_height = get_text_height(&g_ui_context->glyph_cache, text_with_hash_str, font, font_size, g_ui_context->dpi);
+    struct Renderer* renderer = g_ui_context->renderer;
+    f32 text_height = get_text_height(renderer, &g_ui_context->glyph_cache, text_with_hash_str, font, font_size, g_ui_context->dpi);
     SizingAxis text_container_height = fixed(text_height + padding.top + padding.bottom);
     Color placeholder_color = { text_color.r, text_color.g, text_color.b, text_color.a / 2 };
     TextConfig text_config = { .font = font, .font_size = font_size, .line_height = font_size };
@@ -1992,7 +1997,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 if (click_x >= 0.f && inside_y)
                 {
                     state->cursor = find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache,
-                                                     font, font_size, g_ui_context->dpi, get_text_width);
+                                                     font, font_size, g_ui_context->dpi, get_text_width,
+                                                     g_ui_context->renderer);
                 }
             }
         }
@@ -2028,7 +2034,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         {
                             state->cursor =
                                 find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache,
-                                                 font, font_size, g_ui_context->dpi, get_text_width);
+                                                 font, font_size, g_ui_context->dpi, get_text_width,
+                                                 g_ui_context->renderer);
                             state->mark = state->cursor;
 
                             if (ui_double_clicked(flags))
@@ -2061,7 +2068,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         if (state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
-            cursor_x = get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+            cursor_x = get_text_width(renderer, &g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
         }
         approach_f32(&state->cursor_glide_x, cursor_x, 22.f);
         approach_f32(&state->cursor_trail_x, cursor_x, 10.f);
@@ -2087,13 +2094,13 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             String text_to_cursor = { state->base, state->cursor };
             scroll_ctx.cursor_content_x =
-                get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi) +
+                get_text_width(renderer, &g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi) +
                 padding.left;
         }
         {
             b32 has_text = state->text_len > 0;
             String full_text = has_text ? (String){ state->base, state->text_len } : text_hash.display_str;
-            f32 text_width = get_text_width(&g_ui_context->glyph_cache, full_text, font, font_size, g_ui_context->dpi);
+            f32 text_width = get_text_width(renderer, &g_ui_context->glyph_cache, full_text, font, font_size, g_ui_context->dpi);
             f32 inner_width = text_width + padding.left + padding.right;
 
             UIBox* inner =
@@ -2109,7 +2116,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 {
                     String text_to_cursor = { state->base, state->cursor };
                     cursor_x =
-                        get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+                        get_text_width(renderer, &g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
                 }
                 if (is_focused)
                 {
@@ -2158,10 +2165,10 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 {
                     String text_before = { state->base, state->composition_start };
                     f32 comp_x =
-                        get_text_width(&g_ui_context->glyph_cache, text_before, font, font_size, g_ui_context->dpi);
+                        get_text_width(renderer, &g_ui_context->glyph_cache, text_before, font, font_size, g_ui_context->dpi);
                     String comp_text = { state->base + state->composition_start, state->composition_len };
                     f32 comp_w =
-                        get_text_width(&g_ui_context->glyph_cache, comp_text, font, font_size, g_ui_context->dpi);
+                        get_text_width(renderer, &g_ui_context->glyph_cache, comp_text, font, font_size, g_ui_context->dpi);
                     if (comp_w > 0.f)
                     {
                         f32 underline_y = font_size;
@@ -2189,7 +2196,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     {
                         String sel_text = { state->base + sel_start, sel_end - sel_start };
                         f32 sel_width =
-                            get_text_width(&g_ui_context->glyph_cache, sel_text, font, font_size, g_ui_context->dpi);
+                            get_text_width(renderer, &g_ui_context->glyph_cache, sel_text, font, font_size, g_ui_context->dpi);
                         f32 sel_height = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
                         Color sel_color = selection_color;
                         Color copy_flash = selection_flash_color;
@@ -2251,13 +2258,13 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             String text_before = { state->base, state->composition_start };
             ime_cursor_x =
-                get_text_width(&g_ui_context->glyph_cache, text_before, font, font_size, g_ui_context->dpi);
+                get_text_width(renderer, &g_ui_context->glyph_cache, text_before, font, font_size, g_ui_context->dpi);
         }
         else if (state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
             ime_cursor_x =
-                get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+                get_text_width(renderer, &g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
         }
         f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
 

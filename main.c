@@ -72,6 +72,8 @@ typedef struct
     DWriteContext dwrite;
     Font fonts[FONT_CAPACITY];
     Theme theme;
+    Renderer renderer;
+    RendererShared renderer_shared;
 } AppContext;
 
 static u16 s_utf16_pending_high = 0;
@@ -269,9 +271,9 @@ static void process_frame(AppContext* app_context)
                             ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
                             ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
                             ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            // ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            // ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            // ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
                         }
 
                         /* switch box */
@@ -551,7 +553,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_context->client_width = (u32)ceil(physical_client_width / dpi_scale);
             ui_context->client_height = (u32)ceil(physical_client_height / dpi_scale);
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
-                ui_context->render_fn.on_resize(physical_client_width, physical_client_height);
+                ui_context->render_fn.on_resize(ui_context->renderer, physical_client_width, physical_client_height);
             process_frame(app_context);
             SetCursor(s_cursors[ui_context->desired_cursor]);
             return 0;
@@ -562,7 +564,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_context->dpi = GetDpiForWindow(window);
             glyph_cache_deinit(&ui_context->glyph_cache);
             glyph_cache_init(&app_context->dwrite, &ui_context->glyph_cache, GLYPHS_LENGTH);
-            renderer_recreate_glyph_atlas_texture(&ui_context->glyph_cache.atlas);
+            renderer_recreate_glyph_atlas_texture(ui_context->renderer, &ui_context->glyph_cache.atlas);
 
             // Set new window
             RECT* const suggested_rect = (RECT*)lparam;
@@ -630,6 +632,12 @@ i32 WinMainCRTStartup()
                             rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
     }
 
+    /* Initialize font rasterizer */
+    dwrite_init(&app_context.dwrite);
+
+    /* Initialize shared renderer state */
+    renderer_shared_init(&app_context.renderer_shared);
+
     /* Initialize ui context */
     UIRenderFunc render_fn = {
         .flush_and_present = renderer_flush_and_present,
@@ -640,13 +648,12 @@ i32 WinMainCRTStartup()
         .draw_rect = renderer_draw_rect,
         .draw_text = renderer_draw_text,
     };
-    ui_init(app_context.window, &app_context.dwrite, &app_context.ui, CLIENT_WIDTH, CLIENT_HEIGHT, GetDpiForSystem(),
-            render_fn);
+    ui_init(app_context.window, &app_context.dwrite, &app_context.ui, &app_context.renderer, CLIENT_WIDTH,
+            CLIENT_HEIGHT, GetDpiForSystem(), render_fn);
     app_context.ui.clipboard_copy = win32_clipboard_copy;
     app_context.ui.clipboard_paste = win32_clipboard_paste;
 
-    /* Initialize font rasterizer */
-    dwrite_init(&app_context.dwrite);
+    /* Register fonts */
     font_register_from_system(&app_context.dwrite, L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                               &app_context.fonts[FONT_INDEX_UI]);
     font_register_from_system(&app_context.dwrite, L"Microsoft YaHei", DWRITE_FONT_WEIGHT_NORMAL,
@@ -656,8 +663,9 @@ i32 WinMainCRTStartup()
     font_register_from_resource(&app_context.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                                 &app_context.fonts[FONT_INDEX_ICON]);
 
-    /* Initialize renderer */
-    renderer_init(app_context.window, &app_context.ui.glyph_cache.atlas);
+    /* Initialize per-window renderer */
+    renderer_init(&app_context.renderer, &app_context.renderer_shared, app_context.window,
+                  &app_context.ui.glyph_cache.atlas);
 
     /* Render first frame before showing window */
     process_frame(&app_context); // Rasterize needed glyphs
@@ -684,7 +692,8 @@ i32 WinMainCRTStartup()
     }
 
     /* Clean */
-    renderer_deinit();
+    renderer_deinit(&app_context.renderer);
+    renderer_shared_deinit(&app_context.renderer_shared);
     font_unregister(&app_context.fonts[FONT_INDEX_UI]);
     font_unregister(&app_context.fonts[FONT_INDEX_ZH]);
     font_unregister(&app_context.fonts[FONT_INDEX_MONO]);
