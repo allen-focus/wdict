@@ -292,10 +292,30 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             // clang-format off
             switch (wparam)
             {
-                case VK_LEFT:  action.delta = -1; break;
-                case VK_RIGHT: action.delta = +1; break;
+                case VK_LEFT:
+                {
+                    action.delta = -1;
+                    if (!shift)
+                        action.flags |= TextActionFlag_DeltaPicksSelectionSide;
+                } break;
+                case VK_RIGHT:
+                {
+                    action.delta = +1;
+                    if (!shift)
+                        action.flags |= TextActionFlag_DeltaPicksSelectionSide;
+                } break;
                 case VK_HOME:  action.delta = -INT64_MAX; break;
                 case VK_END:   action.delta = +INT64_MAX; break;
+                case VK_BACK:
+                {
+                    action.delta = -1;
+                    action.flags |= TextActionFlag_Delete | TextActionFlag_ZeroDeltaWithSelection;
+                } break;
+                case VK_DELETE:
+                {
+                    action.delta = +1;
+                    action.flags |= TextActionFlag_Delete | TextActionFlag_ZeroDeltaWithSelection;
+                } break;
                 default: return DefWindowProcW(window, message, wparam, lparam);
             }
             ui_context->text_action_queue[ui_context->text_action_queue_count++] = action;
@@ -324,7 +344,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 codepoint = utf16_decode(&c).codepoint;
             }
-            if (codepoint && ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
+            if (codepoint && codepoint != '\b' && codepoint != 127
+                && ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
                 ui_context->char_input_queue[ui_context->char_input_queue_count++] = codepoint;
             return 0;
         }

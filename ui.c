@@ -1633,41 +1633,6 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     return flags;
 }
 
-typedef struct
-{
-    u32 codepoint;
-    isize len;
-} UTF8;
-
-static UTF8 pop_utf8_left(TextEditState* state)
-{
-    UTF8 utf8 = { 0 };
-
-    /* Early return if `cursor` equals 0 */
-    Assert(state->cursor >= 0);
-    if (state->cursor == 0)
-        return utf8;
-
-    /* Pop a utf8 char */
-    state->cursor--;
-    while (state->cursor > 0)
-    {
-        u8 c = state->base[state->cursor];
-
-        // continuation byte: 10xxxxxx
-        if ((c & 0xC0) != 0x80)
-            break;
-        state->cursor--;
-    }
-
-    /* Return */
-    UnicodeDecode res = utf8_decode(&state->base[state->cursor]);
-    utf8.codepoint = res.codepoint;
-    utf8.len = res.next_p - (state->base + state->cursor);
-
-    return utf8;
-}
-
 static isize scan_codepoint_forward(const byte* base, isize text_len, isize pos, isize count)
 {
     while (count > 0 && pos < text_len)
@@ -1746,132 +1711,133 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
     if (is_focused)
     {
-        /* Navigation (text action queue) */
+        /* Unified action processing (navigation + deletion) */
         for (isize i = 0; i < g_ui_context->text_action_queue_count; i++)
         {
             TextAction* action = &g_ui_context->text_action_queue[i];
-            isize new_cursor;
-            if (action->flags & TextActionFlag_WordScan)
+
+            if (action->flags & TextActionFlag_Delete)
             {
-                if (action->delta > 0)
-                    new_cursor = scan_word_forward(state->base, state->text_len, state->cursor);
-                else if (action->delta < 0)
-                    new_cursor = scan_word_backward(state->base, state->cursor);
+                /* ------- Deletion ------- */
+                isize new_cursor = state->cursor;
+                isize delta = action->delta;
+
+                /* ZeroDeltaWithSelection: if selection exists, delete it without moving */
+                if (state->cursor != state->mark && (action->flags & TextActionFlag_ZeroDeltaWithSelection))
+                    delta = 0;
+
+                /* Resolve delta via word-scan or codepoint-scan */
+                if (delta != 0)
+                {
+                    if (action->flags & TextActionFlag_WordScan)
+                    {
+                        if (delta > 0)
+                            new_cursor = scan_word_forward(state->base, state->text_len, state->cursor);
+                        else
+                            new_cursor = scan_word_backward(state->base, state->cursor);
+                    }
+                    else
+                    {
+                        if (delta > 0)
+                            new_cursor =
+                                scan_codepoint_forward(state->base, state->text_len, state->cursor, delta);
+                        else
+                            new_cursor = scan_codepoint_backward(state->base, state->cursor, -delta);
+                    }
+                }
+
+                /* Compute and delete the range */
+                isize del_start, del_end;
+                if (delta == 0)
+                {
+                    del_start = state->cursor < state->mark ? state->cursor : state->mark;
+                    del_end = state->cursor > state->mark ? state->cursor : state->mark;
+                }
                 else
-                    new_cursor = state->cursor;
+                {
+                    del_start = state->cursor < new_cursor ? state->cursor : new_cursor;
+                    del_end = state->cursor > new_cursor ? state->cursor : new_cursor;
+                }
+                if (del_start < del_end)
+                {
+                    memmove(state->base + del_start, state->base + del_end, state->text_len - del_end);
+                    state->text_len -= del_end - del_start;
+                }
+                state->cursor = del_start;
+                state->mark = state->cursor;
             }
             else
             {
-                if (action->delta > 0)
-                    new_cursor =
-                        scan_codepoint_forward(state->base, state->text_len, state->cursor, action->delta);
-                else if (action->delta < 0)
-                    new_cursor = scan_codepoint_backward(state->base, state->cursor, -action->delta);
+                /* ------- Navigation ------- */
+                isize new_cursor;
+
+                /* DeltaPicksSelectionSide: Right/Left on selection → jump to max/min side */
+                if (state->cursor != state->mark
+                    && (action->flags & TextActionFlag_DeltaPicksSelectionSide))
+                {
+                    if (action->delta > 0)
+                        new_cursor = state->cursor > state->mark ? state->cursor : state->mark;
+                    else if (action->delta < 0)
+                        new_cursor = state->cursor < state->mark ? state->cursor : state->mark;
+                    else
+                        new_cursor = state->cursor;
+                }
                 else
-                    new_cursor = state->cursor;
+                {
+                    if (action->flags & TextActionFlag_WordScan)
+                    {
+                        if (action->delta > 0)
+                            new_cursor = scan_word_forward(state->base, state->text_len, state->cursor);
+                        else if (action->delta < 0)
+                            new_cursor = scan_word_backward(state->base, state->cursor);
+                        else
+                            new_cursor = state->cursor;
+                    }
+                    else
+                    {
+                        if (action->delta > 0)
+                            new_cursor =
+                                scan_codepoint_forward(state->base, state->text_len, state->cursor, action->delta);
+                        else if (action->delta < 0)
+                            new_cursor = scan_codepoint_backward(state->base, state->cursor, -action->delta);
+                        else
+                            new_cursor = state->cursor;
+                    }
+                }
+
+                state->cursor = new_cursor;
+                if (!(action->flags & TextActionFlag_KeepMark))
+                    state->mark = state->cursor;
             }
-            state->cursor = new_cursor;
-            if (!(action->flags & TextActionFlag_KeepMark))
-                state->mark = state->cursor;
         }
 
-        /* Text input (char queue) */
+        /* Text input (printable characters only) */
         for (isize i = 0; i < g_ui_context->char_input_queue_count; i++)
         {
             u32 codepoint = g_ui_context->char_input_queue[i];
             if (codepoint == 0)
                 continue;
-            if (codepoint == '\b')
+            /* If there is a selection, delete it first */
+            if (state->cursor != state->mark)
             {
-                if (state->cursor != state->mark)
-                {
-                    isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
-                    isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
-                    memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
-                    state->text_len -= (sel_end - sel_start);
-                    state->cursor = sel_start;
-                    state->mark = state->cursor;
-                }
-                else if (state->cursor > 0)
-                {
-                    isize old_cursor = state->cursor;
-                    UTF8 utf8 = pop_utf8_left(state);
-                    memmove(state->base + state->cursor, state->base + old_cursor, state->text_len - old_cursor);
-                    state->text_len -= utf8.len;
-                    state->mark = state->cursor;
-                }
+                isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
+                isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+                memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
+                state->text_len -= (sel_end - sel_start);
+                state->cursor = sel_start;
+                state->mark = state->cursor;
             }
-            else if (codepoint == 127) // Ctrl+Backspace
+            u8 utf8[4];
+            isize len = utf8_encode(utf8, codepoint);
+            Assert(state->text_len + len <= state->size);
+            if (state->text_len + len <= state->size)
             {
-                if (state->cursor != state->mark)
-                {
-                    isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
-                    isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
-                    memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
-                    state->text_len -= (sel_end - sel_start);
-                    state->cursor = sel_start;
-                    state->mark = state->cursor;
-                }
-                else if (state->cursor > 0)
-                {
-                    isize old_cursor = state->cursor;
-
-                    /* Skip past non-word chars immediately left of cursor */
-                    while (state->cursor > 0)
-                    {
-                        isize before = state->cursor;
-                        UTF8 utf8 = pop_utf8_left(state);
-                        if (is_word_char(utf8.codepoint))
-                        {
-                            state->cursor = before;
-                            break;
-                        }
-                    }
-
-                    /* Delete word characters to the left */
-                    while (state->cursor > 0)
-                    {
-                        isize before = state->cursor;
-                        UTF8 utf8 = pop_utf8_left(state);
-                        if (!is_word_char(utf8.codepoint))
-                        {
-                            state->cursor = before;
-                            break;
-                        }
-                    }
-
-                    /* Shift remaining text left to close the gap */
-                    memmove(state->base + state->cursor, state->base + old_cursor, state->text_len - old_cursor);
-                    state->text_len -= old_cursor - state->cursor;
-                    state->mark = state->cursor;
-                }
-            }
-            else
-            {
-                /* If there is a selection, delete it first */
-                if (state->cursor != state->mark)
-                {
-                    isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
-                    isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
-                    memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
-                    state->text_len -= (sel_end - sel_start);
-                    state->cursor = sel_start;
-                    state->mark = sel_start;
-                }
-
-                u8 utf8[4];
-                isize len = utf8_encode(utf8, codepoint);
-
-                Assert(state->text_len + len <= state->size);
-                if (state->text_len + len <= state->size)
-                {
-                    memmove(state->base + state->cursor + len, state->base + state->cursor,
-                            state->text_len - state->cursor);
-                    memcpy(state->base + state->cursor, utf8, len);
-                    state->cursor += len;
-                    state->text_len += len;
-                    state->mark = state->cursor;
-                }
+                memmove(state->base + state->cursor + len, state->base + state->cursor,
+                        state->text_len - state->cursor);
+                memcpy(state->base + state->cursor, utf8, len);
+                state->cursor += len;
+                state->text_len += len;
+                state->mark = state->cursor;
             }
         }
     }

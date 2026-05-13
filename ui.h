@@ -301,13 +301,13 @@ typedef struct
 typedef enum
 {
     // clang-format off
-    TextActionFlag_WordScan                = (1 << 0),
-    TextActionFlag_KeepMark                = (1 << 1),
-    TextActionFlag_Delete                  = (1 << 2),
-    TextActionFlag_Copy                    = (1 << 3),
-    TextActionFlag_Paste                   = (1 << 4),
-    TextActionFlag_ZeroDeltaWithSelection  = (1 << 5),
-    TextActionFlag_DeltaPicksSelectionSide = (1 << 6),
+    TextActionFlag_WordScan                = (1 << 0), // Ctrl-held: move/dele by word boundary not codepoint
+    TextActionFlag_KeepMark                = (1 << 1), // Shift-held: preserve mark for selection
+    TextActionFlag_Delete                  = (1 << 2), // Del/Backspace: this action deletes, not navigates
+    TextActionFlag_Copy                    = (1 << 3), // Ctrl+C
+    TextActionFlag_Paste                   = (1 << 4), // Ctrl+V
+    TextActionFlag_ZeroDeltaWithSelection  = (1 << 5), // If selection exists, treat delta as 0 (delete selection)
+    TextActionFlag_DeltaPicksSelectionSide = (1 << 6), // On selection, jump to max/min side instead of moving by delta
     // clang-format on
 } TextActionFlags;
 
