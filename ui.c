@@ -1928,7 +1928,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
                 f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
                 b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y &&
-                               g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height;
+                               g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height
+                                                              - SCROLLBAR_THICKNESS_MAX;
                 if (click_x >= 0.f && inside_y)
                 {
                     isize new_cursor =
@@ -1963,7 +1964,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
                         f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
                         b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y &&
-                                       g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height;
+                                       g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height
+                                                                      - SCROLLBAR_THICKNESS_MAX;
                         if (click_x >= 0.f && inside_y)
                         {
                             isize new_cursor =
