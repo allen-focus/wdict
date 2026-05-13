@@ -521,9 +521,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_CHAR:
         {
-            if (ui_context->ime_composing)
-                return 0;
-
             wchar_t c = (wchar_t)wparam;
             u32 codepoint = 0;
             if (is_high_surrogate(c))

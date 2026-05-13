@@ -2247,7 +2247,13 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     if (is_focused && result.found)
     {
         f32 ime_cursor_x = 0.f;
-        if (state->text_len > 0)
+        if (state->composition_len > 0)
+        {
+            String text_before = { state->base, state->composition_start };
+            ime_cursor_x =
+                get_text_width(&g_ui_context->glyph_cache, text_before, font, font_size, g_ui_context->dpi);
+        }
+        else if (state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
             ime_cursor_x =

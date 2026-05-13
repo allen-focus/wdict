@@ -186,17 +186,23 @@ void win32_ime_update_candidate(const HWND window, const LONG client_x, const LO
     if (!himc)
         return;
 
+    POINT pt = { client_x, client_y };
+
     CANDIDATEFORM cf = { 0 };
     cf.dwIndex = 0;
     cf.dwStyle = CFS_CANDIDATEPOS;
-    cf.ptCurrentPos.x = client_x;
-    cf.ptCurrentPos.y = client_y;
+    cf.ptCurrentPos = pt;
     ImmSetCandidateWindow(himc, &cf);
+
+    COMPOSITIONFORM compf = { 0 };
+    compf.dwStyle = CFS_POINT;
+    compf.ptCurrentPos = pt;
+    ImmSetCompositionWindow(himc, &compf);
+
     ImmReleaseContext(window, himc);
 
     if (out_screen_pos)
     {
-        POINT pt = { client_x, client_y };
         ClientToScreen(window, &pt);
         out_screen_pos->x = (f32)pt.x;
         out_screen_pos->y = (f32)pt.y;
