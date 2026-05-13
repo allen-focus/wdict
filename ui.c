@@ -1753,10 +1753,10 @@ static void insert_text_at_cursor(TextEditState* state, const byte* text, const 
     state->mark = state->cursor;
 }
 
-static void cursorbar(const f32 parent_height, const Padding parent_padding)
+static void cursorbar(const f32 parent_height, const Padding parent_padding, const f32 x_offset)
 {
     f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
-    Position float_offset = { 0, -parent_padding.top + CURSORBAR_PADDING };
+    Position float_offset = { x_offset, -parent_padding.top + CURSORBAR_PADDING };
     ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(2), fixed(bar_height) },
                                           .color = { 0, 0, 0, 255 },
                                           .is_float = True,
@@ -2024,14 +2024,20 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 b32 has_selection = is_focused && state->cursor != state->mark;
                 isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
                 isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+                f32 cursor_x = 0.f;
+                f32 anim_x = 0.f;
+                if (is_focused && has_text)
+                {
+                    String text_to_cursor = { state->base, state->cursor };
+                    cursor_x =
+                        get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+                    anim_x = state->cursor_trail_anim_x;
+                }
+                f32 glide_offset = anim_x - cursor_x;
 
                 /* Cursor trail */
                 if (is_focused && has_text)
                 {
-                    String text_to_cursor = { state->base, state->cursor };
-                    f32 cursor_x =
-                        get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
-                    f32 anim_x = state->cursor_trail_anim_x;
                     f32 trail_start = cursor_x < anim_x ? cursor_x : anim_x;
                     f32 trail_width = cursor_x > anim_x ? cursor_x - anim_x : anim_x - cursor_x;
                     if (trail_width > 0.5f)
@@ -2085,7 +2091,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         }));
 
                         if (state->cursor == sel_start)
-                            cursorbar(text_container_height.min_max.min, padding);
+                            cursorbar(text_container_height.min_max.min, padding, glide_offset);
                     }
 
                     /* Selected text (always rendered; highlight box sits behind when focused) */
@@ -2098,7 +2104,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 
                     /* Cursorbar at cursor position */
                     if (is_focused && state->cursor == sel_end)
-                        cursorbar(text_container_height.min_max.min, padding);
+                        cursorbar(text_container_height.min_max.min, padding, glide_offset);
 
                     /* Text after selection (or after cursor) */
                     if (sel_end < state->text_len)
@@ -2111,7 +2117,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 else
                 {
                     if (is_focused)
-                        cursorbar(text_container_height.min_max.min, padding);
+                        cursorbar(text_container_height.min_max.min, padding, glide_offset);
                     String placeholder = text_hash.display_str;
                     text_config.color = placeholder_color;
                     ui_text(placeholder, &text_config);
