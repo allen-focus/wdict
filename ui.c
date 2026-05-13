@@ -1024,6 +1024,11 @@ static Color lerp_color(const Color a, const Color b, const f32 t)
     return c;
 }
 
+static void approach_f32(f32* value, const f32 target, const f32 speed)
+{
+    *value += (target - *value) * min(speed * g_ui_context->frame_delta_time, 1.f);
+}
+
 static b32 update_transition(f32* transition, const f32 speed, const f32 target)
 {
     Assert(target >= 0.f && target <= 1.f);
@@ -1970,6 +1975,12 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         border_color_transition.a = lerp_u8(0, border_color.a, last_box->active_t);
     }
     update_transition(&state->copy_t, 1.5f, 0.f);
+    if (is_focused && state->text_len > 0)
+    {
+        String text_to_cursor = { state->base, state->cursor };
+        f32 cursor_x = get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+        approach_f32(&state->cursor_trail_anim_x, cursor_x, 12.f);
+    }
 
     /* Create text feild box and text */
     UIBox* box = ui_box_start(&(BoxConfig){
@@ -2006,6 +2017,28 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 b32 has_selection = is_focused && state->cursor != state->mark;
                 isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
                 isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+
+                /* Cursor trail */
+                if (is_focused && has_text)
+                {
+                    String text_to_cursor = { state->base, state->cursor };
+                    f32 cursor_x =
+                        get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+                    f32 anim_x = state->cursor_trail_anim_x;
+                    f32 trail_start = cursor_x < anim_x ? cursor_x : anim_x;
+                    f32 trail_width = cursor_x > anim_x ? cursor_x - anim_x : anim_x - cursor_x;
+                    if (trail_width > 0.5f)
+                    {
+                        f32 trail_h = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
+                        Color trail_color = { 0, 0, 0, 64 };
+                        ui_box_end(ui_box_start(&(BoxConfig){
+                            .sizing = { fixed(trail_width), fixed(trail_h) },
+                            .color = trail_color,
+                            .is_float = True,
+                            .float_offset = { trail_start, -padding.top + CURSORBAR_PADDING },
+                        }));
+                    }
+                }
 
                 if (has_text)
                 {

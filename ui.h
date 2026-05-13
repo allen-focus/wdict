@@ -297,6 +297,7 @@ typedef struct
     isize mark;
     isize text_len;
     f32 copy_t;
+    f32 cursor_trail_anim_x;
 } TextEditState;
 
 typedef enum
