@@ -1,3 +1,4 @@
+#include "win32_helper.h"
 #include "utils.h"
 
 #include <imm.h>
@@ -207,4 +208,18 @@ void win32_ime_update_candidate(const HWND window, const LONG client_x, const LO
         out_screen_pos->x = (f32)pt.x;
         out_screen_pos->y = (f32)pt.y;
     }
+}
+
+SystemTheme win32_get_system_theme(void)
+{
+    DWORD value = 1;
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0,
+                      KEY_READ, &key) == ERROR_SUCCESS)
+    {
+        DWORD size = sizeof(value);
+        RegQueryValueExW(key, L"AppsUseLightTheme", NULL, NULL, (LPBYTE)&value, &size);
+        RegCloseKey(key);
+    }
+    return value != 0 ? SYSTEM_THEME_LIGHT : SYSTEM_THEME_DARK;
 }

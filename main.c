@@ -572,6 +572,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             return 0;
         }
 
+        case WM_SETTINGCHANGE:
+        {
+            if (lparam && wcscmp((const wchar_t*)lparam, L"ImmersiveColorSet") == 0)
+                app_context->theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
+            return 0;
+        }
+
         case WM_DESTROY:
         {
             PostQuitMessage(0);
@@ -594,7 +601,8 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 i32 WinMainCRTStartup()
 #endif
 {
-    AppContext app_context = { .title = L"App Title", .theme = s_theme_light };
+    AppContext app_context = { .title = L"App Title" };
+    app_context.theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
 
     if (!s_cursors[0])
     {
