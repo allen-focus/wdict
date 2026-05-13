@@ -1718,6 +1718,29 @@ static isize find_cursor_at_x(byte* base, const isize text_len, const f32 target
     return text_len;
 }
 
+static void delete_selection(TextEditState* state)
+{
+    if (state->cursor == state->mark)
+        return;
+    isize start = state->cursor < state->mark ? state->cursor : state->mark;
+    isize end = state->cursor > state->mark ? state->cursor : state->mark;
+    memmove(state->base + start, state->base + end, state->text_len - end);
+    state->text_len -= end - start;
+    state->cursor = start;
+    state->mark = start;
+}
+
+static void insert_text_at_cursor(TextEditState* state, const byte* text, const isize len)
+{
+    if (len == 0 || state->text_len + len > state->size)
+        return;
+    memmove(state->base + state->cursor + len, state->base + state->cursor, state->text_len - state->cursor);
+    memcpy(state->base + state->cursor, text, len);
+    state->cursor += len;
+    state->text_len += len;
+    state->mark = state->cursor;
+}
+
 static void cursorbar(const f32 parent_height, const Padding parent_padding)
 {
     f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
@@ -1734,6 +1757,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 {
     // clang-format off
     get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
+    get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
     f32 text_height = get_text_height(&g_ui_context->glyph_cache, text_with_hash_str, font, font_size, g_ui_context->dpi);
     SizingAxis text_container_height = fixed(text_height + padding.top + padding.bottom);
     Color placeholder_color = { text_color.r, text_color.g, text_color.b, text_color.a / 2 };
@@ -1757,13 +1781,11 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             TextAction* action = &g_ui_context->text_action_queue[i];
 
             /* Copy: grab selection to clipboard (before any mutation) */
-            Assert(g_ui_context->clipboard_copy);
             if ((action->flags & TextActionFlag_Copy) && g_ui_context->clipboard_copy && state->cursor != state->mark)
             {
-                isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
-                isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
-                String sel_text = { state->base + sel_start, sel_end - sel_start };
-                g_ui_context->clipboard_copy(g_ui_context->window, sel_text);
+                isize start = state->cursor < state->mark ? state->cursor : state->mark;
+                isize end = state->cursor > state->mark ? state->cursor : state->mark;
+                g_ui_context->clipboard_copy(g_ui_context->window, (String){ state->base + start, end - start });
                 state->copy_t = 1.f;
             }
 
@@ -1819,29 +1841,13 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             else
             {
                 /* Paste: insert clipboard text at cursor */
-                Assert(g_ui_context->clipboard_paste);
                 if ((action->flags & TextActionFlag_Paste) && g_ui_context->clipboard_paste)
                 {
                     String pasted = g_ui_context->clipboard_paste(g_ui_context->window, &g_ui_context->arena);
                     if (pasted.len > 0)
                     {
-                        if (state->cursor != state->mark)
-                        {
-                            isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
-                            isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
-                            memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
-                            state->text_len -= (sel_end - sel_start);
-                            state->cursor = sel_start;
-                        }
-                        if (state->text_len + pasted.len <= state->size)
-                        {
-                            memmove(state->base + state->cursor + pasted.len, state->base + state->cursor,
-                                    state->text_len - state->cursor);
-                            memcpy(state->base + state->cursor, pasted.data, pasted.len);
-                            state->cursor += pasted.len;
-                            state->text_len += pasted.len;
-                        }
-                        state->mark = state->cursor;
+                        delete_selection(state);
+                        insert_text_at_cursor(state, pasted.data, pasted.len);
                     }
                 }
 
@@ -1894,28 +1900,11 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             u32 codepoint = g_ui_context->char_input_queue[i];
             if (codepoint == 0)
                 continue;
-            /* If there is a selection, delete it first */
-            if (state->cursor != state->mark)
-            {
-                isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
-                isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
-                memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
-                state->text_len -= (sel_end - sel_start);
-                state->cursor = sel_start;
-                state->mark = state->cursor;
-            }
+            delete_selection(state);
             u8 utf8[4];
             isize len = utf8_encode(utf8, codepoint);
             Assert(state->text_len + len <= state->size);
-            if (state->text_len + len <= state->size)
-            {
-                memmove(state->base + state->cursor + len, state->base + state->cursor,
-                        state->text_len - state->cursor);
-                memcpy(state->base + state->cursor, utf8, len);
-                state->cursor += len;
-                state->text_len += len;
-                state->mark = state->cursor;
-            }
+            insert_text_at_cursor(state, utf8, len);
         }
 
         /* Mouse drag to extend selection (only continue existing press, not new click) */
@@ -1925,17 +1914,14 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             if (inner_result.found)
             {
                 UIBox* inner_box = inner_result.box;
-                get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
                 f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
                 b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y &&
-                               g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height
-                                                              - SCROLLBAR_THICKNESS_MAX;
+                               g_ui_context->mouse_pos.y <=
+                                   inner_box->position.y + inner_box->size.height - SCROLLBAR_THICKNESS_MAX;
                 if (click_x >= 0.f && inside_y)
                 {
-                    isize new_cursor =
-                        find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache, font,
-                                         font_size, g_ui_context->dpi, get_text_width);
-                    state->cursor = new_cursor;
+                    state->cursor = find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache,
+                                                     font, font_size, g_ui_context->dpi, get_text_width);
                 }
             }
         }
@@ -1961,18 +1947,16 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     if (inner_result.found)
                     {
                         UIBox* inner_box = inner_result.box;
-                        get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
                         f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
                         b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y &&
-                                       g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height
-                                                                      - SCROLLBAR_THICKNESS_MAX;
+                                       g_ui_context->mouse_pos.y <=
+                                           inner_box->position.y + inner_box->size.height - SCROLLBAR_THICKNESS_MAX;
                         if (click_x >= 0.f && inside_y)
                         {
-                            isize new_cursor =
+                            state->cursor =
                                 find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache,
                                                  font, font_size, g_ui_context->dpi, get_text_width);
-                            state->cursor = new_cursor;
-                            state->mark = new_cursor;
+                            state->mark = state->cursor;
                         }
                     }
                 }
@@ -2005,15 +1989,12 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         scroll_ctx.scroll_margin = font_size * 2.f;
         if (cursor_moved && state->text_len > 0)
         {
-            get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
             String text_to_cursor = { state->base, state->cursor };
             scroll_ctx.cursor_content_x =
                 get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi) +
                 padding.left;
         }
         {
-            /* Determine the content (inner box) width inside the scroll area */
-            get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
             b32 has_text = state->text_len > 0;
             String full_text = has_text ? (String){ state->base, state->text_len } : text_hash.display_str;
             f32 text_width = get_text_width(&g_ui_context->glyph_cache, full_text, font, font_size, g_ui_context->dpi);
