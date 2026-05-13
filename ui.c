@@ -858,6 +858,7 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
                                  box->config.rect_style.shadow_offset.x * dpi_scale,
                                  box->config.rect_style.shadow_offset.y * dpi_scale,
                              },
+                             .shadow_sigma = box->config.rect_style.shadow_sigma * dpi_scale,
                              .corner_radius = box->config.rect_style.corner_radius * dpi_scale,
                              .corner_colors = {
                                  box->config.rect_style.corner_colors[0],
@@ -1646,7 +1647,8 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
                                               .color = switch_button_color,
                                               .rect_style = { .corner_radius = switch_button_width / 2,
                                                               .shadow_color = shadow_color,
-                                                              .shadow_offset = { shadow_offset_x, 1.f } } }));
+                                                              .shadow_offset = { shadow_offset_x, 0.6f },
+                                                              .shadow_sigma = 1.f } }));
 
         /* right padding */
         UIBox* pad_right = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },

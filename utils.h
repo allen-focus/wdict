@@ -105,6 +105,7 @@ typedef struct
     f32 border_thickness;
     Color shadow_color;
     Position shadow_offset;
+    f32 shadow_sigma;
     f32 corner_radius;
     Color corner_colors[4];
     f32 shear;

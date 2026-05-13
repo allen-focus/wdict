@@ -38,6 +38,7 @@ typedef struct
     f32 corner_radius;
     f32 border_thickness;
     Position shadow_offset;
+    f32 shadow_sigma;
     f32 shear;
 } VertexStyle;
 
@@ -270,19 +271,20 @@ void renderer_init(const HWND window, const GlyphAtlas* glyph_atlas)
     {
         // clang-format off
         D3D11_INPUT_ELEMENT_DESC desc[] = {
-            // SemanticName,  SemanticIndex, Format,                         InputSlot, AlignedByteOffset,                 InputSlotClass,                InstanceDataStepRate
-            { "TARGET_RECT",  0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, target_rect),     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "TEXTURE_RECT", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, texture_rect),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",        0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[0]), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",        1,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[1]), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",        2,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[2]), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "COLOR",        3,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[3]), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "BORDER_COLOR", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, border_color),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "SHADOW_COLOR", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, shadow_color),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "STYLE_PARAMS", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, style_params),    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "SHEAR",        0,             DXGI_FORMAT_R32_FLOAT,          0,         (UINT)(offsetof(Vertex, style_params) + offsetof(VertexStyle, shear)), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "IS_TEXT",      0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, is_text),         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-            { "CLIP_INDEX",   0,             DXGI_FORMAT_R32_SINT,           0,         offsetof(Vertex, clip_rect_index), D3D11_INPUT_PER_INSTANCE_DATA, 1 }
+            // SemanticName,  SemanticIndex, Format,                         InputSlot, AlignedByteOffset,                                                            InputSlotClass,                InstanceDataStepRate
+            { "TARGET_RECT",  0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, target_rect),                                          D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "TEXTURE_RECT", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, texture_rect),                                         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",        0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[0]),                                     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",        1,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[1]),                                     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",        2,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[2]),                                     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "COLOR",        3,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, corner_colors[3]),                                     D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "BORDER_COLOR", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, border_color),                                         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "SHADOW_COLOR", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, shadow_color),                                         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "STYLE_PARAMS", 0,             DXGI_FORMAT_R32G32B32A32_FLOAT, 0,         (UINT)offsetof(Vertex, style_params),                                         D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "SHEAR",        0,             DXGI_FORMAT_R32_FLOAT,          0,         (UINT)(offsetof(Vertex, style_params) + offsetof(VertexStyle, shear)),        D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "SHADOW_SIGMA", 0,             DXGI_FORMAT_R32_FLOAT,          0,         (UINT)(offsetof(Vertex, style_params) + offsetof(VertexStyle, shadow_sigma)), D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "IS_TEXT",      0,             DXGI_FORMAT_R32_FLOAT,          0,         offsetof(Vertex, is_text),                                                    D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+            { "CLIP_INDEX",   0,             DXGI_FORMAT_R32_SINT,           0,         offsetof(Vertex, clip_rect_index),                                            D3D11_INPUT_PER_INSTANCE_DATA, 1 }
         };
         // clang-format on
         ID3D11Device_CreateVertexShader(s_renderer_state.device, d3d11_vshader, sizeof(d3d11_vshader), NULL,
@@ -599,6 +601,7 @@ static void renderer_push_rect(const Rect target_rect, const Rect texture_rect, 
     vertex->style_params.border_thickness = style.border_thickness;
     vertex->style_params.shadow_offset.x = style.shadow_offset.x;
     vertex->style_params.shadow_offset.y = style.shadow_offset.y;
+    vertex->style_params.shadow_sigma = style.shadow_sigma;
     vertex->style_params.shear = style.shear;
 
     /* Update clip rect index */
@@ -669,9 +672,9 @@ void renderer_draw_rect(const GlyphCache* glyph_cache, const Rect rect, const Co
 {
     /* Calculate expanded rect */
     Rect expanded_rect = rect;
-    if (style.shadow_offset.x || style.shadow_offset.y)
+    if (style.shadow_sigma)
     {
-        f32 shadow_sigma = 4;
+        f32 shadow_sigma = style.shadow_sigma;
         f32 shadow_radius = 3.0f * shadow_sigma; // covers 99.73% size
         expanded_rect.xmin -= shadow_radius + max(0, -style.shadow_offset.x);
         expanded_rect.xmax += shadow_radius + max(0, style.shadow_offset.x);

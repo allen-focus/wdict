@@ -29,6 +29,7 @@ struct VS_Input
     float4 shadow_color : SHADOW_COLOR;
     float4 style_params : STYLE_PARAMS; // x: corner_radius, y: border_thickness, z: shadow_offset_x, w: shadow_offset_y
     float shear : SHEAR;
+    float shadow_sigma : SHADOW_SIGMA;
     float is_text : IS_TEXT;
     int clip_index : CLIP_INDEX;
     uint vertex_id : SV_VertexID;
@@ -92,10 +93,9 @@ PS_INPUT vs(VS_Input input)
     float2 shadow_offset = float2(input.style_params.z, input.style_params.w);
     float2 original_rect_half_size = target_rect_half_size;
     float2 original_rect_center = target_rect_center;
-    float enable_shadow = input.style_params.z;
-    if (enable_shadow)
+    if (input.shadow_sigma)
     {
-        shadow_sigma = 4;
+        shadow_sigma = input.shadow_sigma;
         float shadow_radius = 3.0 * shadow_sigma;
 
         // Calculate how much we expanded in each direction
