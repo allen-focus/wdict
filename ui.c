@@ -2024,10 +2024,14 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         border_color_transition.a = lerp_u8(0, border_color.a, last_box->active_t);
     }
     update_transition(&state->copy_t, 1.5f, 0.f);
-    if (is_focused && state->text_len > 0)
+    if (is_focused)
     {
-        String text_to_cursor = { state->base, state->cursor };
-        f32 cursor_x = get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+        f32 cursor_x = 0.f;
+        if (state->text_len > 0)
+        {
+            String text_to_cursor = { state->base, state->cursor };
+            cursor_x = get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+        }
         approach_f32(&state->cursor_glide_x, cursor_x, 22.f);
         approach_f32(&state->cursor_trail_x, cursor_x, 10.f);
     }
@@ -2075,13 +2079,16 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     String text_to_cursor = { state->base, state->cursor };
                     cursor_x =
                         get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+                }
+                if (is_focused)
+                {
                     trail_x = state->cursor_trail_x;
                     glide_x = state->cursor_glide_x;
                 }
                 f32 glide_offset = glide_x - cursor_x;
 
                 /* Cursor trail (spans from slow trail position to fast glide position) */
-                if (is_focused && has_text)
+                if (is_focused)
                 {
                     f32 t_start = trail_x < glide_x ? trail_x : glide_x;
                     f32 t_width = trail_x > glide_x ? trail_x - glide_x : glide_x - trail_x;
