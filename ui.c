@@ -1809,6 +1809,34 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
     if (is_focused)
     {
+        /* IME composition: delete previous range, then insert new composition */
+        if (state->composition_len > 0)
+        {
+            isize comp_start = state->composition_start;
+            isize comp_end = comp_start + state->composition_len;
+            memmove(state->base + comp_start, state->base + comp_end, state->text_len - comp_end);
+            state->text_len -= state->composition_len;
+            if (state->cursor > comp_start)
+                state->cursor = state->cursor > comp_end ? state->cursor - state->composition_len : comp_start;
+            if (state->mark > comp_start)
+                state->mark = state->mark > comp_end ? state->mark - state->composition_len : comp_start;
+            state->composition_len = 0;
+        }
+
+        if (g_ui_context->ime_composing && g_ui_context->ime_composition.len > 0)
+        {
+            String comp = g_ui_context->ime_composition;
+            Assert(state->text_len + comp.len <= state->size);
+            memmove(state->base + state->cursor + comp.len, state->base + state->cursor,
+                    state->text_len - state->cursor);
+            memcpy(state->base + state->cursor, comp.data, comp.len);
+            state->composition_start = state->cursor;
+            state->composition_len = comp.len;
+            state->text_len += comp.len;
+            state->cursor += comp.len;
+            state->mark = state->cursor;
+        }
+
         /* Unified action processing (navigation + deletion) */
         for (isize i = 0; i < g_ui_context->text_action_queue_count; i++)
         {
@@ -2121,6 +2149,27 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             .rect_style = trail_style,
                             .is_float = True,
                             .float_offset = { t_start, -padding.top + CURSORBAR_PADDING },
+                        }));
+                    }
+                }
+
+                /* IME composition underline */
+                if (is_focused && state->composition_len > 0)
+                {
+                    String text_before = { state->base, state->composition_start };
+                    f32 comp_x =
+                        get_text_width(&g_ui_context->glyph_cache, text_before, font, font_size, g_ui_context->dpi);
+                    String comp_text = { state->base + state->composition_start, state->composition_len };
+                    f32 comp_w =
+                        get_text_width(&g_ui_context->glyph_cache, comp_text, font, font_size, g_ui_context->dpi);
+                    if (comp_w > 0.f)
+                    {
+                        f32 underline_y = font_size;
+                        ui_box_end(ui_box_start(&(BoxConfig){
+                            .sizing = { fixed(comp_w), fixed(1) },
+                            .color = text_color,
+                            .is_float = True,
+                            .float_offset = { comp_x, underline_y },
                         }));
                     }
                 }

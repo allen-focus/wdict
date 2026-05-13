@@ -312,6 +312,8 @@ typedef struct
     f32 copy_t;
     f32 cursor_trail_x;
     f32 cursor_glide_x;
+    isize composition_start;
+    isize composition_len;
 } TextEditState;
 
 typedef enum
