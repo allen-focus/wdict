@@ -420,6 +420,11 @@ typedef struct
     /* clipboard */
     clipboard_copy_fn clipboard_copy;
     clipboard_paste_fn clipboard_paste;
+
+    /* IME */
+    b32 ime_composing;
+    String ime_composition;
+    Position ime_cursor_screen_pos;
 } UIContext;
 
 //

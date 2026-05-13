@@ -359,11 +359,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             f64 now = ui_context->current_time;
             i32 click_x = GET_X_LPARAM(lparam);
             i32 click_y = GET_Y_LPARAM(lparam);
-            f64 double_click_ms = (f64)GetDoubleClickTime() / 1000.0;
+            f64 double_click_sec = (f64)GetDoubleClickTime() / 1000.0;
             f32 dx = (f32)(click_x - ui_context->last_lclick_pos.x);
             f32 dy = (f32)(click_y - ui_context->last_lclick_pos.y);
             f32 dist = sqrtf(dx * dx + dy * dy);
-            if (now - ui_context->last_lclick_time <= double_click_ms &&
+            if (now - ui_context->last_lclick_time <= double_click_sec &&
                 dist <= (f32)GetSystemMetrics(SM_CXDOUBLECLK) * 2.f)
                 ui_context->mouse_double_click = True;
             ui_context->last_lclick_time = now;
@@ -393,6 +393,64 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ui_context->mouse_press = False;
             ReleaseCapture();
+        }
+
+        case WM_IME_SETCONTEXT:
+        {
+            if (wparam)
+            {
+                LPARAM flags = lparam;
+                flags &= ~ISC_SHOWUICOMPOSITIONWINDOW;
+                return DefWindowProcW(window, message, wparam, flags);
+            }
+            return DefWindowProcW(window, message, wparam, lparam);
+        }
+
+        case WM_IME_STARTCOMPOSITION:
+        {
+            ui_context->ime_composing = True;
+            return 0;
+        }
+
+        case WM_IME_COMPOSITION:
+        {
+            if (lparam & GCS_RESULTSTR)
+            {
+                String result = win32_ime_get_result(window, &ui_context->arena);
+                const byte* p = result.data;
+                while ((isize)(p - result.data) < result.len)
+                {
+                    UnicodeDecode dec = utf8_decode(p);
+                    if (ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
+                        ui_context->char_input_queue[ui_context->char_input_queue_count++] = dec.codepoint;
+                    p = dec.next_p;
+                }
+            }
+            if (lparam & GCS_COMPSTR)
+                ui_context->ime_composition = win32_ime_get_composition(window, &ui_context->arena);
+            return 0;
+        }
+
+        case WM_IME_ENDCOMPOSITION:
+        {
+            ui_context->ime_composing = False;
+            ui_context->ime_composition = (String){ 0 };
+            return 0;
+        }
+
+        case WM_IME_REQUEST:
+        {
+            if (wparam == IMR_CANDIDATEWINDOW)
+            {
+                CANDIDATEFORM* form = (CANDIDATEFORM*)lparam;
+                form->dwIndex = 0;
+                form->dwStyle = CFS_CANDIDATEPOS;
+                Position pos = ui_context->ime_cursor_screen_pos;
+                form->ptCurrentPos.x = (LONG)pos.x;
+                form->ptCurrentPos.y = (LONG)pos.y;
+                return 1;
+            }
+            return 0;
         }
 
         case WM_KEYDOWN:

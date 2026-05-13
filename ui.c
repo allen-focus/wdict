@@ -2,6 +2,7 @@
 #include "glyph_cache.h"
 #include "utils.h"
 
+#include <imm.h>
 #include <math.h>
 #include <string.h>
 
@@ -31,6 +32,8 @@
 #define SCROLL_ANIM_DURATION             0.09f
 
 #define CURSORBAR_PADDING 7
+
+#define IME_OFFSET_TOP (-12)
 
 ///
 
@@ -2190,6 +2193,41 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     }
     ui_box_end(box);
     update_box_key(box, text_hash.hash_str);
+
+    /* Update IME candidate window position */
+    if (is_focused && result.found)
+    {
+        f32 ime_cursor_x = 0.f;
+        if (state->text_len > 0)
+        {
+            String text_to_cursor = { state->base, state->cursor };
+            ime_cursor_x =
+                get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+        }
+        f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+
+        UIBox* last_box = result.box;
+        POINT client_pt = {
+            (LONG)((last_box->position.x + padding.left + ime_cursor_x) * dpi_scale),
+            (LONG)((last_box->position.y + last_box->size.height + IME_OFFSET_TOP) * dpi_scale),
+        };
+
+        HIMC himc = ImmGetContext(g_ui_context->window);
+        if (himc)
+        {
+            CANDIDATEFORM cf = { 0 };
+            cf.dwIndex = 0;
+            cf.dwStyle = CFS_CANDIDATEPOS;
+            cf.ptCurrentPos = client_pt;
+            ImmSetCandidateWindow(himc, &cf);
+            ImmReleaseContext(g_ui_context->window, himc);
+        }
+
+        POINT screen_pt = client_pt;
+        ClientToScreen(g_ui_context->window, &screen_pt);
+        g_ui_context->ime_cursor_screen_pos.x = (f32)screen_pt.x;
+        g_ui_context->ime_cursor_screen_pos.y = (f32)screen_pt.y;
+    }
 
     return flags;
 }

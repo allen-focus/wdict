@@ -1,5 +1,12 @@
 #include "utils.h"
 
+#include <imm.h>
+#include <windows.h>
+
+#pragma comment(lib, "user32")
+#pragma comment(lib, "kernel32")
+#pragma comment(lib, "imm32")
+
 void win32_clipboard_copy(const HWND window, const String text)
 {
     if (!window || text.len == 0)
@@ -95,4 +102,80 @@ String win32_clipboard_paste(const HWND window, Arena* arena)
     GlobalUnlock(hGlobal);
     CloseClipboard();
     return result;
+}
+
+//
+// IME
+//
+
+static String ime_read_str(const HWND window, Arena* arena, DWORD flag)
+{
+    HIMC himc = ImmGetContext(window);
+    if (!himc)
+        return (String){ 0 };
+
+    LONG byte_len = ImmGetCompositionStringW(himc, flag, NULL, 0);
+    if (byte_len <= 0)
+    {
+        ImmReleaseContext(window, himc);
+        return (String){ 0 };
+    }
+
+    isize wlen = (isize)byte_len / (isize)sizeof(WCHAR);
+    WCHAR* wstr = arena_push(arena, (isize)byte_len + sizeof(WCHAR), (isize)sizeof(WCHAR), 1);
+    ImmGetCompositionStringW(himc, flag, wstr, byte_len);
+    ImmReleaseContext(window, himc);
+
+    /* Count UTF-8 bytes */
+    isize utf8_len = 0;
+    const u16* p = (const u16*)wstr;
+    isize remaining = wlen;
+    while (remaining > 0 && *p)
+    {
+        UnicodeDecode dec = utf16_decode(p);
+        u8 buf[4];
+        utf8_len += utf8_encode(buf, dec.codepoint);
+        isize consumed = (const u16*)dec.next_p - p;
+        p = (const u16*)dec.next_p;
+        remaining -= consumed;
+    }
+
+    /* Convert to UTF-8 */
+    u8* dst = arena_push(arena, utf8_len, 1, 1);
+    u8* dst_cursor = dst;
+    p = (const u16*)wstr;
+    remaining = wlen;
+    while (remaining > 0 && *p)
+    {
+        UnicodeDecode dec = utf16_decode(p);
+        u8 buf[4];
+        isize written = utf8_encode(buf, dec.codepoint);
+        for (isize j = 0; j < written; j++)
+            *dst_cursor++ = buf[j];
+        isize consumed = (const u16*)dec.next_p - p;
+        p = (const u16*)dec.next_p;
+        remaining -= consumed;
+    }
+
+    return (String){ dst, utf8_len };
+}
+
+b32 win32_ime_is_composing(const HWND window)
+{
+    HIMC himc = ImmGetContext(window);
+    if (!himc)
+        return False;
+    LONG len = ImmGetCompositionStringW(himc, GCS_COMPSTR, NULL, 0);
+    ImmReleaseContext(window, himc);
+    return len > 0;
+}
+
+String win32_ime_get_composition(const HWND window, Arena* arena)
+{
+    return ime_read_str(window, arena, GCS_COMPSTR);
+}
+
+String win32_ime_get_result(const HWND window, Arena* arena)
+{
+    return ime_read_str(window, arena, GCS_RESULTSTR);
 }
