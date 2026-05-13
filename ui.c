@@ -1469,8 +1469,7 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
             if (scroll_ctx.cursor_content_x < current_scroll + margin)
                 target = max(0.f, scroll_ctx.cursor_content_x - margin);
             else if (scroll_ctx.cursor_content_x > current_scroll + viewport_width - margin)
-                target = min(scroll_ctx.max_delta.x,
-                             scroll_ctx.cursor_content_x - viewport_width + margin);
+                target = min(scroll_ctx.max_delta.x, scroll_ctx.cursor_content_x - viewport_width + margin);
 
             if (target != current_scroll)
                 start_timed_lerp(&last_area->scroll_anim_x, current_scroll, target, g_ui_context->current_time,
@@ -1919,8 +1918,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             }
         }
 
-        /* Mouse drag to extend selection */
-        if (is_focused && g_ui_context->mouse_press && state->text_len > 0)
+        /* Mouse drag to extend selection (only continue existing press, not new click) */
+        if (is_focused && g_ui_context->mouse_press && !g_ui_context->mouse_lclick && state->text_len > 0)
         {
             UIBoxFindResult inner_result = find_or_insert_box_with_same_hash_str(content_key);
             if (inner_result.found)
@@ -1928,8 +1927,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 UIBox* inner_box = inner_result.box;
                 get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
                 f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
-                b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y
-                               && g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height;
+                b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y &&
+                               g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height;
                 if (click_x >= 0.f && inside_y)
                 {
                     isize new_cursor =
@@ -1963,8 +1962,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         UIBox* inner_box = inner_result.box;
                         get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
                         f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
-                        b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y
-                                       && g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height;
+                        b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y &&
+                                       g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height;
                         if (click_x >= 0.f && inside_y)
                         {
                             isize new_cursor =
@@ -2007,8 +2006,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
             String text_to_cursor = { state->base, state->cursor };
             scroll_ctx.cursor_content_x =
-                get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi)
-                + padding.left;
+                get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi) +
+                padding.left;
         }
         {
             /* Determine the content (inner box) width inside the scroll area */
@@ -2035,7 +2034,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         ui_text(pre_text, &text_config);
                     }
 
-                    /* Selection highlight */
+                    /* Selection highlight (only when focused and selection exists) */
                     if (has_selection)
                     {
                         String sel_text = { state->base + sel_start, sel_end - sel_start };
@@ -2055,13 +2054,18 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 
                         if (state->cursor == sel_start)
                             cursorbar(text_container_height.min_max.min, padding);
+                    }
 
+                    /* Selected text (always rendered; highlight box sits behind when focused) */
+                    if (sel_start < sel_end)
+                    {
+                        String sel_text = { state->base + sel_start, sel_end - sel_start };
                         text_config.color = text_color;
                         ui_text(sel_text, &text_config);
                     }
 
                     /* Cursorbar at cursor position */
-                    if (state->cursor == sel_end)
+                    if (is_focused && state->cursor == sel_end)
                         cursorbar(text_container_height.min_max.min, padding);
 
                     /* Text after selection (or after cursor) */
