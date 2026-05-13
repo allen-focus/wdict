@@ -425,7 +425,8 @@ typedef struct
     UIBoxFindResult last_content_result;
     Color thumb_color;
     b32 fixed_track;
-    b32 auto_scroll_x;
+    f32 cursor_content_x;
+    f32 scroll_margin;
 } ScrollContext;
 
 typedef struct
@@ -436,7 +437,6 @@ typedef struct
     Padding padding;
     Color thumb_color;
     b32 fixed_track;
-    b32 auto_scroll_x;
 } ScrollableAreaConfig;
 
 ///

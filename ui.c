@@ -1370,7 +1370,7 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
     scroll_ctx.hash_str = config->hash_str;
     scroll_ctx.thumb_color = config->thumb_color;
     scroll_ctx.fixed_track = config->fixed_track;
-    scroll_ctx.auto_scroll_x = config->auto_scroll_x;
+    scroll_ctx.cursor_content_x = -1.f;
 
     /* Create area box */
     scroll_ctx.area =
@@ -1458,10 +1458,24 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
             }
         }
 
-        /* Auto-scroll to keep the trailing edge of content visible */
-        if (scroll_ctx.auto_scroll_x && scroll_ctx.max_delta.x > 0)
-            start_timed_lerp(&last_area->scroll_anim_x, last_area->scroll_delta.x, scroll_ctx.max_delta.x,
-                             g_ui_context->current_time, SCROLL_ANIM_DURATION);
+        /* Auto-scroll to keep cursor visible with scrolloff margin */
+        if (scroll_ctx.cursor_content_x >= 0.f && scroll_ctx.max_delta.x > 0)
+        {
+            f32 viewport_width = virtual_area_size.width;
+            f32 current_scroll = last_area->scroll_delta.x;
+            f32 margin = scroll_ctx.scroll_margin;
+            f32 target = current_scroll;
+
+            if (scroll_ctx.cursor_content_x < current_scroll + margin)
+                target = max(0.f, scroll_ctx.cursor_content_x - margin);
+            else if (scroll_ctx.cursor_content_x > current_scroll + viewport_width - margin)
+                target = min(scroll_ctx.max_delta.x,
+                             scroll_ctx.cursor_content_x - viewport_width + margin);
+
+            if (target != current_scroll)
+                start_timed_lerp(&last_area->scroll_anim_x, current_scroll, target, g_ui_context->current_time,
+                                 SCROLL_ANIM_DURATION);
+        }
 
         /* Reserve padding on both ends of the scrollbar */
         Size bar_track_size = { virtual_area_size.width - (f32)SCROLLBAR_SPACER * 2,
@@ -1734,6 +1748,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
     UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
     String content_key = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (content box)"));
+    isize cursor_before = state->cursor;
     b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
     if (is_focused)
     {
@@ -1979,12 +1994,22 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         .enable_clip = True,
     });
     {
+        b32 cursor_moved = state->cursor != cursor_before;
+
         ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig){
             .hash_str = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (scroll area)")),
             .sizing = { grow({}), grow({}) },
             .thumb_color = { 140, 140, 140, 240 },
-            .fixed_track = True,
-            .auto_scroll_x = True });
+            .fixed_track = True });
+        scroll_ctx.scroll_margin = font_size * 2.f;
+        if (cursor_moved && state->text_len > 0)
+        {
+            get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
+            String text_to_cursor = { state->base, state->cursor };
+            scroll_ctx.cursor_content_x =
+                get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi)
+                + padding.left;
+        }
         {
             /* Determine the content (inner box) width inside the scroll area */
             get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
