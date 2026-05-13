@@ -182,11 +182,13 @@ static void box_cache_remove_unused()
 // Context
 //
 
-void ui_init(const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi, UIRenderFunc render_fn)
+void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi,
+             UIRenderFunc render_fn)
 {
     ui_context->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
     glyph_cache_init(dwrite, &ui_context->glyph_cache, GLYPHS_LENGTH);
     box_cache_init(&ui_context->box_cache);
+    ui_context->window = window;
     ui_context->client_width = width;
     ui_context->client_height = height;
     ui_context->dpi = dpi;
@@ -1716,6 +1718,16 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             TextAction* action = &g_ui_context->text_action_queue[i];
 
+            /* Copy: grab selection to clipboard (before any mutation) */
+            Assert(g_ui_context->clipboard_copy);
+            if ((action->flags & TextActionFlag_Copy) && g_ui_context->clipboard_copy && state->cursor != state->mark)
+            {
+                isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
+                isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+                String sel_text = { state->base + sel_start, sel_end - sel_start };
+                g_ui_context->clipboard_copy(g_ui_context->window, sel_text);
+            }
+
             if (action->flags & TextActionFlag_Delete)
             {
                 /* ------- Deletion ------- */
@@ -1739,8 +1751,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     else
                     {
                         if (delta > 0)
-                            new_cursor =
-                                scan_codepoint_forward(state->base, state->text_len, state->cursor, delta);
+                            new_cursor = scan_codepoint_forward(state->base, state->text_len, state->cursor, delta);
                         else
                             new_cursor = scan_codepoint_backward(state->base, state->cursor, -delta);
                     }
@@ -1768,12 +1779,38 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             }
             else
             {
+                /* Paste: insert clipboard text at cursor */
+                Assert(g_ui_context->clipboard_paste);
+                if ((action->flags & TextActionFlag_Paste) && g_ui_context->clipboard_paste)
+                {
+                    String pasted = g_ui_context->clipboard_paste(g_ui_context->window, &g_ui_context->arena);
+                    if (pasted.len > 0)
+                    {
+                        if (state->cursor != state->mark)
+                        {
+                            isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
+                            isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+                            memmove(state->base + sel_start, state->base + sel_end, state->text_len - sel_end);
+                            state->text_len -= (sel_end - sel_start);
+                            state->cursor = sel_start;
+                        }
+                        if (state->text_len + pasted.len <= state->size)
+                        {
+                            memmove(state->base + state->cursor + pasted.len, state->base + state->cursor,
+                                    state->text_len - state->cursor);
+                            memcpy(state->base + state->cursor, pasted.data, pasted.len);
+                            state->cursor += pasted.len;
+                            state->text_len += pasted.len;
+                        }
+                        state->mark = state->cursor;
+                    }
+                }
+
                 /* ------- Navigation ------- */
                 isize new_cursor;
 
                 /* DeltaPicksSelectionSide: Right/Left on selection → jump to max/min side */
-                if (state->cursor != state->mark
-                    && (action->flags & TextActionFlag_DeltaPicksSelectionSide))
+                if (state->cursor != state->mark && (action->flags & TextActionFlag_DeltaPicksSelectionSide))
                 {
                     if (action->delta > 0)
                         new_cursor = state->cursor > state->mark ? state->cursor : state->mark;

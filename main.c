@@ -5,6 +5,7 @@
 #include "renderer.h"
 #include "ui.h"
 #include "utils.h"
+#include "win32_helper.h"
 
 #include <math.h>
 #include <wchar.h>
@@ -316,7 +317,17 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     action.delta = +1;
                     action.flags |= TextActionFlag_Delete | TextActionFlag_ZeroDeltaWithSelection;
                 } break;
-                default: return DefWindowProcW(window, message, wparam, lparam);
+                case 'C': 
+                    if (ctrl) action.flags |= TextActionFlag_Copy; 
+                    else return DefWindowProcW(window, message, wparam, lparam); break;
+                case 'X': 
+                    if (ctrl) action.flags |= TextActionFlag_Copy | TextActionFlag_Delete; 
+                    else return DefWindowProcW(window, message, wparam, lparam); break;
+                case 'V': 
+                    if (ctrl) action.flags |= TextActionFlag_Paste; 
+                    else return DefWindowProcW(window, message, wparam, lparam); break;
+                default: 
+                    return DefWindowProcW(window, message, wparam, lparam);
             }
             ui_context->text_action_queue[ui_context->text_action_queue_count++] = action;
             // clang-format on
@@ -344,8 +355,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 codepoint = utf16_decode(&c).codepoint;
             }
-            if (codepoint && codepoint != '\b' && codepoint != 127
-                && ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
+            if (codepoint && codepoint != '\b' && codepoint != 127 &&
+                ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
                 ui_context->char_input_queue[ui_context->char_input_queue_count++] = codepoint;
             return 0;
         }
@@ -401,11 +412,28 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 i32 WinMainCRTStartup()
 #endif
 {
+    AppContext app_context = { .title = L"App Title" };
+
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    /* Init context */
-    AppContext app_context = { .title = L"App Title" };
+    /* Create window */
+    {
+        RECT rect = get_screen_center_rect(CLIENT_WIDTH, CLIENT_WIDTH, GetDpiForSystem());
+        DWORD window_style = WS_OVERLAPPEDWINDOW;
+        AdjustWindowRectEx(&rect, window_style, 0, 0); // set the client position to screen center
+        WNDCLASSW wc = {
+            .lpfnWndProc = window_procedure,
+            .hInstance = GetModuleHandleW(NULL),
+            .lpszClassName = L"window class",
+        };
+        RegisterClassW(&wc);
+        app_context.window =
+            CreateWindowExW(0, wc.lpszClassName, app_context.title, window_style, rect.left, rect.top,
+                            rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
+    }
+
+    /* Initialize ui context */
     UIRenderFunc render_fn = {
         .flush_and_present = renderer_flush_and_present,
         .on_resize = renderer_resize,
@@ -415,7 +443,12 @@ i32 WinMainCRTStartup()
         .draw_rect = renderer_draw_rect,
         .draw_text = renderer_draw_text,
     };
+    ui_init(app_context.window, &app_context.dwrite, &app_context.ui, CLIENT_WIDTH, CLIENT_HEIGHT, GetDpiForSystem(),
+            render_fn);
+    app_context.ui.clipboard_copy = win32_clipboard_copy;
+    app_context.ui.clipboard_paste = win32_clipboard_paste;
 
+    /* Initialize font rasterizer */
     dwrite_init(&app_context.dwrite);
     font_register_from_system(&app_context.dwrite, L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                               &app_context.fonts[FONT_INDEX_UI]);
@@ -425,21 +458,6 @@ i32 WinMainCRTStartup()
                               &app_context.fonts[FONT_INDEX_MONO]);
     font_register_from_resource(&app_context.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                                 &app_context.fonts[FONT_INDEX_ICON]);
-    ui_init(&app_context.dwrite, &app_context.ui, CLIENT_WIDTH, CLIENT_HEIGHT, GetDpiForSystem(), render_fn);
-
-    /* Create window */
-    RECT rect = get_screen_center_rect(app_context.ui.client_width, app_context.ui.client_height, app_context.ui.dpi);
-    DWORD window_style = WS_OVERLAPPEDWINDOW;
-    AdjustWindowRectEx(&rect, window_style, 0, 0); // set the client position to screen center
-    WNDCLASSW wc = {
-        .lpfnWndProc = window_procedure,
-        .hInstance = GetModuleHandleW(NULL),
-        .lpszClassName = L"window class",
-    };
-    RegisterClassW(&wc);
-    app_context.window =
-        CreateWindowExW(0, wc.lpszClassName, app_context.title, window_style, rect.left, rect.top,
-                        rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
 
     /* Initialize renderer */
     renderer_init(app_context.window, &app_context.ui.glyph_cache.atlas);

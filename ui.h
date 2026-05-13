@@ -333,6 +333,8 @@ typedef void (*draw_rect_fn)(const GlyphCache* glyph_cache, const Rect rect, con
                              const Rect* clip);
 typedef void (*draw_text_fn)(GlyphCache* glyph_cache, String text, const Position position, const Color color,
                              const Font* font, const f32 font_size, const u32 dpi, const Rect* clip);
+typedef void (*clipboard_copy_fn)(const HWND window, const String text);
+typedef String (*clipboard_paste_fn)(const HWND window, Arena* arena);
 
 // NOTE:
 //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
@@ -358,6 +360,10 @@ typedef struct
 
 typedef struct
 {
+    /* OS specific */
+    HWND window;
+
+    /* basic */
     Arena arena;
     f64 current_time;
     u64 frame_index;
@@ -380,7 +386,7 @@ typedef struct
     TextAction text_action_queue[TEXT_ACTION_QUEUE_CAPACITY];
     isize text_action_queue_count;
 
-    /* ui general */
+    /* box cache */
     UIBox* root;
     UIBoxCache box_cache;
     BoxKey focused_box_key;
@@ -389,6 +395,10 @@ typedef struct
     GlyphCache glyph_cache;
     UIRenderFunc render_fn;
     Queue(UICommand, COMMAND_QUEUE_CAPACITY) command_queue;
+
+    /* clipboard */
+    clipboard_copy_fn clipboard_copy;
+    clipboard_paste_fn clipboard_paste;
 } UIContext;
 
 //
@@ -434,7 +444,7 @@ extern UIContext* g_ui_context;
 
 ///
 
-void ui_init(const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi,
+void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_context, u32 width, u32 height, u32 dpi,
              UIRenderFunc render_fn);
 
 UIBox* ui_box_start(const BoxConfig* config);
