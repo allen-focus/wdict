@@ -1733,6 +1733,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     /* Handle input */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
     UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
+    String content_key = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (content box)"));
     b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
     if (is_focused)
     {
@@ -1900,9 +1901,27 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 state->mark = state->cursor;
             }
         }
+
+        /* Mouse drag to extend selection */
+        if (is_focused && g_ui_context->mouse_press && state->text_len > 0)
+        {
+            UIBoxFindResult inner_result = find_or_insert_box_with_same_hash_str(content_key);
+            if (inner_result.found)
+            {
+                UIBox* inner_box = inner_result.box;
+                get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
+                f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
+                if (click_x >= 0.f)
+                {
+                    isize new_cursor =
+                        find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache, font,
+                                         font_size, g_ui_context->dpi, get_text_width);
+                    state->cursor = new_cursor;
+                }
+            }
+        }
     }
 
-    String content_key = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (content box)"));
     UISignalFlags flags = UI_Signal_Flag_None;
     if (result.found)
     {
