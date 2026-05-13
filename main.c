@@ -355,8 +355,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 codepoint = utf16_decode(&c).codepoint;
             }
-            if (codepoint && codepoint != '\b' && codepoint != 127 &&
-                ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
+            if (codepoint >= 0x20 && codepoint != 127
+                && ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
                 ui_context->char_input_queue[ui_context->char_input_queue_count++] = codepoint;
             return 0;
         }

@@ -1750,6 +1750,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
                 String sel_text = { state->base + sel_start, sel_end - sel_start };
                 g_ui_context->clipboard_copy(g_ui_context->window, sel_text);
+                state->copy_t = 1.f;
             }
 
             if (action->flags & TextActionFlag_Delete)
@@ -1867,7 +1868,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 }
 
                 state->cursor = new_cursor;
-                if (!(action->flags & TextActionFlag_KeepMark))
+                if (!(action->flags & TextActionFlag_KeepMark) && !(action->flags & TextActionFlag_Copy) &&
+                    !(action->flags & TextActionFlag_Paste))
                     state->mark = state->cursor;
             }
         }
@@ -1911,7 +1913,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 UIBox* inner_box = inner_result.box;
                 get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
                 f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
-                if (click_x >= 0.f)
+                b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y
+                               && g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height;
+                if (click_x >= 0.f && inside_y)
                 {
                     isize new_cursor =
                         find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache, font,
@@ -1944,7 +1948,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         UIBox* inner_box = inner_result.box;
                         get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
                         f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
-                        if (click_x >= 0.f)
+                        b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y
+                                       && g_ui_context->mouse_pos.y <= inner_box->position.y + inner_box->size.height;
+                        if (click_x >= 0.f && inside_y)
                         {
                             isize new_cursor =
                                 find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache,
@@ -1963,6 +1969,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
         border_color_transition.a = lerp_u8(0, border_color.a, last_box->active_t);
     }
+    update_transition(&state->copy_t, 1.5f, 0.f);
 
     /* Create text feild box and text */
     UIBox* box = ui_box_start(&(BoxConfig){
@@ -2011,9 +2018,12 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             get_text_width(&g_ui_context->glyph_cache, sel_text, font, font_size, g_ui_context->dpi);
                         f32 sel_height = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
                         Color sel_color = { 51, 153, 255, 128 };
+                        Color copy_flash = { 253, 216, 77, 255 };
+                        sel_color = lerp_color(sel_color, copy_flash, state->copy_t);
                         ui_box_end(ui_box_start(&(BoxConfig){
                             .sizing = { fixed(sel_width), fixed(sel_height) },
                             .color = sel_color,
+                            .rect_style = { .corner_radius = 2 },
                             .is_float = True,
                             .float_offset = { 0, -padding.top + CURSORBAR_PADDING },
                         }));
