@@ -9,9 +9,9 @@
          box != NULL;                                                                                                  \
          ui_box_end(box), box = NULL)
 
-#define ui_scrollable_area(...)                                                                                                    \
-    for (ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig)__VA_ARGS__);                                                           \
-         scroll_ctx.area != NULL;                                                                                                  \
+#define ui_scrollable_area(...)                                                                                        \
+    for (ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig)__VA_ARGS__);                      \
+         scroll_ctx.area != NULL;                                                                                      \
          ui_scrollable_area_end(scroll_ctx), scroll_ctx.area = NULL)
 // clang-format on
 
@@ -58,6 +58,17 @@ typedef enum
 #define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
 #define ui_clicked(signal_flags)  (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
 #define ui_pressed(signal_flags)  (signal_flags & UI_Signal_Flag_Pressed)
+
+//
+// Cursor
+//
+
+typedef enum
+{
+    UI_CURSOR_ARROW,
+    UI_CURSOR_IBEAM,
+    UI_CURSOR_HAND,
+} Cursor;
 
 //
 // Command
@@ -384,6 +395,7 @@ typedef struct
     b32 mouse_lclick;
     b32 mouse_rclick;
     b32 mouse_press;
+    Cursor desired_cursor;
     u32 char_input_queue[CHAR_INPUT_QUEUE_CAPACITY];
     isize char_input_queue_count;
     TextAction text_action_queue[TEXT_ACTION_QUEUE_CAPACITY];
@@ -456,6 +468,8 @@ UIBox* ui_text(const String text, const TextConfig* text_config);
 
 isize ui_frame_begin(UIContext* ui_context);
 void ui_frame_end(isize arena_pos_backup);
+
+void ui_set_desired_cursor(Cursor shape);
 
 ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
 void ui_scrollable_area_end(ScrollContext scroll_ctx);

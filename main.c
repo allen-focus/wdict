@@ -75,6 +75,7 @@ typedef struct
 } AppContext;
 
 static u16 s_utf16_pending_high = 0;
+static HCURSOR s_cursors[3];
 
 //
 // Static Variables: Theme
@@ -327,12 +328,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     // Handle message
     switch (message)
     {
-        case WM_SETCURSOR:
-        {
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
-            return 0;
-        }
-
         case WM_MOUSEMOVE:
         {
             f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
@@ -482,6 +477,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
                 ui_context->render_fn.on_resize(physical_client_width, physical_client_height);
             process_frame(app_context);
+            SetCursor(s_cursors[ui_context->desired_cursor]);
             return 0;
         }
 
@@ -523,6 +519,13 @@ i32 WinMainCRTStartup()
 #endif
 {
     AppContext app_context = { .title = L"App Title", .theme = s_theme_light };
+
+    if (!s_cursors[0])
+    {
+        s_cursors[UI_CURSOR_ARROW] = LoadCursor(NULL, IDC_ARROW);
+        s_cursors[UI_CURSOR_IBEAM] = LoadCursor(NULL, IDC_IBEAM);
+        s_cursors[UI_CURSOR_HAND] = LoadCursor(NULL, IDC_HAND);
+    }
 
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -575,6 +578,7 @@ i32 WinMainCRTStartup()
     /* Render first frame before showing window */
     process_frame(&app_context); // Rasterize needed glyphs
     process_frame(&app_context);
+    SetCursor(s_cursors[app_context.ui.desired_cursor]);
     ShowWindow(app_context.window, SW_SHOWDEFAULT);
 
     /* Run message loop */
@@ -592,6 +596,7 @@ i32 WinMainCRTStartup()
 
         TracyCFrameMark;
         process_frame(&app_context);
+        SetCursor(s_cursors[app_context.ui.desired_cursor]);
     }
 
     /* Clean */

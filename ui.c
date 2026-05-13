@@ -822,6 +822,7 @@ isize ui_frame_begin(UIContext* ui_context)
     f64 last_time = g_ui_context->current_time;
     g_ui_context->current_time = get_current_time(g_ui_context->frame_index);
     g_ui_context->frame_delta_time = (f32)(g_ui_context->current_time - last_time);
+    g_ui_context->desired_cursor = UI_CURSOR_ARROW;
 
     return g_ui_context->arena.pos;
 }
@@ -978,6 +979,15 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = NULL;
+}
+
+//
+// Cursor
+//
+
+void ui_set_desired_cursor(Cursor shape)
+{
+    g_ui_context->desired_cursor = shape;
 }
 
 //
@@ -1295,6 +1305,8 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     {
         UIBox* last_bar = bar_result.box;
         update_interaction_flags(last_bar, &bar_flags);
+        if (ui_hovered(thumb_flags) || ui_hovered(bar_flags))
+            ui_set_desired_cursor(UI_CURSOR_ARROW);
 
         /* Expand scrollbar (track & thumb) with a fade-out transition when mouse hovers over it */
         if (ui_pressed(thumb_flags) || ui_hovered(bar_flags))
@@ -1948,6 +1960,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     {
         UIBox* last_box = result.box;
         update_interaction_flags(last_box, &flags);
+        if (ui_hovered(flags))
+            ui_set_desired_cursor(UI_CURSOR_IBEAM);
 
         /* Transition */
         if (ui_lclicked(flags) || is_focused)
