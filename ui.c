@@ -1635,7 +1635,7 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     return flags;
 }
 
-static isize scan_codepoint_forward(const byte* base, isize text_len, isize pos, isize count)
+static isize scan_codepoint_forward(const byte* base, const isize text_len, isize pos, isize count)
 {
     while (count > 0 && pos < text_len)
     {
@@ -1659,7 +1659,7 @@ static isize scan_codepoint_backward(const byte* base, isize pos, isize count)
     return pos;
 }
 
-static b32 is_word_char(u32 c)
+static b32 is_word_char(const u32 c)
 {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
@@ -1682,7 +1682,30 @@ static isize scan_word_backward(const byte* base, isize pos)
     return pos;
 }
 
-static void cursorbar(f32 parent_height, Padding parent_padding)
+static isize find_cursor_at_x(byte* base, const isize text_len, const f32 target_x, GlyphCache* glyph_cache,
+                              const Font* font, const f32 font_size, const u32 dpi,
+                              const get_text_width_fn get_text_width)
+{
+    if (text_len == 0 || target_x <= 0.f)
+        return 0;
+    isize pos = 0;
+    while (pos < text_len)
+    {
+        isize next = scan_codepoint_forward(base, text_len, pos, 1);
+        String to_next = { base, next };
+        if (get_text_width(glyph_cache, to_next, font, font_size, dpi) >= target_x)
+        {
+            String to_pos = { base, pos };
+            f32 w_pos = get_text_width(glyph_cache, to_pos, font, font_size, dpi);
+            f32 w_next = get_text_width(glyph_cache, to_next, font, font_size, dpi);
+            return (target_x - w_pos >= w_next - target_x) ? next : pos;
+        }
+        pos = next;
+    }
+    return text_len;
+}
+
+static void cursorbar(const f32 parent_height, const Padding parent_padding)
 {
     f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
     Position float_offset = { 0, -parent_padding.top + CURSORBAR_PADDING };
@@ -1879,6 +1902,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
     }
 
+    String content_key = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (content box)"));
     UISignalFlags flags = UI_Signal_Flag_None;
     if (result.found)
     {
@@ -1889,7 +1913,29 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         if (ui_lclicked(flags) || is_focused)
         {
             if (ui_lclicked(flags))
+            {
                 g_ui_context->focused_box_key = generate_box_key(text_hash.hash_str);
+
+                /* Position cursor at click point */
+                if (state->text_len > 0)
+                {
+                    UIBoxFindResult inner_result = find_or_insert_box_with_same_hash_str(content_key);
+                    if (inner_result.found)
+                    {
+                        UIBox* inner_box = inner_result.box;
+                        get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
+                        f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
+                        if (click_x >= 0.f)
+                        {
+                            isize new_cursor =
+                                find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->glyph_cache,
+                                                 font, font_size, g_ui_context->dpi, get_text_width);
+                            state->cursor = new_cursor;
+                            state->mark = new_cursor;
+                        }
+                    }
+                }
+            }
             update_transition(&last_box->active_t, 20.f, 1.f);
         }
         else
@@ -1982,6 +2028,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 }
             }
             ui_box_end(inner);
+            update_box_key(inner, content_key);
         }
         ui_scrollable_area_end(scroll_ctx);
     }
