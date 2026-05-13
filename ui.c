@@ -1,8 +1,8 @@
 #include "ui.h"
 #include "glyph_cache.h"
 #include "utils.h"
+#include "win32_helper.h"
 
-#include <imm.h>
 #include <math.h>
 #include <string.h>
 
@@ -2256,26 +2256,10 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
 
         UIBox* last_box = result.box;
-        POINT client_pt = {
-            (LONG)((last_box->position.x + padding.left + ime_cursor_x) * dpi_scale),
-            (LONG)((last_box->position.y + last_box->size.height + IME_OFFSET_TOP) * dpi_scale),
-        };
+        LONG cx = (LONG)((last_box->position.x + padding.left + ime_cursor_x) * dpi_scale);
+        LONG cy = (LONG)((last_box->position.y + last_box->size.height + IME_OFFSET_TOP) * dpi_scale);
 
-        HIMC himc = ImmGetContext(g_ui_context->window);
-        if (himc)
-        {
-            CANDIDATEFORM cf = { 0 };
-            cf.dwIndex = 0;
-            cf.dwStyle = CFS_CANDIDATEPOS;
-            cf.ptCurrentPos = client_pt;
-            ImmSetCandidateWindow(himc, &cf);
-            ImmReleaseContext(g_ui_context->window, himc);
-        }
-
-        POINT screen_pt = client_pt;
-        ClientToScreen(g_ui_context->window, &screen_pt);
-        g_ui_context->ime_cursor_screen_pos.x = (f32)screen_pt.x;
-        g_ui_context->ime_cursor_screen_pos.y = (f32)screen_pt.y;
+        win32_ime_update_candidate(g_ui_context->window, cx, cy, &g_ui_context->ime_cursor_screen_pos);
     }
 
     return flags;

@@ -179,3 +179,26 @@ String win32_ime_get_result(const HWND window, Arena* arena)
 {
     return ime_read_str(window, arena, GCS_RESULTSTR);
 }
+
+void win32_ime_update_candidate(const HWND window, const LONG client_x, const LONG client_y, Position* out_screen_pos)
+{
+    HIMC himc = ImmGetContext(window);
+    if (!himc)
+        return;
+
+    CANDIDATEFORM cf = { 0 };
+    cf.dwIndex = 0;
+    cf.dwStyle = CFS_CANDIDATEPOS;
+    cf.ptCurrentPos.x = client_x;
+    cf.ptCurrentPos.y = client_y;
+    ImmSetCandidateWindow(himc, &cf);
+    ImmReleaseContext(window, himc);
+
+    if (out_screen_pos)
+    {
+        POINT pt = { client_x, client_y };
+        ClientToScreen(window, &pt);
+        out_screen_pos->x = (f32)pt.x;
+        out_screen_pos->y = (f32)pt.y;
+    }
+}
