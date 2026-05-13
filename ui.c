@@ -1986,7 +1986,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     {
         String text_to_cursor = { state->base, state->cursor };
         f32 cursor_x = get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
-        approach_f32(&state->cursor_trail_anim_x, cursor_x, 12.f);
+        approach_f32(&state->cursor_glide_x, cursor_x, 22.f);
+        approach_f32(&state->cursor_trail_x, cursor_x, 10.f);
     }
 
     /* Create text feild box and text */
@@ -2025,39 +2026,49 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
                 isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
                 f32 cursor_x = 0.f;
-                f32 anim_x = 0.f;
+                f32 trail_x = 0.f;
+                f32 glide_x = 0.f;
                 if (is_focused && has_text)
                 {
                     String text_to_cursor = { state->base, state->cursor };
                     cursor_x =
                         get_text_width(&g_ui_context->glyph_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
-                    anim_x = state->cursor_trail_anim_x;
+                    trail_x = state->cursor_trail_x;
+                    glide_x = state->cursor_glide_x;
                 }
-                f32 glide_offset = anim_x - cursor_x;
+                f32 glide_offset = glide_x - cursor_x;
 
-                /* Cursor trail */
+                /* Cursor trail (spans from slow trail position to fast glide position) */
                 if (is_focused && has_text)
                 {
-                    f32 trail_start = cursor_x < anim_x ? cursor_x : anim_x;
-                    f32 trail_width = cursor_x > anim_x ? cursor_x - anim_x : anim_x - cursor_x;
-                    if (trail_width > 0.5f)
+                    f32 t_start = trail_x < glide_x ? trail_x : glide_x;
+                    f32 t_width = trail_x > glide_x ? trail_x - glide_x : glide_x - trail_x;
+                    if (t_width > 0.5f)
                     {
                         f32 trail_h = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
-                        Color base = { 0, 0, 0, 64 };
-                        Color fade = { 0, 0, 0, 6 };
+                        Color base = { 0, 0, 0, 110 };
+                        Color fade = { 0, 0, 0, 25 };
                         Color corners[4] = { base, base, base, base };
-                        if (cursor_x > anim_x) { corners[0] = fade; corners[2] = fade; }
-                        else                    { corners[1] = fade; corners[3] = fade; }
+                        if (trail_x < glide_x)
+                        {
+                            corners[0] = fade;
+                            corners[2] = fade;
+                        }
+                        else
+                        {
+                            corners[1] = fade;
+                            corners[3] = fade;
+                        }
                         RectStyle trail_style = {
                             .corner_radius = font_size * 0.2f,
                             .corner_colors = { corners[0], corners[1], corners[2], corners[3] },
                         };
                         ui_box_end(ui_box_start(&(BoxConfig){
-                            .sizing = { fixed(trail_width), fixed(trail_h) },
+                            .sizing = { fixed(t_width), fixed(trail_h) },
                             .color = base,
                             .rect_style = trail_style,
                             .is_float = True,
-                            .float_offset = { trail_start, -padding.top + CURSORBAR_PADDING },
+                            .float_offset = { t_start, -padding.top + CURSORBAR_PADDING },
                         }));
                     }
                 }
