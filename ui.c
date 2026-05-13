@@ -857,7 +857,14 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
                              .shadow_offset = {
                                  box->config.rect_style.shadow_offset.x * dpi_scale,
                                  box->config.rect_style.shadow_offset.y * dpi_scale,
-                             } };
+                             },
+                             .corner_colors = {
+                                 box->config.rect_style.corner_colors[0],
+                                 box->config.rect_style.corner_colors[1],
+                                 box->config.rect_style.corner_colors[2],
+                                 box->config.rect_style.corner_colors[3],
+                             },
+                             .shear = box->config.rect_style.shear * dpi_scale };
 
     /* If clip is enabled, push a clip */
     Rect new_clip = clip;
@@ -2030,10 +2037,19 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     if (trail_width > 0.5f)
                     {
                         f32 trail_h = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
-                        Color trail_color = { 0, 0, 0, 64 };
+                        Color base = { 0, 0, 0, 64 };
+                        Color fade = { 0, 0, 0, 6 };
+                        Color corners[4] = { base, base, base, base };
+                        if (cursor_x > anim_x) { corners[0] = fade; corners[2] = fade; }
+                        else                    { corners[1] = fade; corners[3] = fade; }
+                        RectStyle trail_style = {
+                            .corner_radius = font_size * 0.2f,
+                            .corner_colors = { corners[0], corners[1], corners[2], corners[3] },
+                        };
                         ui_box_end(ui_box_start(&(BoxConfig){
                             .sizing = { fixed(trail_width), fixed(trail_h) },
-                            .color = trail_color,
+                            .color = base,
+                            .rect_style = trail_style,
                             .is_float = True,
                             .float_offset = { trail_start, -padding.top + CURSORBAR_PADDING },
                         }));
