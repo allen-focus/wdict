@@ -21,6 +21,8 @@
 #define CLIENT_HEIGHT 600
 
 #define MAX_TITLE_LENGTH 64
+#define TEXT_BUFFER_SIZE 1024
+#define MAX_WINDOWS      16
 
 typedef enum
 {
@@ -64,20 +66,36 @@ typedef struct
     Color shadow;
 } Theme;
 
+typedef struct WindowContext WindowContext;
+
 typedef struct
+{
+    DWriteContext dwrite;
+    Font fonts[FONT_CAPACITY];
+    Theme theme;
+    GlyphRasterCache raster_cache;
+    RendererShared renderer_shared;
+    HCURSOR cursors[3];
+    WindowContext* first_window;
+    WindowContext* last_window;
+} AppShared;
+
+struct WindowContext
 {
     HWND window;
     wchar_t title[MAX_TITLE_LENGTH];
     UIContext ui;
-    DWriteContext dwrite;
-    Font fonts[FONT_CAPACITY];
-    Theme theme;
     Renderer renderer;
-    RendererShared renderer_shared;
-} AppContext;
+    AppShared* shared;
+    WindowContext* next;
+
+    u8 text_buf_1[TEXT_BUFFER_SIZE];
+    u8 text_buf_2[TEXT_BUFFER_SIZE];
+    TextEditState text_edit_1;
+    TextEditState text_edit_2;
+};
 
 static u16 s_utf16_pending_high = 0;
-static HCURSOR s_cursors[3];
 
 //
 // Static Variables: Theme
@@ -164,17 +182,7 @@ static f32 s_child_gap_small  = 5;
 // clang-format on
 
 //
-// Static Variables: Widgets Related
-//
-
-#define TEXT_BUFFER_SIZE 1024
-static u8 s_buf_1[TEXT_BUFFER_SIZE] = { 0 };
-static u8 s_buf_2[TEXT_BUFFER_SIZE] = { 0 };
-static TextEditState s_text_edit_state_1 = { s_buf_1, TEXT_BUFFER_SIZE, 0, 0, 0 };
-static TextEditState s_text_edit_state_2 = { s_buf_2, TEXT_BUFFER_SIZE, 0, 0, 0 };
-
-//
-// Helper
+// Helpers
 //
 
 static RECT get_screen_center_rect(u32 width, u32 height, u32 dpi)
@@ -191,29 +199,131 @@ static RECT get_screen_center_rect(u32 width, u32 height, u32 dpi)
     return rect;
 }
 
-static void set_app_title(AppContext* app_context, const String title)
+static void set_window_title(WindowContext* ctx, const String title)
 {
-    i32 written = MultiByteToWideChar(CP_UTF8, 0, (const char*)title.data, (int)title.len, app_context->title,
-                                      MAX_TITLE_LENGTH - 1);
-    app_context->title[written] = L'\0';
-    SetWindowTextW(app_context->window, app_context->title);
+    i32 written =
+        MultiByteToWideChar(CP_UTF8, 0, (const char*)title.data, (int)title.len, ctx->title, MAX_TITLE_LENGTH - 1);
+    ctx->title[written] = L'\0';
+    SetWindowTextW(ctx->window, ctx->title);
+}
+
+static void window_list_add(AppShared* shared, WindowContext* ctx)
+{
+    ctx->next = NULL;
+    if (!shared->first_window)
+    {
+        shared->first_window = shared->last_window = ctx;
+    }
+    else
+    {
+        shared->last_window->next = ctx;
+        shared->last_window = ctx;
+    }
+}
+
+static void window_list_remove(AppShared* shared, WindowContext* ctx)
+{
+    WindowContext** prev = &shared->first_window;
+    while (*prev)
+    {
+        if (*prev == ctx)
+        {
+            *prev = ctx->next;
+            break;
+        }
+        prev = &(*prev)->next;
+    }
+    if (!shared->first_window)
+        shared->last_window = NULL;
+    else
+    {
+        WindowContext* w = shared->first_window;
+        while (w->next)
+            w = w->next;
+        shared->last_window = w;
+    }
+}
+
+//
+// Window creation
+//
+
+static void process_frame(WindowContext* ctx);
+
+static WindowContext* window_create(AppShared* shared, const wchar_t* title, u32 width, u32 height)
+{
+    WindowContext* ctx = (WindowContext*)malloc(sizeof(WindowContext));
+    if (!ctx)
+        return NULL;
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->shared = shared;
+
+    /* Copy title */
+    wcsncpy_s(ctx->title, MAX_TITLE_LENGTH, title, _TRUNCATE);
+
+    /* Create window */
+    RECT rect = get_screen_center_rect(width, height, GetDpiForSystem());
+    DWORD window_style = WS_OVERLAPPEDWINDOW;
+    AdjustWindowRectEx(&rect, window_style, 0, 0);
+    ctx->window =
+        CreateWindowExW(0, L"window class", ctx->title, window_style, rect.left, rect.top, rect.right - rect.left,
+                        rect.bottom - rect.top, NULL, NULL, GetModuleHandleW(NULL), ctx);
+    if (!ctx->window)
+    {
+        free(ctx);
+        return NULL;
+    }
+
+    /* Init UI context */
+    UIRenderFunc render_fn = {
+        .flush_and_present = renderer_flush_and_present,
+        .on_resize = renderer_resize,
+        .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
+        .get_text_width = renderer_get_text_width_for_dpi,
+        .get_text_height = renderer_get_text_height_for_dpi,
+        .draw_rect = renderer_draw_rect,
+        .draw_text = renderer_draw_text,
+    };
+    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, GetDpiForSystem(), render_fn);
+    ctx->ui.clipboard_copy = win32_clipboard_copy;
+    ctx->ui.clipboard_paste = win32_clipboard_paste;
+
+    /* Init per-window renderer */
+    renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
+
+    /* Init per-window text edit state */
+    ctx->text_edit_1.base = ctx->text_buf_1;
+    ctx->text_edit_1.size = TEXT_BUFFER_SIZE;
+    ctx->text_edit_2.base = ctx->text_buf_2;
+    ctx->text_edit_2.size = TEXT_BUFFER_SIZE;
+
+    /* Add to window list */
+    window_list_add(shared, ctx);
+
+    /* Render first frames to rasterize glyphs, then show */
+    process_frame(ctx);
+    process_frame(ctx);
+    SetCursor(shared->cursors[ctx->ui.desired_cursor]);
+    ShowWindow(ctx->window, SW_SHOWDEFAULT);
+
+    return ctx;
 }
 
 //
 // Process frame
 //
 
-static void process_frame(AppContext* app_context)
+static void process_frame(WindowContext* ctx)
 {
+    AppShared* shared = ctx->shared;
+    UIContext* ui_context = &ctx->ui;
+    const Theme* theme = &shared->theme;
+    Font* font_ui = &shared->fonts[FONT_INDEX_UI];
+    Font* font_zh = &shared->fonts[FONT_INDEX_ZH];
+    Font* font_mono = &shared->fonts[FONT_INDEX_MONO];
+    Font* font_symbol = &shared->fonts[FONT_INDEX_ICON];
 
-    UIContext* ui_context = &app_context->ui;
-    Theme* theme = &app_context->theme;
-    Font* font_ui = &app_context->fonts[FONT_INDEX_UI];
-    Font* font_zh = &app_context->fonts[FONT_INDEX_ZH];
-    Font* font_mono = &app_context->fonts[FONT_INDEX_MONO];
-    Font* font_symbol = &app_context->fonts[FONT_INDEX_ICON];
-
-    TracyCZone(ctx, 1);
+    TracyCZone(ctx_frame, 1);
     isize arena_pos_backup = ui_frame_begin(ui_context);
     {
         ui_box({
@@ -241,14 +351,23 @@ static void process_frame(AppContext* app_context)
                              .direction = LAYOUT_TOP_TO_BOTTOM })
                     {
                         /* text feild */
-                        ui_text_field(&s_text_edit_state_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(400),
+                        ui_text_field(&ctx->text_edit_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(400),
                                       s_padding_small, theme->bg_overlay, theme->border_focus, theme->fg_primary,
                                       theme->scrollbar_thumb, theme->cursor_trail, theme->cursor, theme->selection,
                                       theme->selection_flash);
-                        ui_text_field(&s_text_edit_state_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200),
+                        ui_text_field(&ctx->text_edit_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200),
                                       s_padding_small, theme->bg_overlay, theme->border_focus, theme->fg_primary,
                                       theme->scrollbar_thumb, theme->cursor_trail, theme->cursor, theme->selection,
                                       theme->selection_flash);
+
+                        {
+                            UISignalFlags flags =
+                                ui_button(str("create a new window##new window"), font_mono, 12,
+                                          (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent,
+                                          theme->accent_fg, theme->accent_hover, theme->accent_press);
+                            if (ui_lclicked(flags))
+                                window_create(shared, L"New window", CLIENT_WIDTH, CLIENT_HEIGHT);
+                        }
 
                         // clang-format off
                         /* button */
@@ -260,9 +379,9 @@ static void process_frame(AppContext* app_context)
                             if (ui_hovered(flags))
                                 ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = theme->danger }) {}
                             if (ui_lclicked(flags))
-                                set_app_title(app_context, str("Left Click"));
+                                set_window_title(ctx, str("Left Click"));
                             if (ui_rclicked(flags))
-                                set_app_title(app_context, str("Right Click"));
+                                set_window_title(ctx, str("Right Click"));
                         }
 
                         /* text */
@@ -298,7 +417,7 @@ static void process_frame(AppContext* app_context)
         }
     }
     ui_frame_end(arena_pos_backup);
-    TracyCZoneEnd(ctx);
+    TracyCZoneEnd(ctx_frame);
 }
 
 //
@@ -307,24 +426,27 @@ static void process_frame(AppContext* app_context)
 
 static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
 {
-    // Read passing data from param
-    AppContext* app_context = NULL;
+    WindowContext* ctx = NULL;
+    AppShared* shared = NULL;
     UIContext* ui_context = NULL;
     {
         if (message == WM_CREATE)
         {
             CREATESTRUCT* create = (CREATESTRUCT*)(lparam);
-            app_context = (AppContext*)(create->lpCreateParams);
-            SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)app_context);
+            ctx = (WindowContext*)(create->lpCreateParams);
+            SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)ctx);
         }
         else
         {
             LONG_PTR ptr = GetWindowLongPtrW(window, GWLP_USERDATA);
-            app_context = (AppContext*)ptr;
+            ctx = (WindowContext*)ptr;
         }
 
-        if (app_context)
-            ui_context = &app_context->ui;
+        if (ctx)
+        {
+            shared = ctx->shared;
+            ui_context = &ctx->ui;
+        }
     }
 
     // Handle message
@@ -357,7 +479,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ui_context->mouse_lclick = True;
             ui_context->mouse_press = True;
-
             f64 now = ui_context->current_time;
             i32 click_x = GET_X_LPARAM(lparam);
             i32 click_y = GET_Y_LPARAM(lparam);
@@ -371,7 +492,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_context->last_lclick_time = now;
             ui_context->last_lclick_pos.x = (f32)click_x;
             ui_context->last_lclick_pos.y = (f32)click_y;
-
             SetCapture(window);
             return 0;
         }
@@ -554,19 +674,18 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_context->client_height = (u32)ceil(physical_client_height / dpi_scale);
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
                 ui_context->render_fn.on_resize(ui_context->renderer, physical_client_width, physical_client_height);
-            process_frame(app_context);
-            SetCursor(s_cursors[ui_context->desired_cursor]);
+            process_frame(ctx);
+            SetCursor(shared->cursors[ui_context->desired_cursor]);
             return 0;
         }
 
         case WM_DPICHANGED:
         {
             ui_context->dpi = GetDpiForWindow(window);
-            raster_cache_deinit(&ui_context->raster_cache);
-            raster_cache_init(&app_context->dwrite, &ui_context->raster_cache, GLYPHS_LENGTH);
+            // Per-window atlas recreated; shared raster cache NOT reset — glyphs at
+            // old DPI remain available for other windows while new DPI entries accumulate.
             renderer_recreate_glyph_atlas_texture(ui_context->renderer);
 
-            // Set new window
             RECT* const suggested_rect = (RECT*)lparam;
             SetWindowPos(window, NULL, suggested_rect->left, suggested_rect->top,
                          suggested_rect->right - suggested_rect->left, suggested_rect->bottom - suggested_rect->top,
@@ -577,13 +696,24 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_SETTINGCHANGE:
         {
             if (lparam && wcscmp((const wchar_t*)lparam, L"ImmersiveColorSet") == 0)
-                app_context->theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
+                shared->theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
             return 0;
         }
 
         case WM_DESTROY:
         {
-            PostQuitMessage(0);
+            if (shared && ctx)
+            {
+                // First disconnect the association, so subsequent trailing messages (WM_NCDESTROY, etc.) get NULL
+                SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+
+                window_list_remove(shared, ctx);
+                ui_deinit(&ctx->ui);
+                renderer_deinit(&ctx->renderer);
+                free(ctx);
+            }
+            if (!shared || !shared->first_window)
+                PostQuitMessage(0);
             return 0;
         }
     }
@@ -603,74 +733,46 @@ i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 i32 WinMainCRTStartup()
 #endif
 {
-    AppContext app_context = { .title = L"App Title" };
-    app_context.theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
+    AppShared shared = { 0 };
+    shared.theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
 
-    if (!s_cursors[0])
-    {
-        s_cursors[UI_CURSOR_ARROW] = LoadCursor(NULL, IDC_ARROW);
-        s_cursors[UI_CURSOR_IBEAM] = LoadCursor(NULL, IDC_IBEAM);
-        s_cursors[UI_CURSOR_HAND] = LoadCursor(NULL, IDC_HAND);
-    }
+    /* Load cursors */
+    shared.cursors[UI_CURSOR_ARROW] = LoadCursor(NULL, IDC_ARROW);
+    shared.cursors[UI_CURSOR_IBEAM] = LoadCursor(NULL, IDC_IBEAM);
+    shared.cursors[UI_CURSOR_HAND] = LoadCursor(NULL, IDC_HAND);
 
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    /* Create window */
-    {
-        RECT rect = get_screen_center_rect(CLIENT_WIDTH, CLIENT_WIDTH, GetDpiForSystem());
-        DWORD window_style = WS_OVERLAPPEDWINDOW;
-        AdjustWindowRectEx(&rect, window_style, 0, 0); // set the client position to screen center
-        WNDCLASSW wc = {
-            .lpfnWndProc = window_procedure,
-            .hInstance = GetModuleHandleW(NULL),
-            .lpszClassName = L"window class",
-        };
-        RegisterClassW(&wc);
-        app_context.window =
-            CreateWindowExW(0, wc.lpszClassName, app_context.title, window_style, rect.left, rect.top,
-                            rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wc.hInstance, &app_context);
-    }
+    /* Register window class */
+    WNDCLASSW wc = {
+        .lpfnWndProc = window_procedure,
+        .hInstance = GetModuleHandleW(NULL),
+        .lpszClassName = L"window class",
+    };
+    RegisterClassW(&wc);
 
     /* Initialize font rasterizer */
-    dwrite_init(&app_context.dwrite);
+    dwrite_init(&shared.dwrite);
+
+    /* Initialize shared raster cache */
+    raster_cache_init(&shared.dwrite, &shared.raster_cache, GLYPHS_LENGTH);
 
     /* Initialize shared renderer state */
-    renderer_shared_init(&app_context.renderer_shared);
-
-    /* Initialize ui context */
-    UIRenderFunc render_fn = {
-        .flush_and_present = renderer_flush_and_present,
-        .on_resize = renderer_resize,
-        .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
-        .get_text_width = renderer_get_text_width_for_dpi,
-        .get_text_height = renderer_get_text_height_for_dpi,
-        .draw_rect = renderer_draw_rect,
-        .draw_text = renderer_draw_text,
-    };
-    ui_init(app_context.window, &app_context.dwrite, &app_context.ui, &app_context.renderer, CLIENT_WIDTH,
-            CLIENT_HEIGHT, GetDpiForSystem(), render_fn);
-    app_context.ui.clipboard_copy = win32_clipboard_copy;
-    app_context.ui.clipboard_paste = win32_clipboard_paste;
+    renderer_shared_init(&shared.renderer_shared);
 
     /* Register fonts */
-    font_register_from_system(&app_context.dwrite, L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                              &app_context.fonts[FONT_INDEX_UI]);
-    font_register_from_system(&app_context.dwrite, L"Microsoft YaHei", DWRITE_FONT_WEIGHT_NORMAL,
-                              DWRITE_FONT_STYLE_NORMAL, &app_context.fonts[FONT_INDEX_ZH]);
-    font_register_from_system(&app_context.dwrite, L"Consolas", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                              &app_context.fonts[FONT_INDEX_MONO]);
-    font_register_from_resource(&app_context.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                                &app_context.fonts[FONT_INDEX_ICON]);
+    font_register_from_system(&shared.dwrite, L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                              &shared.fonts[FONT_INDEX_UI]);
+    font_register_from_system(&shared.dwrite, L"Microsoft YaHei", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                              &shared.fonts[FONT_INDEX_ZH]);
+    font_register_from_system(&shared.dwrite, L"Consolas", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                              &shared.fonts[FONT_INDEX_MONO]);
+    font_register_from_resource(&shared.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                &shared.fonts[FONT_INDEX_ICON]);
 
-    /* Initialize per-window renderer */
-    renderer_init(&app_context.renderer, &app_context.renderer_shared, app_context.window);
-
-    /* Render first frame before showing window */
-    process_frame(&app_context); // Rasterize needed glyphs
-    process_frame(&app_context);
-    SetCursor(s_cursors[app_context.ui.desired_cursor]);
-    ShowWindow(app_context.window, SW_SHOWDEFAULT);
+    /* Create first window */
+    window_create(&shared, L"App Title", CLIENT_WIDTH, CLIENT_HEIGHT);
 
     /* Run message loop */
     MSG message;
@@ -686,18 +788,30 @@ i32 WinMainCRTStartup()
         }
 
         TracyCFrameMark;
-        process_frame(&app_context);
-        SetCursor(s_cursors[app_context.ui.desired_cursor]);
+        for (WindowContext* w = shared.first_window; w; w = w->next)
+        {
+            process_frame(w);
+            SetCursor(shared.cursors[w->ui.desired_cursor]);
+        }
     }
 
-    /* Clean */
-    renderer_deinit(&app_context.renderer);
-    renderer_shared_deinit(&app_context.renderer_shared);
-    font_unregister(&app_context.fonts[FONT_INDEX_UI]);
-    font_unregister(&app_context.fonts[FONT_INDEX_ZH]);
-    font_unregister(&app_context.fonts[FONT_INDEX_MONO]);
-    font_unregister(&app_context.fonts[FONT_INDEX_ICON]);
-    dwrite_deinit(&app_context.dwrite);
+    /* Clean up remaining windows */
+    WindowContext* w = shared.first_window;
+    while (w)
+    {
+        WindowContext* next = w->next;
+        DestroyWindow(w->window);
+        w = next;
+    }
+
+    font_unregister(&shared.fonts[FONT_INDEX_UI]);
+    font_unregister(&shared.fonts[FONT_INDEX_ZH]);
+    font_unregister(&shared.fonts[FONT_INDEX_MONO]);
+    font_unregister(&shared.fonts[FONT_INDEX_ICON]);
+
+    renderer_shared_deinit(&shared.renderer_shared);
+    raster_cache_deinit(&shared.raster_cache);
+    dwrite_deinit(&shared.dwrite);
 
     return 0;
 }

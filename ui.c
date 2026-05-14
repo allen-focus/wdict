@@ -12,8 +12,6 @@
 #define UI_CONTEXT_ARENA_CAPACITY MB(16)
 #define BOX_CACHE_ARENA_CAPACITY  MB(8)
 #define BOX_CACHE_CAPACITY        1024 // must be a power of two
-#define BOX_STACK_CAPACITY        16
-#define BOX_QUEUE_CAPACITY        2048
 
 // Widgets
 
@@ -36,9 +34,6 @@
 #define IME_OFFSET_TOP (-12)
 
 ///
-
-static Queue(UIBox, BOX_QUEUE_CAPACITY) ui_box_queue = { 0 };
-static Stack(UIBox*, BOX_STACK_CAPACITY) ui_box_stack = { 0 };
 
 UIContext* g_ui_context = NULL;
 
@@ -185,14 +180,14 @@ static void box_cache_remove_unused()
 // Context
 //
 
-void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_context, struct Renderer* renderer, u32 width,
-             u32 height, u32 dpi, UIRenderFunc render_fn)
+void ui_init(const HWND window, UIContext* ui_context, struct Renderer* renderer, GlyphRasterCache* raster_cache,
+             u32 width, u32 height, u32 dpi, UIRenderFunc render_fn)
 {
     ui_context->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
-    raster_cache_init(dwrite, &ui_context->raster_cache, GLYPHS_LENGTH);
     box_cache_init(&ui_context->box_cache);
     ui_context->window = window;
     ui_context->renderer = renderer;
+    ui_context->raster_cache = raster_cache;
     ui_context->client_width = width;
     ui_context->client_height = height;
     ui_context->dpi = dpi;
@@ -203,7 +198,6 @@ void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_conte
 void ui_deinit(UIContext* ui_context)
 {
     box_cache_deinit(&ui_context->box_cache);
-    raster_cache_deinit(&ui_context->raster_cache);
     arena_release(&ui_context->arena);
     memset(ui_context, 0, sizeof(*ui_context));
 }
@@ -214,19 +208,19 @@ void ui_deinit(UIContext* ui_context)
 
 static UIBox* ui_box_new()
 {
-    Assert(ui_box_queue.count < BOX_QUEUE_CAPACITY);
-    return &ui_box_queue.items[ui_box_queue.count++];
+    Assert(g_ui_context->box_queue.count < BOX_QUEUE_CAPACITY);
+    return &g_ui_context->box_queue.items[g_ui_context->box_queue.count++];
 }
 
 static UIBox* ui_box_get_parent()
 {
-    return (ui_box_stack.depth > 0) ? ui_box_stack.items[ui_box_stack.depth - 1] : NULL;
+    return (g_ui_context->box_stack.depth > 0) ? g_ui_context->box_stack.items[g_ui_context->box_stack.depth - 1] : NULL;
 }
 
 static UIBox* ui_box_get_root()
 {
-    Assert(ui_box_queue.count > 0);
-    return &ui_box_queue.items[0];
+    Assert(g_ui_context->box_queue.count > 0);
+    return &g_ui_context->box_queue.items[0];
 }
 
 static b32 axis_has_fit_attribute(const SizingMode mode)
@@ -241,8 +235,8 @@ static b32 axis_has_grow_attribute(const SizingMode mode)
 
 UIBox* ui_box_start(const BoxConfig* config)
 {
-    Assert(ui_box_stack.depth <= BOX_STACK_CAPACITY);
-    Assert(ui_box_queue.count <= BOX_QUEUE_CAPACITY);
+    Assert(g_ui_context->box_stack.depth <= BOX_STACK_CAPACITY);
+    Assert(g_ui_context->box_queue.count <= BOX_QUEUE_CAPACITY);
 
     UIBox* box = ui_box_new();
     UIBox* parent = ui_box_get_parent();
@@ -264,7 +258,7 @@ UIBox* ui_box_start(const BoxConfig* config)
         parent->data.container.child_count++;
     }
 
-    ui_box_stack.items[ui_box_stack.depth++] = box;
+    g_ui_context->box_stack.items[g_ui_context->box_stack.depth++] = box;
     memcpy(&box->config, config, sizeof(*config));
     box->is_float = config->is_float;
     box->size.width = config->sizing.width.mode == SIZING_MODE_FIXED ? config->sizing.width.min_max.min : 0;
@@ -279,12 +273,12 @@ UIBox* ui_box_start(const BoxConfig* config)
 
 void ui_box_end(UIBox* box)
 {
-    ui_box_stack.items[ui_box_stack.depth--] = NULL;
+    g_ui_context->box_stack.items[g_ui_context->box_stack.depth--] = NULL;
 }
 
 UIBox* ui_text(const String text, const TextConfig* text_config)
 {
-    GlyphRasterCache* raster_cache = &g_ui_context->raster_cache;
+    GlyphRasterCache* raster_cache = g_ui_context->raster_cache;
     u32 dpi = g_ui_context->dpi;
     get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
     get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
@@ -728,7 +722,7 @@ static void ui_box_resolve_position(UIBox* box)
 static void perform_text_wrapping(UIBox* text_box)
 {
     u32 dpi = g_ui_context->dpi;
-    GlyphRasterCache* raster_cache = &g_ui_context->raster_cache;
+    GlyphRasterCache* raster_cache = g_ui_context->raster_cache;
     get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
     struct Renderer* renderer = g_ui_context->renderer;
 
@@ -823,6 +817,7 @@ static f64 get_current_time(u64 frame_index)
 
 isize ui_frame_begin(UIContext* ui_context)
 {
+    ui_context->prev_context = g_ui_context;
     g_ui_context = ui_context;
     if (g_ui_context->frame_index > 0)
         g_ui_context->render_fn.wait_for_last_submitted_frame(g_ui_context->renderer);
@@ -934,7 +929,7 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 
 void ui_frame_end(isize arena_pos_backup)
 {
-    GlyphRasterCache* raster_cache = &g_ui_context->raster_cache;
+    GlyphRasterCache* raster_cache = g_ui_context->raster_cache;
     u32 dpi = g_ui_context->dpi;
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     Rect no_clip = { 0, 0, g_ui_context->client_width * dpi_scale, g_ui_context->client_height * dpi_scale };
@@ -953,8 +948,7 @@ void ui_frame_end(isize arena_pos_backup)
         {
             case UI_COMMAND_RECT:
                 clip = memcmp(&cmd->rect.clip, &no_clip, sizeof(no_clip)) == 0 ? NULL : &cmd->rect.clip;
-                render_fn->draw_rect(g_ui_context->renderer, cmd->rect.rect, cmd->rect.color,
-                                     cmd->rect.style, clip);
+                render_fn->draw_rect(g_ui_context->renderer, cmd->rect.rect, cmd->rect.color, cmd->rect.style, clip);
                 break;
             case UI_COMMAND_TEXT:
                 UICommandText* text = &cmd->text;
@@ -973,8 +967,8 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_context->render_fn.flush_and_present(g_ui_context->renderer, physical_client_width, physical_client_height);
 
     /* Reset state */
-    Assert(ui_box_stack.depth == 0);
-    memset(&ui_box_queue, 0, sizeof(ui_box_queue));
+    Assert(g_ui_context->box_stack.depth == 0);
+    memset(&g_ui_context->box_queue, 0, sizeof(g_ui_context->box_queue));
     memset(&g_ui_context->command_queue, 0, sizeof(g_ui_context->command_queue));
     box_cache_remove_unused();
 
@@ -987,7 +981,7 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_context->text_action_queue_count = 0;
     g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
-    g_ui_context = NULL;
+    g_ui_context = g_ui_context->prev_context;
 }
 
 //
@@ -1798,7 +1792,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
     get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
     struct Renderer* renderer = g_ui_context->renderer;
-    f32 text_height = get_text_height(renderer, &g_ui_context->raster_cache, text_with_hash_str, font, font_size, g_ui_context->dpi);
+    f32 text_height = get_text_height(renderer, g_ui_context->raster_cache, text_with_hash_str, font, font_size, g_ui_context->dpi);
     SizingAxis text_container_height = fixed(text_height + padding.top + padding.bottom);
     Color placeholder_color = { text_color.r, text_color.g, text_color.b, text_color.a / 2 };
     TextConfig text_config = { .font = font, .font_size = font_size, .line_height = font_size };
@@ -1997,9 +1991,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                                    inner_box->position.y + inner_box->size.height - SCROLLBAR_THICKNESS_MAX;
                 if (click_x >= 0.f && inside_y)
                 {
-                    state->cursor = find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->raster_cache,
-                                                     font, font_size, g_ui_context->dpi, get_text_width,
-                                                     g_ui_context->renderer);
+                    state->cursor =
+                        find_cursor_at_x(state->base, state->text_len, click_x, g_ui_context->raster_cache, font,
+                                         font_size, g_ui_context->dpi, get_text_width, g_ui_context->renderer);
                 }
             }
         }
@@ -2033,10 +2027,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                                            inner_box->position.y + inner_box->size.height - SCROLLBAR_THICKNESS_MAX;
                         if (click_x >= 0.f && inside_y)
                         {
-                            state->cursor =
-                                find_cursor_at_x(state->base, state->text_len, click_x, &g_ui_context->raster_cache,
-                                                 font, font_size, g_ui_context->dpi, get_text_width,
-                                                 g_ui_context->renderer);
+                            state->cursor = find_cursor_at_x(state->base, state->text_len, click_x,
+                                                             g_ui_context->raster_cache, font, font_size,
+                                                             g_ui_context->dpi, get_text_width, g_ui_context->renderer);
                             state->mark = state->cursor;
 
                             if (ui_double_clicked(flags))
@@ -2069,7 +2062,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         if (state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
-            cursor_x = get_text_width(renderer, &g_ui_context->raster_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+            cursor_x = get_text_width(renderer, g_ui_context->raster_cache, text_to_cursor, font, font_size,
+                                      g_ui_context->dpi);
         }
         approach_f32(&state->cursor_glide_x, cursor_x, 22.f);
         approach_f32(&state->cursor_trail_x, cursor_x, 10.f);
@@ -2094,14 +2088,15 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         if (cursor_moved && state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
-            scroll_ctx.cursor_content_x =
-                get_text_width(renderer, &g_ui_context->raster_cache, text_to_cursor, font, font_size, g_ui_context->dpi) +
-                padding.left;
+            scroll_ctx.cursor_content_x = get_text_width(renderer, g_ui_context->raster_cache, text_to_cursor, font,
+                                                         font_size, g_ui_context->dpi) +
+                                          padding.left;
         }
         {
             b32 has_text = state->text_len > 0;
             String full_text = has_text ? (String){ state->base, state->text_len } : text_hash.display_str;
-            f32 text_width = get_text_width(renderer, &g_ui_context->raster_cache, full_text, font, font_size, g_ui_context->dpi);
+            f32 text_width =
+                get_text_width(renderer, g_ui_context->raster_cache, full_text, font, font_size, g_ui_context->dpi);
             f32 inner_width = text_width + padding.left + padding.right;
 
             UIBox* inner =
@@ -2116,8 +2111,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 if (is_focused && has_text)
                 {
                     String text_to_cursor = { state->base, state->cursor };
-                    cursor_x =
-                        get_text_width(renderer, &g_ui_context->raster_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+                    cursor_x = get_text_width(renderer, g_ui_context->raster_cache, text_to_cursor, font, font_size,
+                                              g_ui_context->dpi);
                 }
                 if (is_focused)
                 {
@@ -2165,11 +2160,11 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 if (is_focused && state->composition_len > 0)
                 {
                     String text_before = { state->base, state->composition_start };
-                    f32 comp_x =
-                        get_text_width(renderer, &g_ui_context->raster_cache, text_before, font, font_size, g_ui_context->dpi);
+                    f32 comp_x = get_text_width(renderer, g_ui_context->raster_cache, text_before, font, font_size,
+                                                g_ui_context->dpi);
                     String comp_text = { state->base + state->composition_start, state->composition_len };
-                    f32 comp_w =
-                        get_text_width(renderer, &g_ui_context->raster_cache, comp_text, font, font_size, g_ui_context->dpi);
+                    f32 comp_w = get_text_width(renderer, g_ui_context->raster_cache, comp_text, font, font_size,
+                                                g_ui_context->dpi);
                     if (comp_w > 0.f)
                     {
                         f32 underline_y = font_size;
@@ -2196,8 +2191,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     if (has_selection)
                     {
                         String sel_text = { state->base + sel_start, sel_end - sel_start };
-                        f32 sel_width =
-                            get_text_width(renderer, &g_ui_context->raster_cache, sel_text, font, font_size, g_ui_context->dpi);
+                        f32 sel_width = get_text_width(renderer, g_ui_context->raster_cache, sel_text, font, font_size,
+                                                       g_ui_context->dpi);
                         f32 sel_height = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
                         Color sel_color = selection_color;
                         Color copy_flash = selection_flash_color;
@@ -2259,13 +2254,13 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             String text_before = { state->base, state->composition_start };
             ime_cursor_x =
-                get_text_width(renderer, &g_ui_context->raster_cache, text_before, font, font_size, g_ui_context->dpi);
+                get_text_width(renderer, g_ui_context->raster_cache, text_before, font, font_size, g_ui_context->dpi);
         }
         else if (state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
-            ime_cursor_x =
-                get_text_width(renderer, &g_ui_context->raster_cache, text_to_cursor, font, font_size, g_ui_context->dpi);
+            ime_cursor_x = get_text_width(renderer, g_ui_context->raster_cache, text_to_cursor, font, font_size,
+                                          g_ui_context->dpi);
         }
         f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
 

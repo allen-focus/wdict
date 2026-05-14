@@ -62,7 +62,6 @@ typedef struct
 } GlyphKey;
 
 // Metrics + cached bitmap produced by rasterization.
-// No atlas UV — UV is per-window and lives in the per-window atlas mapping.
 typedef struct
 {
     u32 w, h, xadvance;
@@ -76,7 +75,11 @@ typedef struct
 {
     byte* bitmap;
     u16 w, h;
+    // Manages the next position for placing glyphs within the atlas
     u16 next_x, next_y;
+    // Tracks the y-coordinate of the next available position in the atlas,
+    // which is determined by the maximum height of all glyphs placed in the
+    // current line plus the current line's height.
     u16 maxy;
 } GlyphAtlas;
 

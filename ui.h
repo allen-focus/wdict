@@ -33,6 +33,8 @@
 #define grow(...)     { __VA_ARGS__, SIZING_MODE_GROW }
 
 #define COMMAND_QUEUE_CAPACITY     4096
+#define BOX_QUEUE_CAPACITY         2048
+#define BOX_STACK_CAPACITY         16
 #define HASH_STR_MAX_LENGTH        128
 #define CHAR_INPUT_QUEUE_CAPACITY  64
 #define TEXT_ACTION_QUEUE_CAPACITY 64
@@ -54,11 +56,11 @@ typedef enum
     // clang-format on
 } UISignalFlags;
 
-#define ui_hovered(signal_flags)  (signal_flags & UI_Signal_Flag_Hovered)
-#define ui_lclicked(signal_flags) (signal_flags & UI_Signal_Flag_LClicked)
-#define ui_rclicked(signal_flags) (signal_flags & UI_Signal_Flag_RClicked)
-#define ui_clicked(signal_flags)  (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
-#define ui_pressed(signal_flags)  (signal_flags & UI_Signal_Flag_Pressed)
+#define ui_hovered(signal_flags)        (signal_flags & UI_Signal_Flag_Hovered)
+#define ui_lclicked(signal_flags)       (signal_flags & UI_Signal_Flag_LClicked)
+#define ui_rclicked(signal_flags)       (signal_flags & UI_Signal_Flag_RClicked)
+#define ui_clicked(signal_flags)        (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
+#define ui_pressed(signal_flags)        (signal_flags & UI_Signal_Flag_Pressed)
 #define ui_double_clicked(signal_flags) (signal_flags & UI_Signal_Flag_DoubleClicked)
 
 //
@@ -380,7 +382,7 @@ typedef struct
     draw_text_fn draw_text;
 } UIRenderFunc;
 
-typedef struct
+typedef struct UIContext
 {
     /* OS specific */
     HWND window;
@@ -419,9 +421,11 @@ typedef struct
     UIBox* root;
     UIBoxCache box_cache;
     BoxKey focused_box_key;
+    Queue(UIBox, BOX_QUEUE_CAPACITY) box_queue;
+    Stack(UIBox*, BOX_STACK_CAPACITY) box_stack;
 
     /* render */
-    GlyphRasterCache raster_cache;
+    GlyphRasterCache* raster_cache;
     UIRenderFunc render_fn;
     Queue(UICommand, COMMAND_QUEUE_CAPACITY) command_queue;
 
@@ -433,6 +437,9 @@ typedef struct
     b32 ime_composing;
     String ime_composition;
     Position ime_cursor_screen_pos;
+
+    /* nesting */
+    struct UIContext* prev_context;
 } UIContext;
 
 //
@@ -478,8 +485,9 @@ extern UIContext* g_ui_context;
 
 ///
 
-void ui_init(const HWND window, const DWriteContext* dwrite, UIContext* ui_context, struct Renderer* renderer, u32 width,
-             u32 height, u32 dpi, UIRenderFunc render_fn);
+void ui_init(const HWND window, UIContext* ui_context, struct Renderer* renderer, GlyphRasterCache* raster_cache,
+             u32 width, u32 height, u32 dpi, UIRenderFunc render_fn);
+void ui_deinit(UIContext* ui_context);
 
 UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
