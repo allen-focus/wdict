@@ -463,6 +463,16 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             return 0;
         }
 
+        case WM_SETCURSOR:
+        {
+            if (LOWORD(lparam) == HTCLIENT)
+            {
+                SetCursor(shared->cursors[ui_context->desired_cursor]);
+                return True;
+            }
+            return DefWindowProcW(window, message, wparam, lparam);
+        }
+
         case WM_MOUSEHWHEEL:
         {
             ui_context->mouse_scroll_delta.x += GET_WHEEL_DELTA_WPARAM(wparam) / 10;
@@ -675,7 +685,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             if (ui_context->client_width > 0 && ui_context->client_height > 0)
                 ui_context->render_fn.on_resize(ui_context->renderer, physical_client_width, physical_client_height);
             process_frame(ctx);
-            SetCursor(shared->cursors[ui_context->desired_cursor]);
             return 0;
         }
 
@@ -791,7 +800,6 @@ i32 WinMainCRTStartup()
         for (WindowContext* w = shared.first_window; w; w = w->next)
         {
             process_frame(w);
-            SetCursor(shared.cursors[w->ui.desired_cursor]);
         }
     }
 
