@@ -225,7 +225,6 @@ void atlas_glyph_map_init(AtlasGlyphMap* map, Arena* arena)
     map->keys = arena_push(arena, sizeof(GlyphKey), _Alignof(GlyphKey), map->capacity);
     map->atlas_x = arena_push(arena, sizeof(u16), _Alignof(u16), map->capacity);
     map->atlas_y = arena_push(arena, sizeof(u16), _Alignof(u16), map->capacity);
-    memset(map->keys, 0, sizeof(GlyphKey) * map->capacity);
     map->count = 0;
 }
 

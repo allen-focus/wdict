@@ -23,6 +23,39 @@
 #define MAX_TITLE_LENGTH 64
 #define TEXT_BUFFER_SIZE 1024
 #define MAX_WINDOWS      16
+#define CMD_ARENA_SIZE   KB(64)
+
+typedef enum
+{
+    CMD_NONE,
+    CMD_CREATE_WINDOW,
+    CMD_SET_WINDOW_TITLE,
+    CMD_TOGGLE_CHECK,
+    CMD_TOGGLE_THEME,
+} CmdKind;
+
+typedef struct WindowContext WindowContext;
+
+typedef struct CmdNode CmdNode;
+struct CmdNode
+{
+    CmdNode* next;
+    CmdKind kind;
+    union
+    {
+        struct
+        {
+            u32 width;
+            u32 height;
+        } create_win;
+        struct
+        {
+            WindowContext* target;
+            String title;
+        } set_title;
+        b32* toggle_check;
+    };
+};
 
 typedef enum
 {
@@ -78,6 +111,10 @@ typedef struct
     HCURSOR cursors[3];
     WindowContext* first_window;
     WindowContext* last_window;
+    Arena cmd_arena;
+    CmdNode* cmd_first;
+    CmdNode* cmd_last;
+    u64 cmd_count;
 } AppShared;
 
 struct WindowContext
@@ -88,6 +125,8 @@ struct WindowContext
     Renderer renderer;
     AppShared* shared;
     WindowContext* next;
+
+    b32 check;
 
     u8 text_buf_1[TEXT_BUFFER_SIZE];
     u8 text_buf_2[TEXT_BUFFER_SIZE];
@@ -207,6 +246,10 @@ static void set_window_title(WindowContext* ctx, const String title)
     SetWindowTextW(ctx->window, ctx->title);
 }
 
+//
+// Window creation
+//
+
 static void window_list_add(AppShared* shared, WindowContext* ctx)
 {
     ctx->next = NULL;
@@ -244,12 +287,7 @@ static void window_list_remove(AppShared* shared, WindowContext* ctx)
     }
 }
 
-//
-// Window creation
-//
-
 static void process_frame(WindowContext* ctx);
-
 static WindowContext* window_create(AppShared* shared, const wchar_t* title, u32 width, u32 height)
 {
     WindowContext* ctx = (WindowContext*)malloc(sizeof(WindowContext));
@@ -291,6 +329,9 @@ static WindowContext* window_create(AppShared* shared, const wchar_t* title, u32
     /* Init per-window renderer */
     renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
 
+    /* Init per-window switch box check state */
+    ctx->check = False;
+
     /* Init per-window text edit state */
     ctx->text_edit_1.base = ctx->text_buf_1;
     ctx->text_edit_1.size = TEXT_BUFFER_SIZE;
@@ -310,6 +351,56 @@ static WindowContext* window_create(AppShared* shared, const wchar_t* title, u32
 }
 
 //
+// App Commands
+//
+
+static CmdNode* cmd_push(AppShared* shared, const CmdKind kind)
+{
+    CmdNode* n = (CmdNode*)arena_push(&shared->cmd_arena, sizeof(CmdNode), _Alignof(CmdNode), 1);
+    n->kind = kind;
+    if (!shared->cmd_last)
+        shared->cmd_first = n;
+    else
+        shared->cmd_last->next = n;
+    shared->cmd_last = n;
+    shared->cmd_count++;
+    return n;
+}
+
+static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
+{
+    CmdNode* list = shared->cmd_first;
+    shared->cmd_first = NULL;
+    shared->cmd_last = NULL;
+    shared->cmd_count = 0;
+
+    if (list == NULL)
+        return;
+
+    for (CmdNode* n = list; n; n = n->next)
+    {
+        switch (n->kind)
+        {
+            case CMD_CREATE_WINDOW:
+                window_create(shared, L"Window", n->create_win.width, n->create_win.height);
+                break;
+            case CMD_SET_WINDOW_TITLE:
+                set_window_title(n->set_title.target, n->set_title.title);
+                break;
+            case CMD_TOGGLE_CHECK:
+                *n->toggle_check = !*n->toggle_check;
+                break;
+            case CMD_TOGGLE_THEME:
+                shared->theme = (shared->theme.bg_base.r == s_theme_dark.bg_base.r) ? s_theme_light : s_theme_dark;
+                break;
+            default:
+                break;
+        }
+    }
+    arena_pop_to(&shared->cmd_arena, 0);
+}
+
+//
 // Process frame
 //
 
@@ -324,6 +415,7 @@ static void process_frame(WindowContext* ctx)
     Font* font_symbol = &shared->fonts[FONT_INDEX_ICON];
 
     TracyCZone(ctx_frame, 1);
+    cmd_execute_all(shared, ctx);
     isize arena_pos_backup = ui_frame_begin(ui_context);
     {
         ui_box({
@@ -366,7 +458,11 @@ static void process_frame(WindowContext* ctx)
                                           (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent,
                                           theme->accent_fg, theme->accent_hover, theme->accent_press);
                             if (ui_lclicked(flags))
-                                window_create(shared, L"New window", CLIENT_WIDTH, CLIENT_HEIGHT);
+                            {
+                                CmdNode* n = cmd_push(shared, CMD_CREATE_WINDOW);
+                                n->create_win.width = CLIENT_WIDTH;
+                                n->create_win.height = CLIENT_HEIGHT;
+                            }
                         }
 
                         // clang-format off
@@ -379,9 +475,17 @@ static void process_frame(WindowContext* ctx)
                             if (ui_hovered(flags))
                                 ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = theme->danger }) {}
                             if (ui_lclicked(flags))
-                                set_window_title(ctx, str("Left Click"));
+                            {
+                                CmdNode* n = cmd_push(shared, CMD_SET_WINDOW_TITLE);
+                                n->set_title.target = ctx;
+                                n->set_title.title = str("Left Click");
+                            }
                             if (ui_rclicked(flags))
-                                set_window_title(ctx, str("Right Click"));
+                            {
+                                CmdNode* n = cmd_push(shared, CMD_SET_WINDOW_TITLE);
+                                n->set_title.target = ctx;
+                                n->set_title.title = str("Right Click");
+                            }
                         }
 
                         /* text */
@@ -396,19 +500,21 @@ static void process_frame(WindowContext* ctx)
                         }
 
                         /* switch box */
-                        static b32 check = False;
                         UISignalFlags flags = ui_switchbox(
                             str("switch box"),
                             font_symbol,
-                            &check,
+                            &ctx->check,
                             theme->border_normal,
                             theme->accent_fg,
                             theme->shadow,
                             theme->accent
                         );
                         if (ui_lclicked(flags))
-                            check = !check;
-                        if (check)
+                        {
+                            CmdNode* n = cmd_push(shared, CMD_TOGGLE_CHECK);
+                            n->toggle_check = &ctx->check;
+                        }
+                        if (ctx->check)
                             ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = theme->success }) {}
                         // clang-format on
                     }
@@ -601,8 +707,27 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 return 0;
             }
 
-            TextAction action = { 0 };
             b32 ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+
+            if (wparam == 'N' && ctrl)
+            {
+                CmdNode* n = cmd_push(shared, CMD_CREATE_WINDOW);
+                n->create_win.width = CLIENT_WIDTH;
+                n->create_win.height = CLIENT_HEIGHT;
+                return 0;
+            }
+            if (wparam == 'T' && ctrl)
+            {
+                cmd_push(shared, CMD_TOGGLE_THEME);
+                return 0;
+            }
+            if (wparam == VK_F11)
+            {
+                cmd_push(shared, CMD_TOGGLE_THEME);
+                return 0;
+            }
+
+            TextAction action = { 0 };
             b32 shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
             if (ctrl)
                 action.flags |= TextActionFlag_WordScan;
@@ -752,6 +877,7 @@ i32 WinMainCRTStartup()
 {
     AppShared shared = { 0 };
     shared.theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
+    shared.cmd_arena = arena_new(CMD_ARENA_SIZE);
 
     /* Load cursors */
     shared.cursors[UI_CURSOR_ARROW] = LoadCursor(NULL, IDC_ARROW);
@@ -828,6 +954,7 @@ i32 WinMainCRTStartup()
     renderer_shared_deinit(&shared.renderer_shared);
     raster_cache_deinit(&shared.raster_cache);
     dwrite_deinit(&shared.dwrite);
+    arena_release(&shared.cmd_arena);
 
     return 0;
 }
