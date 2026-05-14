@@ -155,6 +155,17 @@ typedef struct
 } Sizing;
 
 //
+// Box flags
+//
+
+typedef enum
+{
+    BoxFlag_None  = 0,
+    BoxFlag_Clip  = (1 << 0),
+    BoxFlag_Float = (1 << 1),
+} BoxFlags;
+
+//
 // Box
 //
 
@@ -192,8 +203,7 @@ typedef struct
     f32 child_gap;
     Alignment alignment;
     LayoutDirection direction;
-    b32 enable_clip;
-    b32 is_float;
+    u32 flags;
     Position float_offset;
 } BoxConfig;
 
@@ -263,7 +273,7 @@ struct UIBox
 
     BoxType type;
     BoxConfig config;
-    b32 is_float;
+    u32 flags;
 
     /* layout tree */
     UIBox* parent;

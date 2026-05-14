@@ -260,7 +260,7 @@ UIBox* ui_box_start(const BoxConfig* config)
 
     g_ui_context->box_stack.items[g_ui_context->box_stack.depth++] = box;
     memcpy(&box->config, config, sizeof(*config));
-    box->is_float = config->is_float;
+    box->flags = config->flags;
     box->size.width = config->sizing.width.mode == SIZING_MODE_FIXED ? config->sizing.width.min_max.min : 0;
     box->size.height = config->sizing.height.mode == SIZING_MODE_FIXED ? config->sizing.height.min_max.min : 0;
     if (axis_has_grow_attribute(config->sizing.width.mode) && config->sizing.width.min_max.max == 0)
@@ -455,7 +455,7 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
 
     /* If the current box is a child, adjust its parent's size based on box direction. */
     UIBox* parent = box->parent;
-    if (parent && !box->is_float)
+    if (parent && !(box->flags & BoxFlag_Float))
     {
         AxisContext parent_ctx = get_axis_context(parent, axis);
         if (axis_has_fit_attribute(parent_ctx.sizing_mode))
@@ -485,7 +485,6 @@ typedef struct
 {
     f32* value;
     f32* limit;
-    b32 is_float;
 } DistributeAble;
 
 typedef Slice(DistributeAble) DistributeAbles;
@@ -547,7 +546,6 @@ static void distribute_axis(f32* remaining, DistributeAbles ables, const Distrib
                 *child = limit;
                 ables.data[i].value = ables.data[ables.len - 1].value;
                 ables.data[i].limit = ables.data[ables.len - 1].limit;
-                ables.data[i].is_float = ables.data[ables.len - 1].is_float;
                 ables.len--;
                 i--;
                 continue;
@@ -582,14 +580,14 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
         UIBox* child = box->child_first;
         while (child)
         {
-            if (child->is_float)
+            if (child->flags & BoxFlag_Float)
                 *ctx.remaining += box->config.child_gap;
 
             AxisContext child_ctx = get_axis_context(child, axis);
 
             /* Subtract the child's determined size from the parent's remaining space. */
             if (box->config.direction == ctx.main_direction)
-                if (!child->is_float)
+                if (!(child->flags & BoxFlag_Float))
                     *ctx.remaining -= *child_ctx.size;
 
             child = child->next;
@@ -604,13 +602,13 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
             AxisContext child_ctx = get_axis_context(child, axis);
             if (axis_has_grow_attribute(child_ctx.sizing_mode))
             {
-                DistributeAble growable = { child_ctx.size, child_ctx.max_size, child->is_float };
+                DistributeAble growable = { child_ctx.size, child_ctx.max_size };
                 *slice_push(&g_ui_context->arena, &growables) = growable;
             }
 
             if (*child_ctx.size > *child_ctx.min_size)
             {
-                DistributeAble shrinkable = { child_ctx.size, child_ctx.min_size, child->is_float };
+                DistributeAble shrinkable = { child_ctx.size, child_ctx.min_size };
                 *slice_push(&g_ui_context->arena, &shrinkables) = shrinkable;
             }
             child = child->next;
@@ -658,7 +656,7 @@ static void ui_box_resolve_position(UIBox* box)
         if (parent->config.direction == LAYOUT_LEFT_TO_RIGHT)
         {
             box->position.x += parent_data->next_child_offset_x;
-            if (!box->is_float)
+            if (!(box->flags & BoxFlag_Float))
                 parent_data->next_child_offset_x += box->size.width + parent->config.child_gap;
 
             if (parent->config.alignment.x == ALIGN_CENTER)
@@ -674,7 +672,7 @@ static void ui_box_resolve_position(UIBox* box)
         else
         {
             box->position.y += parent_data->next_child_offset_y;
-            if (!box->is_float)
+            if (!(box->flags & BoxFlag_Float))
                 parent_data->next_child_offset_y += box->size.height + parent->config.child_gap;
 
             if (parent->config.alignment.y == ALIGN_CENTER)
@@ -689,8 +687,8 @@ static void ui_box_resolve_position(UIBox* box)
         }
 
         /* Handle scroll & float offset */
-        box->position.x += parent->config.child_offset.x + (box->is_float ? box->config.float_offset.x : 0.f);
-        box->position.y += parent->config.child_offset.y + (box->is_float ? box->config.float_offset.y : 0.f);
+        box->position.x += parent->config.child_offset.x + ((box->flags & BoxFlag_Float) ? box->config.float_offset.x : 0.f);
+        box->position.y += parent->config.child_offset.y + ((box->flags & BoxFlag_Float) ? box->config.float_offset.y : 0.f);
     }
 
     if (box->type == BOX_TYPE_CONTAINER)
@@ -873,7 +871,7 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 
     /* If clip is enabled, push a clip */
     Rect new_clip = clip;
-    if (box->config.enable_clip)
+    if (box->config.flags & BoxFlag_Clip)
         new_clip = intersect_rects(clip, rect);
 
     // clang-format off
@@ -1357,7 +1355,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     // clang-format off
     /* Create scrollbar */
     ScrollBarLayout L = make_scrollbar_layout(is_horizontal, thickness, padding_end, bar_thickness_max, thumb_size, scroll_ctx.thumb_delta);
-    UIBox* bar_container = ui_box_start(&(BoxConfig){ .sizing = L.container_sizing, .is_float = True, .float_offset = L.float_offset, .direction = L.padding_direction });
+    UIBox* bar_container = ui_box_start(&(BoxConfig){ .sizing = L.container_sizing, .flags = BoxFlag_Float, .float_offset = L.float_offset, .direction = L.padding_direction });
     {
         // `padding-start` and `padding-end` is used to do the transition of scrollbar expanding
         ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.padding_start_sizing, .alignment = { ALIGN_START, ALIGN_CENTER } }));
@@ -1405,7 +1403,7 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
 
     /* Create area box */
     scroll_ctx.area =
-        ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .enable_clip = True });
+        ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .flags = BoxFlag_Clip });
     update_box_key(scroll_ctx.area, config->hash_str);
 
     /* Handle interaction and animation */
@@ -1779,7 +1777,7 @@ static void cursor_bar(const f32 parent_height, const Padding parent_padding, co
     f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
     Position float_offset = { x_offset, -parent_padding.top + CURSORBAR_PADDING };
     ui_box_end(ui_box_start(&(BoxConfig){
-        .sizing = { fixed(2), fixed(bar_height) }, .color = color, .is_float = True, .float_offset = float_offset }));
+        .sizing = { fixed(2), fixed(bar_height) }, .color = color, .flags = BoxFlag_Float, .float_offset = float_offset }));
 }
 
 UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_str, const Font* font,
@@ -2074,7 +2072,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         .sizing = { sizing_x, text_container_height },
         .rect_style = { .corner_radius = 4, .border_color = border_color_transition, .border_thickness = 2 },
         .color = bg_color,
-        .enable_clip = True,
+        .flags = BoxFlag_Clip,
     });
     {
         b32 cursor_moved = state->cursor != cursor_before;
@@ -2150,7 +2148,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             .sizing = { fixed(t_width), fixed(trail_h) },
                             .color = base,
                             .rect_style = trail_style,
-                            .is_float = True,
+                            .flags = BoxFlag_Float,
                             .float_offset = { t_start, -padding.top + CURSORBAR_PADDING },
                         }));
                     }
@@ -2171,7 +2169,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         ui_box_end(ui_box_start(&(BoxConfig){
                             .sizing = { fixed(comp_w), fixed(1) },
                             .color = text_color,
-                            .is_float = True,
+                            .flags = BoxFlag_Float,
                             .float_offset = { comp_x, underline_y },
                         }));
                     }
@@ -2201,7 +2199,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             .sizing = { fixed(sel_width), fixed(sel_height) },
                             .color = sel_color,
                             .rect_style = { .corner_radius = 2 },
-                            .is_float = True,
+                            .flags = BoxFlag_Float,
                             .float_offset = { 0, -padding.top + CURSORBAR_PADDING },
                         }));
 
