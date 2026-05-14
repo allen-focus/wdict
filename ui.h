@@ -346,14 +346,15 @@ struct Renderer;
 typedef void (*flush_and_present_fn)(struct Renderer* renderer, const u32 client_width, const u32 client_height);
 typedef void (*on_resize_fn)(struct Renderer* renderer, const u32 client_width, const u32 client_height);
 typedef void (*wait_for_last_submitted_frame_fn)(struct Renderer* renderer);
-typedef f32 (*get_text_width_fn)(struct Renderer* renderer, GlyphCache* glyph_cache, const String text, const Font* font,
-                                 const f32 font_size, const u32 dpi);
-typedef f32 (*get_text_height_fn)(struct Renderer* renderer, GlyphCache* glyph_cache, const String text, const Font* font,
-                                  const f32 font_size, const u32 dpi);
-typedef void (*draw_rect_fn)(struct Renderer* renderer, const GlyphCache* glyph_cache, const Rect rect,
-                             const Color color, const RectStyle style, const Rect* clip);
-typedef void (*draw_text_fn)(struct Renderer* renderer, GlyphCache* glyph_cache, String text, const Position position,
-                             const Color color, const Font* font, const f32 font_size, const u32 dpi, const Rect* clip);
+typedef f32 (*get_text_width_fn)(struct Renderer* renderer, GlyphRasterCache* raster_cache, const String text,
+                                 const Font* font, const f32 font_size, const u32 dpi);
+typedef f32 (*get_text_height_fn)(struct Renderer* renderer, GlyphRasterCache* raster_cache, const String text,
+                                  const Font* font, const f32 font_size, const u32 dpi);
+typedef void (*draw_rect_fn)(struct Renderer* renderer, const Rect rect, const Color color, const RectStyle style,
+                             const Rect* clip);
+typedef void (*draw_text_fn)(struct Renderer* renderer, GlyphRasterCache* raster_cache, String text,
+                             const Position position, const Color color, const Font* font, const f32 font_size,
+                             const u32 dpi, const Rect* clip);
 typedef void (*clipboard_copy_fn)(const HWND window, const String text);
 typedef String (*clipboard_paste_fn)(const HWND window, Arena* arena);
 
@@ -420,7 +421,7 @@ typedef struct
     BoxKey focused_box_key;
 
     /* render */
-    GlyphCache glyph_cache;
+    GlyphRasterCache raster_cache;
     UIRenderFunc render_fn;
     Queue(UICommand, COMMAND_QUEUE_CAPACITY) command_queue;
 

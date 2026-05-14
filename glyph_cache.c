@@ -6,7 +6,7 @@
 
 ///
 
-#define GLYPH_CAHCE_ARENA_CAPACITY MB(32)
+#define RASTER_CACHE_ARENA_CAPACITY MB(32)
 
 //
 // IUnknown object that owns font data buffer
@@ -216,74 +216,99 @@ void font_unregister(Font* font)
 }
 
 //
-// atlas
+// atlas (per-window, CPU-side packing)
 //
 
-void atlas_insert_glyph(GlyphAtlas* atlas, GlyphInfo* glyph_info, byte* glyph_bitmap)
+void atlas_glyph_map_init(AtlasGlyphMap* map, Arena* arena)
 {
-    /* Update the position information of glyph and atlas */
-    atlas->maxy = max(atlas->maxy, atlas->next_y + glyph_info->h);
-    Assert(atlas->maxy <= atlas->h);
-    if (atlas->next_x + glyph_info->w > atlas->w)
+    map->capacity = ATLAS_GLYPH_MAP_CAPACITY;
+    map->keys = arena_push(arena, sizeof(GlyphKey), _Alignof(GlyphKey), map->capacity);
+    map->atlas_x = arena_push(arena, sizeof(u16), _Alignof(u16), map->capacity);
+    map->atlas_y = arena_push(arena, sizeof(u16), _Alignof(u16), map->capacity);
+    memset(map->keys, 0, sizeof(GlyphKey) * map->capacity);
+    map->count = 0;
+}
+
+AtlasGlyphFindResult atlas_glyph_map_find(const AtlasGlyphMap* map, const GlyphKey* key)
+{
+    AtlasGlyphFindResult result = { 0 };
+    if (map->count == 0)
+        return result;
+    u32 idx = fnv1a_hash(key, sizeof(*key)) & (map->capacity - 1);
+    GlyphKey void_key = { 0 };
+    while (memcmp(&map->keys[idx], &void_key, sizeof(void_key)) != 0)
     {
-        Assert(atlas->maxy + glyph_info->h <= atlas->h);
+        if (memcmp(&map->keys[idx], key, sizeof(*key)) == 0)
+        {
+            result.found = True;
+            result.atlas_x = map->atlas_x[idx];
+            result.atlas_y = map->atlas_y[idx];
+            return result;
+        }
+        idx = (idx + 1) & (map->capacity - 1);
+    }
+    return result;
+}
+
+void atlas_glyph_map_insert(AtlasGlyphMap* map, const GlyphKey* key, u16 x, u16 y)
+{
+    Assert(map->count < map->capacity);
+    u32 idx = fnv1a_hash(key, sizeof(*key)) & (map->capacity - 1);
+    GlyphKey void_key = { 0 };
+    while (memcmp(&map->keys[idx], &void_key, sizeof(void_key)) != 0)
+        idx = (idx + 1) & (map->capacity - 1);
+    memcpy(&map->keys[idx], key, sizeof(*key));
+    map->atlas_x[idx] = x;
+    map->atlas_y[idx] = y;
+    map->count++;
+}
+
+AtlasGlyphPosition atlas_insert_glyph(GlyphAtlas* atlas, u32 w, u32 h, const u8* bitmap)
+{
+    atlas->maxy = max(atlas->maxy, atlas->next_y + h);
+    Assert(atlas->maxy <= atlas->h);
+    if (atlas->next_x + w > (u32)atlas->w)
+    {
+        Assert(atlas->maxy + h <= atlas->h);
         atlas->next_y = atlas->maxy;
         atlas->next_x = 0;
     }
-    glyph_info->atlas_x = atlas->next_x;
-    glyph_info->atlas_y = atlas->next_y;
+    AtlasGlyphPosition pos = { atlas->next_x, atlas->next_y };
 
-    /* Insert glyph bitmap into atlas */
-    for (u32 y = 0; y < glyph_info->h; y++)
-        for (u32 x = 0; x < glyph_info->w; x++)
-        {
-            u8 grayscale = glyph_bitmap[glyph_info->w * y + x];
-            atlas->bitmap[(atlas->next_y + y) * atlas->w + (atlas->next_x + x)] = grayscale;
-        }
-    atlas->next_x += glyph_info->w;
+    for (u32 y = 0; y < h; y++)
+        for (u32 x = 0; x < w; x++)
+            atlas->bitmap[(atlas->next_y + y) * atlas->w + (atlas->next_x + x)] = bitmap[w * y + x];
+
+    atlas->next_x += (u16)w;
+    return pos;
 }
 
 //
-// glyph cache
+// raster cache (process-wide shared)
 //
 
 static b32 is_same_glyph_key(const void* a, const void* b, isize size)
 {
-    return memcmp(a, b, size) == 0;
+    (void)size;
+    return memcmp(a, b, sizeof(GlyphKey)) == 0;
 }
 
-void glyph_cache_init(const DWriteContext* dwrite, GlyphCache* glyph_cache, const isize glyphs_length)
+void raster_cache_init(const DWriteContext* dwrite, GlyphRasterCache* cache, const isize glyphs_length)
 {
-    glyph_cache->arena = arena_new(GLYPH_CAHCE_ARENA_CAPACITY);
-    glyph_cache->atlas.w = GLYPH_ATLAS_WIDTH;
-    glyph_cache->atlas.h = GLYPH_ATLAS_HEIGHT;
-    GlyphAtlas* atlas = &glyph_cache->atlas;
-    atlas->bitmap = arena_push(&glyph_cache->arena, sizeof(u8), _Alignof(u8), atlas->w * atlas->h);
-
-    glyph_cache->lru_cache = lru_cache_create(&glyph_cache->arena, ((glyphs_length - 1) >> 1), glyphs_length,
-                                              sizeof(GlyphKey), sizeof(GlyphInfo), fnv1a_hash, is_same_glyph_key);
-
-    /* Insert a 3x3 white region to bottom-right corner of glyph atlas */
-    GlyphInfo* white_glyph = (GlyphInfo*)glyph_cache->lru_cache.values_buf;
-    white_glyph->atlas_x = GLYPH_ATLAS_WIDTH - 3;
-    white_glyph->atlas_y = GLYPH_ATLAS_HEIGHT - 3;
-    white_glyph->w = 3;
-    white_glyph->h = 3;
-    for (isize y = 0; y < 3; y++)
-        for (isize x = 0; x < 3; x++)
-            atlas->bitmap[(white_glyph->atlas_y + y) * GLYPH_ATLAS_WIDTH + (white_glyph->atlas_x + x)] = 255;
-
-    glyph_cache->dwrite = dwrite;
+    cache->arena = arena_new(RASTER_CACHE_ARENA_CAPACITY);
+    cache->lru_cache = lru_cache_create(&cache->arena, ((glyphs_length - 1) >> 1), glyphs_length, sizeof(GlyphKey),
+                                        sizeof(GlyphRasterInfo), fnv1a_hash, is_same_glyph_key);
+    cache->dwrite = dwrite;
 }
 
-void glyph_cache_deinit(GlyphCache* glyph_cache)
+void raster_cache_deinit(GlyphRasterCache* cache)
 {
-    arena_release(&glyph_cache->arena);
-    memset(glyph_cache, 0, sizeof(*glyph_cache));
+    arena_release(&cache->arena);
+    memset(cache, 0, sizeof(*cache));
 }
 
-u8* glyph_rasterize(const DWriteContext* dwrite, Arena* arena, GlyphInfo* glyph_info, u32 codepoint, const Font* font,
-                    const f32 font_size, const u32 dpi)
+static void raster_cache_rasterize_impl(const DWriteContext* dwrite, Arena* arena, GlyphRasterInfo* info, u32 codepoint,
+                                        const Font* font, const f32 font_size, const u32 dpi)
 {
     IDWriteFontFace* font_face;
     IDWriteFontFace3_QueryInterface(font->face3, &IID_IDWriteFontFace, (void**)&font_face);
@@ -305,7 +330,7 @@ u8* glyph_rasterize(const DWriteContext* dwrite, Arena* arena, GlyphInfo* glyph_
     DWRITE_GLYPH_METRICS design_metrics[1] = { 0 };
     IDWriteFontFace3_GetDesignGlyphMetrics(font->face3, glyph_indices, 1, design_metrics, False);
     f32 glyph_advances[1] = { design_metrics[0].advanceWidth * metrics_scale };
-    glyph_info->xadvance = (u32)glyph_advances[0];
+    info->xadvance = (u32)glyph_advances[0];
 
     /* Get glyph offsets */
     DWRITE_GLYPH_OFFSET glyph_offsets[1] = { 0 };
@@ -337,7 +362,6 @@ u8* glyph_rasterize(const DWriteContext* dwrite, Arena* arena, GlyphInfo* glyph_
         /* glyphRunAnalysis */ &analysis);
 
     /* Create glyph bitmap */
-    u8* glyph_bitmap;
     {
         // DWRITE_TEXTURE_ALIASED_1x1 is a misnomer, It actually outputs grayscale if we set up the analysis with AA
         const DWRITE_TEXTURE_TYPE type = DWRITE_TEXTURE_ALIASED_1x1;
@@ -345,28 +369,35 @@ u8* glyph_rasterize(const DWriteContext* dwrite, Arena* arena, GlyphInfo* glyph_
         RECT bounds = { 0 };
         IDWriteGlyphRunAnalysis_GetAlphaTextureBounds(analysis, type, &bounds);
 
-        glyph_info->xoff = bounds.left;
-        glyph_info->yoff = bounds.top;
-        glyph_info->w = bounds.right - bounds.left;
-        glyph_info->h = bounds.bottom - bounds.top;
+        info->xoff = bounds.left;
+        info->yoff = bounds.top;
+        info->w = bounds.right - bounds.left;
+        info->h = bounds.bottom - bounds.top;
 
-        u32 bitmap_size = glyph_info->w * glyph_info->h;
-        glyph_bitmap = arena_push(arena, sizeof(u8), _Alignof(u8), bitmap_size);
-        IDWriteGlyphRunAnalysis_CreateAlphaTexture(analysis, type, &bounds, glyph_bitmap, bitmap_size);
+        u32 bitmap_size = info->w * info->h;
+        info->bitmap_size = bitmap_size;
+        info->bitmap = arena_push(arena, sizeof(u8), _Alignof(u8), bitmap_size);
+        IDWriteGlyphRunAnalysis_CreateAlphaTexture(analysis, type, &bounds, info->bitmap, bitmap_size);
         IDWriteGlyphRunAnalysis_Release(analysis);
     }
 
     IDWriteFontFace_Release(font_face);
-    return glyph_bitmap;
 }
 
-GlyphFindOrInsertResult glyph_find_or_insert(GlyphCache* glyph_cache, u32 codepoint, const Font* font, f32 font_size)
+void raster_cache_rasterize(GlyphRasterCache* cache, GlyphRasterInfo* info, u32 codepoint, const Font* font,
+                            f32 font_size, u32 dpi)
 {
-    GlyphFindOrInsertResult result = { 0 };
-    GlyphKey key = { font, font_size, codepoint };
-    LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&glyph_cache->lru_cache, &key);
+    raster_cache_rasterize_impl(cache->dwrite, &cache->arena, info, codepoint, font, font_size, dpi);
+}
+
+GlyphRasterResult raster_cache_find_or_insert(GlyphRasterCache* cache, u32 codepoint, const Font* font, f32 font_size,
+                                              u32 dpi)
+{
+    GlyphRasterResult result = { 0 };
+    GlyphKey key = { font, font_size, dpi, codepoint };
+    LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&cache->lru_cache, &key);
     result.signal = lru_result.signal;
     result.info =
-        (GlyphInfo*)((byte*)glyph_cache->lru_cache.values_buf + lru_result.index * glyph_cache->lru_cache.value_size);
+        (GlyphRasterInfo*)((byte*)cache->lru_cache.values_buf + lru_result.index * cache->lru_cache.value_size);
     return result;
 }

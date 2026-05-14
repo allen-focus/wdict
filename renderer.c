@@ -21,27 +21,20 @@
 
 ///
 
-//
-// sRGB and linear
-//
+#define RENDERER_ARENA_CAPACITY MB(8)
+#define VERTEX_CAPACITY         8192
+#define VERTEX_IS_TEXT          1.0f
+#define VERTEX_IS_NOT_TEXT      0.0f
+#define CLIP_RECT_CAPACITY      256 // 1. must matches shader's define; 2. must be a power of two
+#define CLIP_INDEX_SKIP         -1
 
-static f32 srgb_to_linear(f32 c)
-{
-    if (c <= 0.04045f)
-        return c / 12.92f;
-    return powf((c + 0.055f) / 1.055f, 2.4f);
-}
+// White glyph: 3x3 solid white rect placed at bottom-right of atlas for solid-color rect rendering.
+#define WHITE_GLYPH_X (GLYPH_ATLAS_WIDTH - 3)
+#define WHITE_GLYPH_Y (GLYPH_ATLAS_HEIGHT - 3)
+#define WHITE_GLYPH_W 3
+#define WHITE_GLYPH_H 3
 
-static ColorF32 color_srgb_to_linear(Color color_srgb)
-{
-    ColorF32 color_linear = {
-        .r = srgb_to_linear(color_srgb.r / 255.0f),
-        .g = srgb_to_linear(color_srgb.g / 255.0f),
-        .b = srgb_to_linear(color_srgb.b / 255.0f),
-        .a = color_srgb.a / 255.0f,
-    };
-    return color_linear;
-}
+static ColorF32 color_srgb_to_linear(Color color_srgb);
 
 //
 // renderer core
@@ -162,15 +155,29 @@ void renderer_shared_deinit(RendererShared* shared)
     memset(shared, 0, sizeof(*shared));
 }
 
-void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window, const GlyphAtlas* glyph_atlas)
+void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window)
 {
     memset(renderer, 0, sizeof(*renderer));
     renderer->shared = shared;
 
     /* Allocate vertex and clip arrays from a dedicated arena */
-    renderer->arena = arena_new(MB(8));
+    renderer->arena = arena_new(RENDERER_ARENA_CAPACITY);
     renderer->vertex_cache.data = arena_push(&renderer->arena, sizeof(Vertex), _Alignof(Vertex), VERTEX_CAPACITY);
     renderer->clip_cache.rects = arena_push(&renderer->arena, sizeof(Rect), _Alignof(Rect), CLIP_RECT_CAPACITY);
+
+    /* Create per-window CPU-side glyph atlas */
+    renderer->cpu_atlas.w = GLYPH_ATLAS_WIDTH;
+    renderer->cpu_atlas.h = GLYPH_ATLAS_HEIGHT;
+    renderer->cpu_atlas.bitmap =
+        arena_push(&renderer->arena, sizeof(u8), _Alignof(u8), GLYPH_ATLAS_WIDTH * GLYPH_ATLAS_HEIGHT);
+
+    /* Create per-window atlas glyph map */
+    atlas_glyph_map_init(&renderer->atlas_map, &renderer->arena);
+
+    /* Insert white glyph at bottom-right corner of atlas */
+    for (isize y = 0; y < WHITE_GLYPH_H; y++)
+        for (isize x = 0; x < WHITE_GLYPH_W; x++)
+            renderer->cpu_atlas.bitmap[(WHITE_GLYPH_Y + y) * GLYPH_ATLAS_WIDTH + (WHITE_GLYPH_X + x)] = 255;
 
     /* Create swapchain */
     {
@@ -218,8 +225,8 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     /* Create texture (glyph atlas) */
     {
         D3D11_TEXTURE2D_DESC desc = {
-            .Width = glyph_atlas->w,
-            .Height = glyph_atlas->h,
+            .Width = renderer->cpu_atlas.w,
+            .Height = renderer->cpu_atlas.h,
             .MipLevels = 1,
             .ArraySize = 1,
             .Format = DXGI_FORMAT_R8_UNORM,
@@ -228,8 +235,8 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
             .BindFlags = D3D11_BIND_SHADER_RESOURCE,
         };
         D3D11_SUBRESOURCE_DATA data = {
-            .pSysMem = glyph_atlas->bitmap,
-            .SysMemPitch = glyph_atlas->w,
+            .pSysMem = renderer->cpu_atlas.bitmap,
+            .SysMemPitch = renderer->cpu_atlas.w,
         };
         ID3D11Device_CreateTexture2D(shared->device, &desc, &data, &renderer->glyph_atlas_texture);
     }
@@ -273,29 +280,29 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     }
 }
 
-static void renderer_upload_glyph(Renderer* renderer, const GlyphAtlas* atlas, const GlyphInfo* glyph_info)
+static void renderer_upload_glyph(Renderer* renderer, u16 atlas_x, u16 atlas_y, u32 w, u32 h)
 {
     D3D11_BOX box = {
-        .left = glyph_info->atlas_x,
-        .top = glyph_info->atlas_y,
+        .left = atlas_x,
+        .top = atlas_y,
         .front = 0,
-        .right = glyph_info->atlas_x + glyph_info->w,
-        .bottom = glyph_info->atlas_y + glyph_info->h,
+        .right = atlas_x + w,
+        .bottom = atlas_y + h,
         .back = 1,
     };
-    const u8* src = atlas->bitmap + glyph_info->atlas_y * atlas->w + glyph_info->atlas_x;
+    const u8* src = renderer->cpu_atlas.bitmap + atlas_y * renderer->cpu_atlas.w + atlas_x;
     ID3D11DeviceContext_UpdateSubresource(renderer->shared->context, (ID3D11Resource*)renderer->glyph_atlas_texture, 0,
-                                          &box, src, atlas->w, 0);
+                                          &box, src, renderer->cpu_atlas.w, 0);
 }
 
-void renderer_recreate_glyph_atlas_texture(Renderer* renderer, const GlyphAtlas* glyph_atlas)
+void renderer_recreate_glyph_atlas_texture(Renderer* renderer)
 {
     ID3D11Texture2D_Release(renderer->glyph_atlas_texture);
     ID3D11ShaderResourceView_Release(renderer->glyph_atlas_shader_resource_view);
 
     D3D11_TEXTURE2D_DESC desc = {
-        .Width = glyph_atlas->w,
-        .Height = glyph_atlas->h,
+        .Width = renderer->cpu_atlas.w,
+        .Height = renderer->cpu_atlas.h,
         .MipLevels = 1,
         .ArraySize = 1,
         .Format = DXGI_FORMAT_R8_UNORM,
@@ -304,14 +311,27 @@ void renderer_recreate_glyph_atlas_texture(Renderer* renderer, const GlyphAtlas*
         .BindFlags = D3D11_BIND_SHADER_RESOURCE,
     };
     D3D11_SUBRESOURCE_DATA data = {
-        .pSysMem = glyph_atlas->bitmap,
-        .SysMemPitch = glyph_atlas->w,
+        .pSysMem = renderer->cpu_atlas.bitmap,
+        .SysMemPitch = renderer->cpu_atlas.w,
     };
     ID3D11Device_CreateTexture2D(renderer->shared->device, &desc, &data, &renderer->glyph_atlas_texture);
 
     /* Create texture view (glyph atlas) */
     ID3D11Device_CreateShaderResourceView(renderer->shared->device, (ID3D11Resource*)renderer->glyph_atlas_texture, 0,
                                           &renderer->glyph_atlas_shader_resource_view);
+
+    /* Reset atlas packing state and map */
+    renderer->cpu_atlas.next_x = 0;
+    renderer->cpu_atlas.next_y = 0;
+    renderer->cpu_atlas.maxy = 0;
+    memset(renderer->cpu_atlas.bitmap, 0, GLYPH_ATLAS_WIDTH * GLYPH_ATLAS_HEIGHT);
+    memset(renderer->atlas_map.keys, 0, sizeof(GlyphKey) * renderer->atlas_map.capacity);
+    renderer->atlas_map.count = 0;
+
+    /* Re-insert white glyph */
+    for (isize y = 0; y < WHITE_GLYPH_H; y++)
+        for (isize x = 0; x < WHITE_GLYPH_W; x++)
+            renderer->cpu_atlas.bitmap[(WHITE_GLYPH_Y + y) * GLYPH_ATLAS_WIDTH + (WHITE_GLYPH_X + x)] = 255;
 }
 
 static void map_vertex_buffer(Renderer* renderer)
@@ -454,6 +474,28 @@ void renderer_resize(Renderer* renderer, const u32 client_width, const u32 clien
 }
 
 //
+// sRGB and linear
+//
+
+static f32 srgb_to_linear(f32 c)
+{
+    if (c <= 0.04045f)
+        return c / 12.92f;
+    return powf((c + 0.055f) / 1.055f, 2.4f);
+}
+
+static ColorF32 color_srgb_to_linear(Color color_srgb)
+{
+    ColorF32 color_linear = {
+        .r = srgb_to_linear(color_srgb.r / 255.0f),
+        .g = srgb_to_linear(color_srgb.g / 255.0f),
+        .b = srgb_to_linear(color_srgb.b / 255.0f),
+        .a = color_srgb.a / 255.0f,
+    };
+    return color_linear;
+}
+
+//
 // rect push
 //
 
@@ -557,21 +599,23 @@ static void renderer_push_rect(Renderer* renderer, const Rect target_rect, const
 // text width & height
 //
 
-static void renderer_update_glyph(Renderer* renderer, GlyphCache* glyph_cache, GlyphInfo* glyph_info, const Font* font,
-                                  const f32 font_size, const u32 codepoint, const u32 dpi)
+// Ensure glyph is in this window's atlas. Returns atlas position.
+// If already present, returns the UV. Otherwise packs, inserts, and uploads.
+static AtlasGlyphPosition renderer_ensure_glyph_in_atlas(Renderer* renderer, GlyphRasterInfo* info, const GlyphKey* key)
 {
-    GlyphAtlas* atlas = &glyph_cache->atlas;
-    u8* glyph_bitmap =
-        glyph_rasterize(glyph_cache->dwrite, &glyph_cache->arena, glyph_info, codepoint, font, font_size, dpi);
-    if (codepoint != ' ')
-    {
-        atlas_insert_glyph(atlas, glyph_info, glyph_bitmap);
-        renderer_upload_glyph(renderer, &glyph_cache->atlas, glyph_info);
-    }
+    AtlasGlyphFindResult find_result = atlas_glyph_map_find(&renderer->atlas_map, key);
+    if (find_result.found)
+        return (AtlasGlyphPosition){ find_result.atlas_x, find_result.atlas_y };
+
+    /* Not in this window's atlas yet — pack it and upload */
+    AtlasGlyphPosition pos = atlas_insert_glyph(&renderer->cpu_atlas, info->w, info->h, info->bitmap);
+    atlas_glyph_map_insert(&renderer->atlas_map, key, pos.atlas_x, pos.atlas_y);
+    renderer_upload_glyph(renderer, pos.atlas_x, pos.atlas_y, info->w, info->h);
+    return pos;
 }
 
-f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphCache* glyph_cache, const String text, const Font* font,
-                                    const f32 font_size, const u32 dpi)
+f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphRasterCache* raster_cache, const String text,
+                                    const Font* font, const f32 font_size, const u32 dpi)
 {
     f32 text_width = 0;
     const byte* p = text.data;
@@ -580,9 +624,9 @@ f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphCache* glyph_cache,
         UnicodeDecode res = utf8_decode(p);
         p = res.next_p;
 
-        GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, res.codepoint, font, font_size);
-        if (result.signal == LRU_SIGNAL_TOINSERT || result.signal == LRU_SIGNAL_TOEVICT)
-            renderer_update_glyph(renderer, glyph_cache, result.info, font, font_size, res.codepoint, dpi);
+        GlyphRasterResult result = raster_cache_find_or_insert(raster_cache, res.codepoint, font, font_size, dpi);
+        if (result.signal == LRU_SIGNAL_TOINSERT)
+            raster_cache_rasterize(raster_cache, result.info, res.codepoint, font, font_size, dpi);
 
         text_width += result.info->xadvance;
     }
@@ -590,19 +634,16 @@ f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphCache* glyph_cache,
     return text_width / dpi_scale;
 }
 
-// TODO: Future support for multiple fonts per line is planned. This will require calculating text height
-// based on varying font line spaces rather than relying on a single font's line space.
-f32 renderer_get_text_height_for_dpi(Renderer* renderer, GlyphCache* glyph_cache, const String text, const Font* font,
-                                     const f32 font_size, const u32 dpi)
+f32 renderer_get_text_height_for_dpi(Renderer* renderer, GlyphRasterCache* raster_cache, const String text,
+                                     const Font* font, const f32 font_size, const u32 dpi)
 {
     u32 codepoint = utf8_decode(text.data).codepoint; // Get first glyph codepoint of the text
     Assert(codepoint);
 
-    GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, codepoint, font, font_size);
-    if (result.signal == LRU_SIGNAL_TOINSERT || result.signal == LRU_SIGNAL_TOEVICT)
-        renderer_update_glyph(renderer, glyph_cache, result.info, font, font_size, codepoint, dpi);
+    GlyphRasterResult result = raster_cache_find_or_insert(raster_cache, codepoint, font, font_size, dpi);
+    if (result.signal == LRU_SIGNAL_TOINSERT)
+        raster_cache_rasterize(raster_cache, result.info, codepoint, font, font_size, dpi);
 
-    // TODO: Should we just return `font_size`?
     return font_size;
 }
 
@@ -610,8 +651,7 @@ f32 renderer_get_text_height_for_dpi(Renderer* renderer, GlyphCache* glyph_cache
 // draw
 //
 
-void renderer_draw_rect(Renderer* renderer, const GlyphCache* glyph_cache, const Rect rect, const Color color,
-                        const RectStyle style, const Rect* clip)
+void renderer_draw_rect(Renderer* renderer, const Rect rect, const Color color, const RectStyle style, const Rect* clip)
 {
     /* Calculate expanded rect */
     Rect expanded_rect = rect;
@@ -625,17 +665,16 @@ void renderer_draw_rect(Renderer* renderer, const GlyphCache* glyph_cache, const
         expanded_rect.ymax += shadow_radius + max(0, style.shadow_offset.y);
     }
 
-    GlyphInfo* glyph_white = (GlyphInfo*)glyph_cache->lru_cache.values_buf;
-    Rect glyph_white_rect = {
-        .xmin = (f32)glyph_white->atlas_x,
-        .ymin = (f32)glyph_white->atlas_y,
-        .xmax = (f32)(glyph_white->atlas_x + glyph_white->w),
-        .ymax = (f32)(glyph_white->atlas_y + glyph_white->h),
+    Rect white_rect = {
+        .xmin = WHITE_GLYPH_X,
+        .ymin = WHITE_GLYPH_Y,
+        .xmax = WHITE_GLYPH_X + WHITE_GLYPH_W,
+        .ymax = WHITE_GLYPH_Y + WHITE_GLYPH_H,
     };
-    renderer_push_rect(renderer, expanded_rect, glyph_white_rect, color, style, clip);
+    renderer_push_rect(renderer, expanded_rect, white_rect, color, style, clip);
 }
 
-void renderer_draw_text(Renderer* renderer, GlyphCache* glyph_cache, String text, const Position position,
+void renderer_draw_text(Renderer* renderer, GlyphRasterCache* raster_cache, String text, const Position position,
                         const Color color, const Font* font, const f32 font_size, const u32 dpi, const Rect* clip)
 {
     f32 next_position_x = position.x;
@@ -643,7 +682,7 @@ void renderer_draw_text(Renderer* renderer, GlyphCache* glyph_cache, String text
     /* Get physical pixel position of y */
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     f32 position_y =
-        position.y + renderer_get_text_height_for_dpi(renderer, glyph_cache, text, font, font_size, dpi) * dpi_scale;
+        position.y + renderer_get_text_height_for_dpi(renderer, raster_cache, text, font, font_size, dpi) * dpi_scale;
 
     const byte* p = text.data;
     while (p - text.data < text.len)
@@ -651,9 +690,18 @@ void renderer_draw_text(Renderer* renderer, GlyphCache* glyph_cache, String text
         UnicodeDecode res = utf8_decode(p);
         p = res.next_p;
 
-        GlyphFindOrInsertResult result = glyph_find_or_insert(glyph_cache, res.codepoint, font, font_size);
-        if (result.signal == LRU_SIGNAL_TOINSERT || result.signal == LRU_SIGNAL_TOEVICT)
-            renderer_update_glyph(renderer, glyph_cache, result.info, font, font_size, res.codepoint, dpi);
+        GlyphRasterResult result = raster_cache_find_or_insert(raster_cache, res.codepoint, font, font_size, dpi);
+        if (result.signal == LRU_SIGNAL_TOINSERT)
+            raster_cache_rasterize(raster_cache, result.info, res.codepoint, font, font_size, dpi);
+
+        u16 atlas_x = 0, atlas_y = 0;
+        if (res.codepoint != ' ')
+        {
+            GlyphKey key = { font, font_size, dpi, res.codepoint };
+            AtlasGlyphPosition pos = renderer_ensure_glyph_in_atlas(renderer, result.info, &key);
+            atlas_x = pos.atlas_x;
+            atlas_y = pos.atlas_y;
+        }
 
         Rect target_rect = {
             .xmin = next_position_x + (f32)result.info->xoff,
@@ -662,10 +710,10 @@ void renderer_draw_text(Renderer* renderer, GlyphCache* glyph_cache, String text
             .ymax = position_y + (f32)result.info->yoff + (f32)result.info->h,
         };
         Rect texture_rect = {
-            .xmin = (f32)result.info->atlas_x,
-            .ymin = (f32)result.info->atlas_y,
-            .xmax = (f32)(result.info->atlas_x + result.info->w),
-            .ymax = (f32)(result.info->atlas_y + result.info->h),
+            .xmin = (f32)atlas_x,
+            .ymin = (f32)atlas_y,
+            .xmax = (f32)(atlas_x + result.info->w),
+            .ymax = (f32)(atlas_y + result.info->h),
         };
         RectStyle rect_style = { 0 };
         renderer_push_rect(renderer, target_rect, texture_rect, color, rect_style, clip);

@@ -6,14 +6,6 @@
 
 ///
 
-#define VERTEX_CAPACITY    8192
-#define VERTEX_IS_TEXT     1.0f
-#define VERTEX_IS_NOT_TEXT 0.0f
-#define CLIP_RECT_CAPACITY 256 // 1. must matches shader's define; 2. must be a power of two
-#define CLIP_INDEX_SKIP    -1
-
-///
-
 typedef struct
 {
     f32 r, g, b, a;
@@ -80,6 +72,8 @@ typedef struct Renderer
     ID3D11Buffer*             clip_rect_buffer;
     VertexCache               vertex_cache;
     ClipCache                 clip_cache;
+    GlyphAtlas                cpu_atlas;
+    AtlasGlyphMap             atlas_map;
     RendererShared*           shared;
     Arena                     arena;
 } Renderer;
@@ -90,19 +84,19 @@ typedef struct Renderer
 void renderer_shared_init(RendererShared* shared);
 void renderer_shared_deinit(RendererShared* shared);
 
-void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window, const GlyphAtlas* glyph_atlas);
+void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window);
 void renderer_deinit(Renderer* renderer);
 void renderer_resize(Renderer* renderer, const u32 client_width, const u32 client_height);
-void renderer_recreate_glyph_atlas_texture(Renderer* renderer, const GlyphAtlas* glyph_atlas);
+void renderer_recreate_glyph_atlas_texture(Renderer* renderer);
 void renderer_wait_for_last_submitted_frame(Renderer* renderer);
 void renderer_flush_and_present(Renderer* renderer, const u32 client_width, const u32 client_height);
 
-f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphCache* glyph_cache, const String text, const Font* font,
-                                    const f32 font_size, const u32 dpi);
-f32 renderer_get_text_height_for_dpi(Renderer* renderer, GlyphCache* glyph_cache, const String text, const Font* font,
-                                     const f32 font_size, const u32 dpi);
+f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphRasterCache* raster_cache, const String text,
+                                    const Font* font, const f32 font_size, const u32 dpi);
+f32 renderer_get_text_height_for_dpi(Renderer* renderer, GlyphRasterCache* raster_cache, const String text,
+                                     const Font* font, const f32 font_size, const u32 dpi);
 
-void renderer_draw_rect(Renderer* renderer, const GlyphCache* glyph_cache, const Rect rect, const Color color,
-                        const RectStyle style, const Rect* clip);
-void renderer_draw_text(Renderer* renderer, GlyphCache* glyph_cache, String text, const Position position,
+void renderer_draw_rect(Renderer* renderer, const Rect rect, const Color color, const RectStyle style,
+                        const Rect* clip);
+void renderer_draw_text(Renderer* renderer, GlyphRasterCache* raster_cache, String text, const Position position,
                         const Color color, const Font* font, const f32 font_size, const u32 dpi, const Rect* clip);

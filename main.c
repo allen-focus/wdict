@@ -562,9 +562,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_DPICHANGED:
         {
             ui_context->dpi = GetDpiForWindow(window);
-            glyph_cache_deinit(&ui_context->glyph_cache);
-            glyph_cache_init(&app_context->dwrite, &ui_context->glyph_cache, GLYPHS_LENGTH);
-            renderer_recreate_glyph_atlas_texture(ui_context->renderer, &ui_context->glyph_cache.atlas);
+            raster_cache_deinit(&ui_context->raster_cache);
+            raster_cache_init(&app_context->dwrite, &ui_context->raster_cache, GLYPHS_LENGTH);
+            renderer_recreate_glyph_atlas_texture(ui_context->renderer);
 
             // Set new window
             RECT* const suggested_rect = (RECT*)lparam;
@@ -664,8 +664,7 @@ i32 WinMainCRTStartup()
                                 &app_context.fonts[FONT_INDEX_ICON]);
 
     /* Initialize per-window renderer */
-    renderer_init(&app_context.renderer, &app_context.renderer_shared, app_context.window,
-                  &app_context.ui.glyph_cache.atlas);
+    renderer_init(&app_context.renderer, &app_context.renderer_shared, app_context.window);
 
     /* Render first frame before showing window */
     process_frame(&app_context); // Rasterize needed glyphs
