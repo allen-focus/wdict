@@ -214,7 +214,8 @@ static UIBox* ui_box_new()
 
 static UIBox* ui_box_get_parent()
 {
-    return (g_ui_context->box_stack.depth > 0) ? g_ui_context->box_stack.items[g_ui_context->box_stack.depth - 1] : NULL;
+    return (g_ui_context->box_stack.depth > 0) ? g_ui_context->box_stack.items[g_ui_context->box_stack.depth - 1]
+                                               : NULL;
 }
 
 static UIBox* ui_box_get_root()
@@ -687,8 +688,10 @@ static void ui_box_resolve_position(UIBox* box)
         }
 
         /* Handle scroll & float offset */
-        box->position.x += parent->config.child_offset.x + ((box->flags & BoxFlag_Float) ? box->config.float_offset.x : 0.f);
-        box->position.y += parent->config.child_offset.y + ((box->flags & BoxFlag_Float) ? box->config.float_offset.y : 0.f);
+        box->position.x +=
+            parent->config.child_offset.x + ((box->flags & BoxFlag_Float) ? box->config.float_offset.x : 0.f);
+        box->position.y +=
+            parent->config.child_offset.y + ((box->flags & BoxFlag_Float) ? box->config.float_offset.y : 0.f);
     }
 
     if (box->type == BOX_TYPE_CONTAINER)
@@ -973,6 +976,7 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_context->mouse_lclick = False;
     g_ui_context->mouse_rclick = False;
     g_ui_context->mouse_double_click = False;
+    g_ui_context->mouse_released = False;
     g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
     g_ui_context->char_input_queue_count = 0;
@@ -1009,6 +1013,16 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
         .xmax = box->position.x + box->size.width,
         .ymax = box->position.y + box->size.height,
     };
+
+    b32 has_drag = box->drag_anchor.x != 0.f || box->drag_anchor.y != 0.f;
+
+    /* Release must be detected even when not hovering */
+    if (!g_ui_context->mouse_press && has_drag)
+    {
+        *flags |= UI_Signal_Flag_Released;
+        box->drag_anchor = (Position){ 0 };
+    }
+
     if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
     {
         *flags |= UI_Signal_Flag_Hovered;
@@ -1020,7 +1034,41 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
             *flags |= UI_Signal_Flag_Pressed;
         if (g_ui_context->mouse_double_click)
             *flags |= UI_Signal_Flag_DoubleClicked;
+
+        /* Drag: anchor on press, compute delta while holding */
+        if (g_ui_context->mouse_lclick)
+            box->drag_anchor = g_ui_context->mouse_pos;
+        if (g_ui_context->mouse_press && has_drag)
+        {
+            Position delta = {
+                g_ui_context->mouse_pos.x - box->drag_anchor.x,
+                g_ui_context->mouse_pos.y - box->drag_anchor.y,
+            };
+            if (delta.x != 0.f || delta.y != 0.f)
+                *flags |= UI_Signal_Flag_Dragging;
+        }
     }
+}
+
+UISignalFlags ui_box_interact(UIBox* box, const String hash_str)
+{
+    UISignalFlags flags = UI_Signal_Flag_None;
+    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(hash_str);
+    if (result.found)
+        update_interaction_flags(result.box, &flags);
+    update_box_key(box, hash_str);
+    return flags;
+}
+
+Position ui_box_drag_delta(const UIBox* box)
+{
+    Position delta = { 0 };
+    if (g_ui_context->mouse_press && (box->drag_anchor.x != 0.f || box->drag_anchor.y != 0.f))
+    {
+        delta.x = g_ui_context->mouse_pos.x - box->drag_anchor.x;
+        delta.y = g_ui_context->mouse_pos.y - box->drag_anchor.y;
+    }
+    return delta;
 }
 
 //
@@ -1776,8 +1824,10 @@ static void cursor_bar(const f32 parent_height, const Padding parent_padding, co
 {
     f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
     Position float_offset = { x_offset, -parent_padding.top + CURSORBAR_PADDING };
-    ui_box_end(ui_box_start(&(BoxConfig){
-        .sizing = { fixed(2), fixed(bar_height) }, .color = color, .flags = BoxFlag_Float, .float_offset = float_offset }));
+    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(2), fixed(bar_height) },
+                                          .color = color,
+                                          .flags = BoxFlag_Float,
+                                          .float_offset = float_offset }));
 }
 
 UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_str, const Font* font,

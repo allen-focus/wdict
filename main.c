@@ -514,6 +514,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         }
 
         case WM_LBUTTONUP:
+        {
+            ui_context->mouse_released = True;
+            ui_context->mouse_press = False;
+            ReleaseCapture();
+            return 0;
+        }
+
         case WM_RBUTTONUP:
         {
             ui_context->mouse_press = False;
@@ -523,6 +530,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_CAPTURECHANGED:
         {
+            ui_context->mouse_released = True;
             ui_context->mouse_press = False;
             ReleaseCapture();
         }

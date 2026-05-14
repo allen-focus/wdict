@@ -47,12 +47,14 @@
 typedef enum
 {
     // clang-format off
-    UI_Signal_Flag_None     = 0,
-    UI_Signal_Flag_Hovered  = (1 << 0),
-    UI_Signal_Flag_LClicked = (1 << 1),
-    UI_Signal_Flag_RClicked = (1 << 2),
-    UI_Signal_Flag_Pressed    = (1 << 3),
+    UI_Signal_Flag_None          = 0,
+    UI_Signal_Flag_Hovered       = (1 << 0),
+    UI_Signal_Flag_LClicked      = (1 << 1),
+    UI_Signal_Flag_RClicked      = (1 << 2),
+    UI_Signal_Flag_Pressed       = (1 << 3),
     UI_Signal_Flag_DoubleClicked = (1 << 4),
+    UI_Signal_Flag_Released      = (1 << 5),
+    UI_Signal_Flag_Dragging      = (1 << 6),
     // clang-format on
 } UISignalFlags;
 
@@ -62,6 +64,8 @@ typedef enum
 #define ui_clicked(signal_flags)        (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
 #define ui_pressed(signal_flags)        (signal_flags & UI_Signal_Flag_Pressed)
 #define ui_double_clicked(signal_flags) (signal_flags & UI_Signal_Flag_DoubleClicked)
+#define ui_released(signal_flags)       (signal_flags & UI_Signal_Flag_Released)
+#define ui_dragging(signal_flags)       (signal_flags & UI_Signal_Flag_Dragging)
 
 //
 // Cursor
@@ -160,8 +164,8 @@ typedef struct
 
 typedef enum
 {
-    BoxFlag_None  = 0,
-    BoxFlag_Clip  = (1 << 0),
+    BoxFlag_None = 0,
+    BoxFlag_Clip = (1 << 0),
     BoxFlag_Float = (1 << 1),
 } BoxFlags;
 
@@ -308,6 +312,9 @@ struct UIBox
     BoxKey pressed_thumb_y_key;
     Position drag_anchor_mouse_pos;
     Position drag_anchor_mouse_scroll;
+
+    /* general drag state */
+    Position drag_anchor;
 };
 
 //
@@ -419,6 +426,7 @@ typedef struct UIContext
     b32 mouse_rclick;
     b32 mouse_press;
     b32 mouse_double_click;
+    b32 mouse_released;
     f64 last_lclick_time;
     Position last_lclick_pos;
     Cursor desired_cursor;
@@ -501,6 +509,8 @@ void ui_deinit(UIContext* ui_context);
 
 UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
+UISignalFlags ui_box_interact(UIBox* box, const String hash_str);
+Position ui_box_drag_delta(const UIBox* box);
 UIBox* ui_text(const String text, const TextConfig* text_config);
 
 isize ui_frame_begin(UIContext* ui_context);
