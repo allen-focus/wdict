@@ -307,14 +307,18 @@ struct UIBox
     TimedLerpAnimation scroll_anim_x;
     TimedLerpAnimation scroll_anim_y;
 
-    /* scrollbar thumb drag state (lives in scroll area box so it dies with the area) */
+    // scrollbar thumb drag state (lives in scroll area box so it dies with the area)
     BoxKey pressed_thumb_x_key;
     BoxKey pressed_thumb_y_key;
-    Position drag_anchor_mouse_pos;
-    Position drag_anchor_mouse_scroll;
 
-    /* general drag state */
-    Position drag_anchor;
+    // Scroll-value anchor: recorded when thumb press starts.
+    // Used by: scrollbar drag formula  new_scroll = anchor + mouse_delta * scale
+    Position drag_scroll_anchor;
+
+    // Mouse-position anchor: recorded by update_interaction_flags() on press.
+    // Used by: ui_box_drag_delta() to compute mouse displacement since press.
+    // Managed automatically — set on LClick, cleared on Release.
+    Position drag_mouse_anchor;
 };
 
 //

@@ -1014,13 +1014,14 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
         .ymax = box->position.y + box->size.height,
     };
 
-    b32 has_drag = box->drag_anchor.x != 0.f || box->drag_anchor.y != 0.f;
+    /* Was the mouse pressed on this box in a prior frame? */
+    b32 has_mouse_anchor = box->drag_mouse_anchor.x != 0.f || box->drag_mouse_anchor.y != 0.f;
 
     /* Release must be detected even when not hovering */
-    if (!g_ui_context->mouse_press && has_drag)
+    if (!g_ui_context->mouse_press && has_mouse_anchor)
     {
         *flags |= UI_Signal_Flag_Released;
-        box->drag_anchor = (Position){ 0 };
+        box->drag_mouse_anchor = (Position){ 0 };
     }
 
     if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
@@ -1035,14 +1036,14 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
         if (g_ui_context->mouse_double_click)
             *flags |= UI_Signal_Flag_DoubleClicked;
 
-        /* Drag: anchor on press, compute delta while holding */
+        /* Drag: record mouse anchor on press, signal Dragging when mouse moves while held */
         if (g_ui_context->mouse_lclick)
-            box->drag_anchor = g_ui_context->mouse_pos;
-        if (g_ui_context->mouse_press && has_drag)
+            box->drag_mouse_anchor = g_ui_context->mouse_pos;
+        if (g_ui_context->mouse_press && has_mouse_anchor)
         {
             Position delta = {
-                g_ui_context->mouse_pos.x - box->drag_anchor.x,
-                g_ui_context->mouse_pos.y - box->drag_anchor.y,
+                g_ui_context->mouse_pos.x - box->drag_mouse_anchor.x,
+                g_ui_context->mouse_pos.y - box->drag_mouse_anchor.y,
             };
             if (delta.x != 0.f || delta.y != 0.f)
                 *flags |= UI_Signal_Flag_Dragging;
@@ -1063,10 +1064,10 @@ UISignalFlags ui_box_interact(UIBox* box, const String hash_str)
 Position ui_box_drag_delta(const UIBox* box)
 {
     Position delta = { 0 };
-    if (g_ui_context->mouse_press && (box->drag_anchor.x != 0.f || box->drag_anchor.y != 0.f))
+    if (g_ui_context->mouse_press && (box->drag_mouse_anchor.x != 0.f || box->drag_mouse_anchor.y != 0.f))
     {
-        delta.x = g_ui_context->mouse_pos.x - box->drag_anchor.x;
-        delta.y = g_ui_context->mouse_pos.y - box->drag_anchor.y;
+        delta.x = g_ui_context->mouse_pos.x - box->drag_mouse_anchor.x;
+        delta.y = g_ui_context->mouse_pos.y - box->drag_mouse_anchor.y;
     }
     return delta;
 }
@@ -1237,9 +1238,8 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     f32 scroll_max_delta                   = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
     f32* scroll_delta                      = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
     TimedLerpAnimation* scroll_anim        = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
-    f32* ctx_last_drag_anchor_mouse_pos    = is_horizontal ? &last_area->drag_anchor_mouse_pos.x    : &last_area->drag_anchor_mouse_pos.y;
-    f32* ctx_last_drag_anchor_mouse_scroll = is_horizontal ? &last_area->drag_anchor_mouse_scroll.x : &last_area->drag_anchor_mouse_scroll.y;
-    BoxKey* ctx_last_thumb_key             = is_horizontal ? &last_area->pressed_thumb_x_key  : &last_area->pressed_thumb_y_key;
+    f32* ctx_drag_scroll_anchor            = is_horizontal ? &last_area->drag_scroll_anchor.x               : &last_area->drag_scroll_anchor.y;
+    BoxKey* ctx_last_thumb_key             = is_horizontal ? &last_area->pressed_thumb_x_key                : &last_area->pressed_thumb_y_key;
     // clang-format on
 
     /* Transition-related variables */
@@ -1265,6 +1265,8 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     if (thumb_result.found)
     {
         UIBox* last_thumb = thumb_result.box;
+        f32* ctx_thumb_mouse_anchor =
+            is_horizontal ? &last_thumb->drag_mouse_anchor.x : &last_thumb->drag_mouse_anchor.y;
         String last_pressed_scroll_thumb_hash_str = { ctx_last_thumb_key->str, ctx_last_thumb_key->len };
         update_interaction_flags(last_thumb, &thumb_flags);
 
@@ -1275,12 +1277,11 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                 /* Mark as pressed if this thumb was being dragged even if not hovering */
                 thumb_flags |= UI_Signal_Flag_Pressed;
             }
-            else if (!ui_pressed(thumb_flags))
+            else if (ui_released(thumb_flags))
             {
                 /* Reset cached active scroll state */
                 ctx_last_thumb_key->len = 0;
-                *ctx_last_drag_anchor_mouse_pos = 0;
-                *ctx_last_drag_anchor_mouse_scroll = 0;
+                *ctx_drag_scroll_anchor = 0;
             }
         }
 
@@ -1292,16 +1293,15 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                 last_thumb->anim_state = TRANSITION_FORWARD;
                 last_thumb->hot_t = SCROLLBAR_THUMB_OPACITY_HOVER;
 
-                *ctx_last_drag_anchor_mouse_pos = mouse_pos;
-                *ctx_last_drag_anchor_mouse_scroll = *scroll_delta;
+                *ctx_drag_scroll_anchor = *scroll_delta;
             }
             if (ui_pressed(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
             {
-                if (ui_pressed(thumb_flags) && *ctx_last_drag_anchor_mouse_pos)
+                if (ui_pressed(thumb_flags) && *ctx_thumb_mouse_anchor)
                 {
                     *ctx_last_thumb_key = generate_box_key(thumb_hash_str);
-                    f32 mouse_drag_delta = mouse_pos - *ctx_last_drag_anchor_mouse_pos;
-                    f32 target = *ctx_last_drag_anchor_mouse_scroll + mouse_drag_delta * thumb_delta_scale;
+                    f32 mouse_drag_delta = mouse_pos - *ctx_thumb_mouse_anchor;
+                    f32 target = *ctx_drag_scroll_anchor + mouse_drag_delta * thumb_delta_scale;
                     *scroll_delta = clamp(target, 0.f, scroll_max_delta);
                     start_timed_lerp(scroll_anim, *scroll_delta, *scroll_delta, g_ui_context->current_time, 0.f);
                 }
