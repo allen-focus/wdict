@@ -6,7 +6,7 @@
 
 ///
 
-#define VERTEX_CAPACITY    2048
+#define VERTEX_CAPACITY    8192
 #define VERTEX_IS_TEXT     1.0f
 #define VERTEX_IS_NOT_TEXT 0.0f
 #define CLIP_RECT_CAPACITY 256 // 1. must matches shader's define; 2. must be a power of two
@@ -42,13 +42,13 @@ typedef struct
 
 typedef struct
 {
-    Vertex data[VERTEX_CAPACITY];
+    Vertex* data;
     u32 count;
 } VertexCache;
 
 typedef struct
 {
-    Rect rects[CLIP_RECT_CAPACITY];
+    Rect* rects;
     u32 current_index;
     u32 count;
 } ClipCache;
@@ -81,6 +81,7 @@ typedef struct Renderer
     VertexCache               vertex_cache;
     ClipCache                 clip_cache;
     RendererShared*           shared;
+    Arena                     arena;
 } Renderer;
 // clang-format on
 

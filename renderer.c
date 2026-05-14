@@ -146,6 +146,7 @@ void renderer_deinit(Renderer* renderer)
     ID3D11ShaderResourceView_Release(renderer->glyph_atlas_shader_resource_view);
     IDXGISwapChain2_Release(renderer->swapchain2);
     IDXGISwapChain1_Release(renderer->swapchain);
+    arena_release(&renderer->arena);
     memset(renderer, 0, sizeof(*renderer));
 }
 
@@ -165,6 +166,11 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
 {
     memset(renderer, 0, sizeof(*renderer));
     renderer->shared = shared;
+
+    /* Allocate vertex and clip arrays from a dedicated arena */
+    renderer->arena = arena_new(MB(8));
+    renderer->vertex_cache.data = arena_push(&renderer->arena, sizeof(Vertex), _Alignof(Vertex), VERTEX_CAPACITY);
+    renderer->clip_cache.rects = arena_push(&renderer->arena, sizeof(Rect), _Alignof(Rect), CLIP_RECT_CAPACITY);
 
     /* Create swapchain */
     {
@@ -235,7 +241,7 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     /* Create vertex buffer */
     {
         D3D11_BUFFER_DESC desc = {
-            .ByteWidth = sizeof(renderer->vertex_cache.data),
+            .ByteWidth = sizeof(Vertex) * VERTEX_CAPACITY,
             .Usage = D3D11_USAGE_DYNAMIC,
             .BindFlags = D3D11_BIND_VERTEX_BUFFER,
             .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
@@ -258,7 +264,7 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     /* Create constant buffer for clipping */
     {
         D3D11_BUFFER_DESC desc = {
-            .ByteWidth = sizeof(renderer->clip_cache.rects),
+            .ByteWidth = sizeof(Rect) * CLIP_RECT_CAPACITY,
             .Usage = D3D11_USAGE_DYNAMIC,
             .BindFlags = D3D11_BIND_CONSTANT_BUFFER,
             .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
@@ -407,8 +413,11 @@ void renderer_flush_and_present(Renderer* renderer, const u32 client_width, cons
     IDXGISwapChain1_Present(renderer->swapchain, vsync, flags);
 
     /* Reset vertex stack & clip rect cache */
-    memset(&renderer->vertex_cache, 0, sizeof(renderer->vertex_cache));
-    memset(&renderer->clip_cache, 0, sizeof(renderer->clip_cache));
+    memset(renderer->vertex_cache.data, 0, sizeof(Vertex) * VERTEX_CAPACITY);
+    renderer->vertex_cache.count = 0;
+    memset(renderer->clip_cache.rects, 0, sizeof(Rect) * CLIP_RECT_CAPACITY);
+    renderer->clip_cache.current_index = 0;
+    renderer->clip_cache.count = 0;
 
     TracyCZoneEnd(ctx);
 }
