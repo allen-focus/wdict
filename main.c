@@ -44,6 +44,7 @@ typedef enum
     CMD_TAB_NEW,
     CMD_TAB_CLOSE,
     CMD_TAB_MOVE,
+    CMD_TAB_MOVE_TO_PANEL,
 } CmdKind;
 
 typedef struct WindowContext WindowContext;
@@ -69,6 +70,7 @@ struct CmdNode
         {
             WindowContext* target;
             Panel* panel;
+            Panel* to_panel;
             PanelTab* tab;
             i32 delta;
         } panel_action;
@@ -476,6 +478,10 @@ static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
                 if (n->panel_action.target && n->panel_action.panel && n->panel_action.tab)
                     panel_tab_move(n->panel_action.panel, n->panel_action.tab, n->panel_action.delta);
                 break;
+            case CMD_TAB_MOVE_TO_PANEL:
+                if (n->panel_action.target && n->panel_action.panel && n->panel_action.to_panel && n->panel_action.tab)
+                    panel_tab_move_to_panel(n->panel_action.panel, n->panel_action.tab, n->panel_action.to_panel);
+                break;
             default:
                 break;
         }
@@ -671,8 +677,8 @@ static void process_frame(WindowContext* ctx)
                             b32 is_active = (tab == active);
 
                             u8 tab_key[HASH_STR_MAX_LENGTH];
-                            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key),
-                                                       "###tab_%p_%.*s", (void*)p, (int)tab->name_len, tab->name);
+                            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key), "###tab_%p_%.*s", (void*)p,
+                                                       (int)tab->name_len, tab->name);
                             String tab_key_str = { tab_key, tab_key_len };
 
                             Color bg_normal = is_active ? theme->bg_base : (Color){ 0, 0, 0, 0 };
@@ -698,20 +704,20 @@ static void process_frame(WindowContext* ctx)
                                 if (ui_lclicked(r.flags))
                                     panel_tab_activate(p, tab);
 
-                                ui_text((String){ tab->name, tab->name_len },
-                                        &(TextConfig){ .font = font_ui, .font_size = font_sz, .color = fg,
-                                                       .line_height = font_sz });
+                                ui_text((String){ tab->name, tab->name_len }, &(TextConfig){ .font = font_ui,
+                                                                                             .font_size = font_sz,
+                                                                                             .color = fg,
+                                                                                             .line_height = font_sz });
 
                                 /* Close button */
                                 u8 ck[HASH_STR_MAX_LENGTH];
                                 i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%p_%.*s", (void*)p, (int)tab->name_len,
                                                   tab->name);
-                                Color cb_normal = is_active ? theme->fg_secondary
-                                                            : (Color){ 0, 0, 0, 0 };
+                                Color cb_normal = is_active ? theme->fg_secondary : (Color){ 0, 0, 0, 0 };
                                 Color cb_hover = theme->fg_secondary;
-                                UISignalFlags cf = ui_button((String){ ck, cl }, font_ui, 10,
-                                                              (Sizing){ fixed(14), fixed(14) }, (Padding){ 0 },
-                                                              cb_normal, cb_normal, cb_hover, cb_hover);
+                                UISignalFlags cf =
+                                    ui_button((String){ ck, cl }, font_ui, 10, (Sizing){ fixed(14), fixed(14) },
+                                              (Padding){ 0 }, cb_normal, cb_normal, cb_hover, cb_hover);
                                 if (ui_lclicked(cf))
                                 {
                                     CmdNode* n = cmd_push(shared, CMD_TAB_CLOSE);
@@ -723,7 +729,9 @@ static void process_frame(WindowContext* ctx)
                         }
 
                         /* Spacer */
-                        ui_box({ .sizing = { grow({}), fit({}) } }) { }
+                        ui_box({ .sizing = { grow({}), fit({}) } })
+                        {
+                        }
 
                         /* New tab button */
                         u8 plus_key[HASH_STR_MAX_LENGTH];
@@ -745,8 +753,7 @@ static void process_frame(WindowContext* ctx)
                         String close_str = { close_key, close_len };
                         UISignalFlags close_flags =
                             ui_button(close_str, font_ui, 12, (Sizing){ fixed(22), fixed(22) }, (Padding){ 0 },
-                                      (Color){ 0, 0, 0, 0 }, theme->fg_secondary, theme->danger,
-                                      theme->danger);
+                                      (Color){ 0, 0, 0, 0 }, theme->fg_secondary, theme->danger, theme->danger);
                         if (p->parent && ui_lclicked(close_flags))
                         {
                             CmdNode* n = cmd_push(shared, CMD_CLOSE_PANEL);
@@ -778,14 +785,16 @@ static void process_frame(WindowContext* ctx)
                             })
                             {
                                 String tab_label = { active_tab->name, active_tab->name_len };
-                                ui_text(tab_label,
-                                        &(TextConfig){ .font = font_ui, .font_size = 14, .color = theme->accent,
-                                                       .line_height = 20 });
+                                ui_text(tab_label, &(TextConfig){ .font = font_ui,
+                                                                  .font_size = 14,
+                                                                  .color = theme->accent,
+                                                                  .line_height = 20 });
 
-                                ui_text(
-                                    str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
-                                    &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary,
-                                                   .line_height = 24 });
+                                ui_text(str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
+                                        &(TextConfig){ .font = font_ui,
+                                                       .font_size = 12,
+                                                       .color = theme->fg_primary,
+                                                       .line_height = 24 });
                                 ui_text(str("Ctrl+W closes the panel under the mouse cursor."),
                                         &(TextConfig){ .font = font_ui,
                                                        .font_size = 12,
@@ -802,9 +811,9 @@ static void process_frame(WindowContext* ctx)
                                                           "New Window##panel_button_%p", (void*)p);
                                 String button_str = { button_key, button_len };
 
-                                UISignalFlags button_flags =
-                                    ui_button(button_str, font_mono, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                              theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
+                                UISignalFlags button_flags = ui_button(
+                                    button_str, font_mono, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                    theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
                                 if (ui_lclicked(button_flags))
                                 {
                                     CmdNode* n = cmd_push(shared, CMD_CREATE_WINDOW);
@@ -1013,13 +1022,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
             b32 ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
 
-            if (wparam == 'N' && ctrl)
-            {
-                CmdNode* n = cmd_push(shared, CMD_CREATE_WINDOW);
-                n->create_win.width = CLIENT_WIDTH;
-                n->create_win.height = CLIENT_HEIGHT;
-                return 0;
-            }
             if (wparam == 'T' && ctrl)
             {
                 if (ctx && ctx->hovered_panel)
@@ -1086,6 +1088,29 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         n->panel_action.panel = ctx->hovered_panel;
                         n->panel_action.tab = at;
                         n->panel_action.delta = (wparam == VK_LEFT) ? -1 : +1;
+                    }
+                    return 0;
+                }
+                /* Tab move to next panel: Ctrl+Shift+N */
+                if (wparam == 'N')
+                {
+                    PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
+                    if (at)
+                    {
+                        /* Find the next leaf panel (skip non-leaves) */
+                        Panel* next_panel = ctx->hovered_panel;
+                        do
+                        {
+                            next_panel = panel_iter_next(next_panel);
+                        } while (next_panel && next_panel->child_a);
+                        if (next_panel)
+                        {
+                            CmdNode* n = cmd_push(shared, CMD_TAB_MOVE_TO_PANEL);
+                            n->panel_action.target = ctx;
+                            n->panel_action.panel = ctx->hovered_panel;
+                            n->panel_action.to_panel = next_panel;
+                            n->panel_action.tab = at;
+                        }
                     }
                     return 0;
                 }

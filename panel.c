@@ -228,6 +228,49 @@ void panel_tab_move(Panel* panel, PanelTab* tab, const i32 delta)
     }
 }
 
+void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to)
+{
+    if (!from || !tab || !to || from == to)
+        return;
+
+    /* Verify tab belongs to 'from' */
+    PanelTab** prev = &from->tab_first;
+    b32 found = False;
+    while (*prev)
+    {
+        if (*prev == tab)
+        {
+            found = True;
+            break;
+        }
+        prev = &(*prev)->next;
+    }
+    if (!found)
+        return;
+
+    /* Unlink from source panel */
+    *prev = tab->next;
+    panel_tab_list_refresh_last(from);
+    tab->next = NULL;
+    if (from->active_tab == tab)
+        from->active_tab = tab->next ? tab->next : from->tab_first;
+
+    /* Append to destination panel's tab list */
+    if (!to->tab_last)
+    {
+        to->tab_first = tab;
+        to->tab_last = tab;
+    }
+    else
+    {
+        to->tab_last->next = tab;
+        to->tab_last = tab;
+    }
+
+    /* Activate the moved tab in the destination */
+    to->active_tab = tab;
+}
+
 void panel_tabs_cleanup(Panel* panel)
 {
     /* Remove undeclared tabs */

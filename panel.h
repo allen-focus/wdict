@@ -61,6 +61,7 @@ PanelTab* panel_tab_get_active(Panel* panel);
 void panel_tab_activate(Panel* panel, PanelTab* tab);
 void panel_tab_close(Panel* panel, PanelTab* tab);
 void panel_tab_move(Panel* panel, PanelTab* tab, i32 delta);
+void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to);
 void panel_tabs_cleanup(Panel* panel);
 void panel_tab_generate_default_name(const Panel* panel, u8* buf, isize buf_size, isize* out_len);
 Panel* panel_update_animations(Panel* root, f64 now);
