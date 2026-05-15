@@ -3,12 +3,14 @@
 
 #include "glyph_cache.h"
 #include "palette.h"
+#include "panel.h"
 #include "renderer.h"
 #include "ui.h"
 #include "utils.h"
 #include "win32_helper.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <wchar.h>
 #include <windows.h>
 #include <windowsx.h>
@@ -25,6 +27,10 @@
 #define MAX_WINDOWS      16
 #define CMD_ARENA_SIZE   KB(64)
 
+#define PANEL_BOUNDARY_WIDTH 8.0f
+#define PANEL_PCT_MIN        0.05f
+#define PANEL_PCT_MAX        0.95f
+
 typedef enum
 {
     CMD_NONE,
@@ -32,6 +38,9 @@ typedef enum
     CMD_SET_WINDOW_TITLE,
     CMD_TOGGLE_CHECK,
     CMD_TOGGLE_THEME,
+    CMD_SPLIT_PANEL_H,
+    CMD_SPLIT_PANEL_V,
+    CMD_CLOSE_PANEL,
 } CmdKind;
 
 typedef struct WindowContext WindowContext;
@@ -53,6 +62,11 @@ struct CmdNode
             WindowContext* target;
             String title;
         } set_title;
+        struct
+        {
+            WindowContext* target;
+            Panel* panel;
+        } panel_action;
         b32* toggle_check;
     };
 };
@@ -108,7 +122,7 @@ typedef struct
     Theme theme;
     GlyphRasterCache raster_cache;
     RendererShared renderer_shared;
-    HCURSOR cursors[3];
+    HCURSOR cursors[5];
     WindowContext* first_window;
     WindowContext* last_window;
     Arena cmd_arena;
@@ -126,6 +140,10 @@ struct WindowContext
     AppShared* shared;
     WindowContext* next;
 
+    Panel* root_panel;
+    Panel* hovered_panel;
+
+    /* widget needed */
     b32 check;
 
     u8 text_buf_1[TEXT_BUFFER_SIZE];
@@ -288,7 +306,7 @@ static void window_list_remove(AppShared* shared, WindowContext* ctx)
 }
 
 static void process_frame(WindowContext* ctx);
-static WindowContext* window_create(AppShared* shared, const wchar_t* title, u32 width, u32 height)
+static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32 width, u32 height)
 {
     WindowContext* ctx = (WindowContext*)malloc(sizeof(WindowContext));
     if (!ctx)
@@ -341,6 +359,10 @@ static WindowContext* window_create(AppShared* shared, const wchar_t* title, u32
     /* Add to window list */
     window_list_add(shared, ctx);
 
+    /* Init per-window root panel */
+    ctx->root_panel = (Panel*)calloc(1, sizeof(*ctx->root_panel));
+    ctx->root_panel->pct_of_parent = 1.0f;
+
     /* Render first frames to rasterize glyphs, then show */
     process_frame(ctx);
     process_frame(ctx);
@@ -382,7 +404,7 @@ static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
         switch (n->kind)
         {
             case CMD_CREATE_WINDOW:
-                window_create(shared, L"Window", n->create_win.width, n->create_win.height);
+                create_window(shared, L"Window", n->create_win.width, n->create_win.height);
                 break;
             case CMD_SET_WINDOW_TITLE:
                 set_window_title(n->set_title.target, n->set_title.title);
@@ -393,11 +415,104 @@ static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
             case CMD_TOGGLE_THEME:
                 shared->theme = (shared->theme.bg_base.r == s_theme_dark.bg_base.r) ? s_theme_light : s_theme_dark;
                 break;
+            case CMD_SPLIT_PANEL_H:
+                if (n->panel_action.target && n->panel_action.panel)
+                    panel_split(n->panel_action.panel, Axis2_X);
+                break;
+            case CMD_SPLIT_PANEL_V:
+                if (n->panel_action.target && n->panel_action.panel)
+                    panel_split(n->panel_action.panel, Axis2_Y);
+                break;
+            case CMD_CLOSE_PANEL:
+                if (n->panel_action.target && n->panel_action.panel)
+                {
+                    Panel* old_parent = n->panel_action.panel->parent;
+                    Panel* survivor = panel_remove(n->panel_action.panel);
+                    if (old_parent == ctx->root_panel)
+                        ctx->root_panel = survivor;
+                }
+                break;
             default:
                 break;
         }
     }
     arena_pop_to(&shared->cmd_arena, 0);
+}
+
+//
+// Panel rendering helpers
+//
+
+static void panel_render_boundary(const Panel* panel, const Rect panel_rect)
+{
+    Assert(panel->child_a);
+    Assert(panel->child_b);
+
+    Panel* child_a = panel->child_a;
+    Panel* child_b = panel->child_b;
+
+    Rect child_a_rect = panel_calc_rect_from_parent(child_a, panel_rect);
+    f32 half_boundary = PANEL_BOUNDARY_WIDTH * 0.5f;
+    Position bound_pos;
+    f32 bound_w, bound_h;
+    if (panel->split_axis == Axis2_X)
+    {
+        bound_pos.x = child_a_rect.xmax - half_boundary;
+        bound_pos.y = child_a_rect.ymin;
+        bound_w = PANEL_BOUNDARY_WIDTH;
+        bound_h = child_a_rect.ymax - child_a_rect.ymin;
+    }
+    else
+    {
+        bound_pos.x = child_a_rect.xmin;
+        bound_pos.y = child_a_rect.ymax - half_boundary;
+        bound_w = child_a_rect.xmax - child_a_rect.xmin;
+        bound_h = PANEL_BOUNDARY_WIDTH;
+    }
+
+    ui_box({
+        .sizing = { fixed(bound_w), fixed(bound_h) },
+        .flags = BoxFlag_Float,
+        .float_offset = bound_pos,
+    })
+    {
+        u8 key_buf[HASH_STR_MAX_LENGTH];
+        i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_bound_%p", (void*)panel);
+        String key = { key_buf, key_len };
+
+        UIBoxInteractResult result = ui_box_interact(box, key);
+        UISignalFlags flags = result.flags;
+        if (ui_hovered(flags))
+        {
+            Cursor cur = (panel->split_axis == Axis2_X) ? UI_CURSOR_HORIZONTAL : UI_CURSOR_VERTICAL;
+            ui_set_desired_cursor(cur);
+        }
+        if (ui_lclicked(flags))
+        {
+            child_a->drag_saved_pct = child_a->pct_of_parent;
+            child_a->drag_saved_partner_pct = child_b->pct_of_parent;
+        }
+        if (ui_dragging(flags))
+        {
+            Position delta = ui_box_drag_delta(result.last_box);
+            f32 parent_dim = (panel->split_axis == Axis2_X) ? (panel_rect.xmax - panel_rect.xmin)
+                                                            : (panel_rect.ymax - panel_rect.ymin);
+            f32 dp = (panel->split_axis == Axis2_X ? delta.x : delta.y) / parent_dim;
+            child_a->pct_of_parent = clamp(child_a->drag_saved_pct + dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
+            child_b->pct_of_parent = clamp(child_a->drag_saved_partner_pct - dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
+        }
+    }
+}
+
+static void panel_render_boundaries(const Panel* root, const Rect root_rect)
+{
+    for (const Panel* p = root; p; p = panel_iter_next(p))
+    {
+        if (!p->child_a)
+            continue;
+        Rect panel_rect = panel_calc_rect(p, root_rect);
+        panel_render_boundary(p, panel_rect);
+    }
 }
 
 //
@@ -418,105 +533,122 @@ static void process_frame(WindowContext* ctx)
     cmd_execute_all(shared, ctx);
     isize arena_pos_backup = ui_frame_begin(ui_context);
     {
+        f32 client_w = (f32)ui_context->client_width;
+        f32 client_h = (f32)ui_context->client_height;
+        Rect root_rect = { 0, 0, client_w, client_h };
+        ctx->hovered_panel = NULL;
+
         ui_box({
-            .sizing = { fixed((f32)ui_context->client_width), fixed((f32)ui_context->client_height) },
+            .sizing = { fixed(client_w), fixed(client_h) },
             .color = theme->bg_base,
-            .padding = s_padding_big,
-            .child_gap = s_child_gap_big,
-            .alignment = { ALIGN_CENTER, ALIGN_CENTER },
         })
         {
-            ui_box({
-                .sizing = { fixed(500), fixed(500) },
-                .color = theme->accent,
-                .padding = s_padding_medium,
-            })
+            panel_render_boundaries(ctx->root_panel, root_rect);
+
+            for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
             {
-                ui_scrollable_area({ str("scroll area"), (Sizing){ grow({}), grow({}) }, theme->bg_base,
-                                     s_padding_small, theme->scrollbar_thumb })
+                if (p->child_a)
+                    continue;
+                Rect rect = panel_calc_rect(p, root_rect);
+                f32 pad = 2.0f;
+                Rect inner = { rect.xmin + pad, rect.ymin + pad, rect.xmax - pad, rect.ymax - pad };
+                f32 iw = inner.xmax - inner.xmin;
+                f32 ih = inner.ymax - inner.ymin;
+
+                b32 mouse_in = ui_context->mouse_pos.x >= rect.xmin && ui_context->mouse_pos.x < rect.xmax &&
+                               ui_context->mouse_pos.y >= rect.ymin && ui_context->mouse_pos.y < rect.ymax;
+                if (!ctx->hovered_panel && mouse_in)
+                    ctx->hovered_panel = p;
+
+                ui_box({
+                    .sizing = { fixed(iw), fixed(ih) },
+                    .flags = BoxFlag_Float,
+                    .float_offset = { inner.xmin, inner.ymin },
+                    .color = theme->bg_surface,
+                    .rect_style = { .border_color = theme->border_normal, .border_thickness = 1 },
+                    .padding = s_padding_small,
+                    .child_gap = s_child_gap_small,
+                    .direction = LAYOUT_TOP_TO_BOTTOM,
+                })
                 {
+                    u8 key_buf[HASH_STR_MAX_LENGTH];
+                    i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_%p", (void*)p);
+                    String key = { key_buf, key_len };
 
-                    ui_box({ .sizing = { fixed(1000), fixed(2000) },
-                             .color = theme->bg_surface,
-                             .padding = s_padding_small,
-                             .child_gap = s_child_gap_medium,
-                             .direction = LAYOUT_TOP_TO_BOTTOM })
+                    ui_box_interact(box, key);
+
+                    /* Panel header */
+                    ui_box({
+                        .sizing = { fit_grow({}), fit({}) },
+                        .direction = LAYOUT_LEFT_TO_RIGHT,
+                        .child_gap = s_child_gap_small,
+                    })
                     {
-                        /* text feild */
-                        ui_text_field(&ctx->text_edit_1, str("text##feild"), font_zh, 12, (SizingAxis)fixed(400),
-                                      s_padding_small, theme->bg_overlay, theme->border_focus, theme->fg_primary,
-                                      theme->scrollbar_thumb, theme->cursor_trail, theme->cursor, theme->selection,
-                                      theme->selection_flash);
-                        ui_text_field(&ctx->text_edit_2, str("text##feild2"), font_zh, 12, (SizingAxis)fixed(200),
-                                      s_padding_small, theme->bg_overlay, theme->border_focus, theme->fg_primary,
-                                      theme->scrollbar_thumb, theme->cursor_trail, theme->cursor, theme->selection,
-                                      theme->selection_flash);
-
+                        ui_text(str("Panel"),
+                                &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_secondary });
+                        ui_box({ .sizing = { grow({}), fit({}) } })
                         {
-                            UISignalFlags flags =
-                                ui_button(str("create a new window##new window"), font_mono, 12,
-                                          (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent,
-                                          theme->accent_fg, theme->accent_hover, theme->accent_press);
-                            if (ui_lclicked(flags))
+                        }
+
+                        u8 close_key[HASH_STR_MAX_LENGTH];
+                        i32 close_len = snprintf((char*)close_key, sizeof(close_key), "X##panel_close_%p", (void*)p);
+                        String close_str = { close_key, close_len };
+
+                        UISignalFlags close_flags =
+                            ui_button(close_str, font_ui, 12, (Sizing){ fixed(20), fixed(20) }, (Padding){ 0, 0, 0, 0 },
+                                      theme->danger, theme->accent_fg, theme->danger, theme->danger);
+                        if (ui_lclicked(close_flags))
+                        {
+                            CmdNode* n = cmd_push(shared, CMD_CLOSE_PANEL);
+                            n->panel_action.target = ctx;
+                            n->panel_action.panel = p;
+                        }
+                    }
+
+                    /* Panel content */
+                    u8 sa_key[HASH_STR_MAX_LENGTH];
+                    i32 sa_len = snprintf((char*)sa_key, sizeof(sa_key), "panel_scroll_%p", (void*)p);
+                    ui_scrollable_area({
+                        (String){ sa_key, sa_len },
+                        (Sizing){ grow({}), grow({}) },
+                        theme->bg_base,
+                        s_padding_small,
+                        theme->scrollbar_thumb,
+                    })
+                    {
+                        ui_box({
+                            .sizing = { fixed(400), fit_grow({}) },
+                            .color = theme->bg_surface,
+                            .padding = s_padding_small,
+                            .child_gap = s_child_gap_medium,
+                            .direction = LAYOUT_TOP_TO_BOTTOM,
+                        })
+                        {
+                            ui_text(
+                                str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
+                                &(TextConfig){
+                                    .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
+                            ui_text(str("Ctrl+W closes the panel under the mouse cursor."),
+                                    &(TextConfig){ .font = font_ui,
+                                                   .font_size = 12,
+                                                   .color = theme->fg_secondary,
+                                                   .line_height = 24 });
+
+                            u8 button_key[HASH_STR_MAX_LENGTH];
+                            i32 button_len = snprintf((char*)button_key, sizeof(button_key),
+                                                      "New Window##panel_button_%p", (void*)p);
+                            String button_str = { button_key, button_len };
+
+                            UISignalFlags button_flags =
+                                ui_button(button_str, font_mono, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                          theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
+                            if (ui_lclicked(button_flags))
                             {
                                 CmdNode* n = cmd_push(shared, CMD_CREATE_WINDOW);
                                 n->create_win.width = CLIENT_WIDTH;
                                 n->create_win.height = CLIENT_HEIGHT;
                             }
                         }
-
-                        // clang-format off
-                        /* button */
-                        ui_box({ .sizing = { fit_grow({}), fit({}) }, .child_gap = 5 })
-                        {
-                            UISignalFlags flags = ui_button(str("hello##world"), font_zh, 12,
-                                                            (Sizing){ fit_grow({ .max = 70 }), fit({}) }, s_padding_small,
-                                                            theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
-                            if (ui_hovered(flags))
-                                ui_box({ .sizing = { fixed(30), fit_grow({}) }, .color = theme->danger }) {}
-                            if (ui_lclicked(flags))
-                            {
-                                CmdNode* n = cmd_push(shared, CMD_SET_WINDOW_TITLE);
-                                n->set_title.target = ctx;
-                                n->set_title.title = str("Left Click");
-                            }
-                            if (ui_rclicked(flags))
-                            {
-                                CmdNode* n = cmd_push(shared, CMD_SET_WINDOW_TITLE);
-                                n->set_title.target = ctx;
-                                n->set_title.title = str("Right Click");
-                            }
-                        }
-
-                        /* text */
-                        ui_box({ .sizing = { fixed(400), fit({}) }, .child_gap = 20, .direction = LAYOUT_TOP_TO_BOTTOM })
-                        {
-                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("Dream of the Red Chamber has a complicated textual history that scholars have long debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was a member of a prominent Chinese family that had served the Manchu emperors of the Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, and he may have written drafts of the remaining chapters. These hand-copied manuscripts circulated first among his personal friends and a growing circle of aficionados, then eventually on the open market where they sold for large sums of money."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("The first printed version of Dream of the Red Chamber, published by Cheng Weiyuan and Gao E in 1791, contains edits and revisions that Cao never authorized. It is possible that Cao destroyed the last chapters or that at least parts of Cao's original ending were incorporated into the 120 chapter Cheng-Gao versions, with Gao E's \"careful emendations\" of Cao's draft."), &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                        }
-
-                        /* switch box */
-                        UISignalFlags flags = ui_switchbox(
-                            str("switch box"),
-                            font_symbol,
-                            &ctx->check,
-                            theme->border_normal,
-                            theme->accent_fg,
-                            theme->shadow,
-                            theme->accent
-                        );
-                        if (ui_lclicked(flags))
-                        {
-                            CmdNode* n = cmd_push(shared, CMD_TOGGLE_CHECK);
-                            n->toggle_check = &ctx->check;
-                        }
-                        if (ctx->check)
-                            ui_box({ .sizing = { fit_grow({}), fixed(50) }, .color = theme->success }) {}
-                        // clang-format on
                     }
                 }
             }
@@ -727,8 +859,39 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 return 0;
             }
 
-            TextAction action = { 0 };
             b32 shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if (wparam == 'H' && ctrl && shift)
+            {
+                if (ctx && ctx->hovered_panel)
+                {
+                    CmdNode* n = cmd_push(shared, CMD_SPLIT_PANEL_H);
+                    n->panel_action.target = ctx;
+                    n->panel_action.panel = ctx->hovered_panel;
+                }
+                return 0;
+            }
+            if (wparam == 'V' && ctrl && shift)
+            {
+                if (ctx && ctx->hovered_panel)
+                {
+                    CmdNode* n = cmd_push(shared, CMD_SPLIT_PANEL_V);
+                    n->panel_action.target = ctx;
+                    n->panel_action.panel = ctx->hovered_panel;
+                }
+                return 0;
+            }
+            if (wparam == 'W' && ctrl)
+            {
+                if (ctx && ctx->hovered_panel && ctx->hovered_panel->parent)
+                {
+                    CmdNode* n = cmd_push(shared, CMD_CLOSE_PANEL);
+                    n->panel_action.target = ctx;
+                    n->panel_action.panel = ctx->hovered_panel;
+                }
+                return 0;
+            }
+
+            TextAction action = { 0 };
             if (ctrl)
                 action.flags |= TextActionFlag_WordScan;
             if (shift)
@@ -850,6 +1013,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 SetWindowLongPtrW(window, GWLP_USERDATA, 0);
 
                 window_list_remove(shared, ctx);
+                panel_free_tree(ctx->root_panel);
                 ui_deinit(&ctx->ui);
                 renderer_deinit(&ctx->renderer);
                 free(ctx);
@@ -883,6 +1047,8 @@ i32 WinMainCRTStartup()
     shared.cursors[UI_CURSOR_ARROW] = LoadCursor(NULL, IDC_ARROW);
     shared.cursors[UI_CURSOR_IBEAM] = LoadCursor(NULL, IDC_IBEAM);
     shared.cursors[UI_CURSOR_HAND] = LoadCursor(NULL, IDC_HAND);
+    shared.cursors[UI_CURSOR_HORIZONTAL] = LoadCursor(NULL, IDC_SIZEWE);
+    shared.cursors[UI_CURSOR_VERTICAL] = LoadCursor(NULL, IDC_SIZENS);
 
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -915,7 +1081,7 @@ i32 WinMainCRTStartup()
                                 &shared.fonts[FONT_INDEX_ICON]);
 
     /* Create first window */
-    window_create(&shared, L"App Title", CLIENT_WIDTH, CLIENT_HEIGHT);
+    create_window(&shared, L"App Title", CLIENT_WIDTH, CLIENT_HEIGHT);
 
     /* Run message loop */
     MSG message;

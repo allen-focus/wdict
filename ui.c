@@ -141,12 +141,12 @@ static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
     switch (lru_result.signal)
     {
         case LRU_SIGNAL_FOUND:
-            // // Detect duplicate box key
-            // if (g_ui_context->frame_index != 0)
-            //     if (last_box->last_frame_index == g_ui_context->frame_index)
-            //         Assert(0);
             last_box =
                 (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
+            // Detect duplicate box key
+            if (g_ui_context->frame_index != 0)
+                if (last_box->last_frame_index == g_ui_context->frame_index)
+                    Assert(0);
             break;
         case LRU_SIGNAL_TOINSERT:
             last_box =
@@ -1036,18 +1036,22 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
         if (g_ui_context->mouse_double_click)
             *flags |= UI_Signal_Flag_DoubleClicked;
 
-        /* Drag: record mouse anchor on press, signal Dragging when mouse moves while held */
+        /* Drag: record mouse anchor on press (must be over the box to start drag) */
         if (g_ui_context->mouse_lclick)
             box->drag_mouse_anchor = g_ui_context->mouse_pos;
-        if (g_ui_context->mouse_press && has_mouse_anchor)
-        {
-            Position delta = {
-                g_ui_context->mouse_pos.x - box->drag_mouse_anchor.x,
-                g_ui_context->mouse_pos.y - box->drag_mouse_anchor.y,
-            };
-            if (delta.x != 0.f || delta.y != 0.f)
-                *flags |= UI_Signal_Flag_Dragging;
-        }
+    }
+
+    /* Drag: signal Dragging when mouse moves while held, even outside the box.
+       The drag anchor was set on press (when the mouse was over the box),
+       so drag continues from that anchor until mouse release. */
+    if (g_ui_context->mouse_press && has_mouse_anchor)
+    {
+        Position delta = {
+            g_ui_context->mouse_pos.x - box->drag_mouse_anchor.x,
+            g_ui_context->mouse_pos.y - box->drag_mouse_anchor.y,
+        };
+        if (delta.x != 0.f || delta.y != 0.f)
+            *flags |= UI_Signal_Flag_Dragging;
     }
 }
 
@@ -1238,8 +1242,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     f32 scroll_max_delta                   = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
     f32* scroll_delta                      = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
     TimedLerpAnimation* scroll_anim        = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
-    f32* ctx_drag_scroll_anchor            = is_horizontal ? &last_area->drag_scroll_anchor.x               : &last_area->drag_scroll_anchor.y;
-    BoxKey* ctx_last_thumb_key             = is_horizontal ? &last_area->pressed_thumb_x_key                : &last_area->pressed_thumb_y_key;
+    f32* area_drag_scroll_anchor           = is_horizontal ? &last_area->drag_scroll_anchor.x               : &last_area->drag_scroll_anchor.y;
     // clang-format on
 
     /* Transition-related variables */
@@ -1264,43 +1267,25 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     /* [THUMB] Handle interaction and transition */
     if (last_thumb)
     {
-        f32* ctx_thumb_mouse_anchor =
-            is_horizontal ? &last_thumb->drag_mouse_anchor.x : &last_thumb->drag_mouse_anchor.y;
-        String last_pressed_scroll_thumb_hash_str = { ctx_last_thumb_key->str, ctx_last_thumb_key->len };
         update_interaction_flags(last_thumb, &thumb_flags);
-
-        if (str_compare(last_pressed_scroll_thumb_hash_str, thumb_hash_str))
-        {
-            if (g_ui_context->mouse_press)
-            {
-                /* Mark as pressed if this thumb was being dragged even if not hovering */
-                thumb_flags |= UI_Signal_Flag_Pressed;
-            }
-            else if (ui_released(thumb_flags))
-            {
-                /* Reset cached active scroll state */
-                ctx_last_thumb_key->len = 0;
-                *ctx_drag_scroll_anchor = 0;
-            }
-        }
+        f32* drag_mouse_anchor = is_horizontal ? &last_thumb->drag_mouse_anchor.x : &last_thumb->drag_mouse_anchor.y;
 
         /* Handle transition */
-        if (ui_pressed(thumb_flags) || (ui_hovered(thumb_flags) && last_thumb->active_t == 1.f))
+        if (ui_pressed(thumb_flags) || ui_dragging(thumb_flags) ||
+            (ui_hovered(thumb_flags) && last_thumb->active_t == 1.f))
         {
             if (ui_lclicked(thumb_flags))
             {
                 last_thumb->anim_state = TRANSITION_FORWARD;
                 last_thumb->hot_t = SCROLLBAR_THUMB_OPACITY_HOVER;
-
-                *ctx_drag_scroll_anchor = *scroll_delta;
+                *area_drag_scroll_anchor = *scroll_delta;
             }
-            if (ui_pressed(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
+            if (ui_dragging(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
             {
-                if (ui_pressed(thumb_flags) && *ctx_thumb_mouse_anchor)
+                if (ui_dragging(thumb_flags))
                 {
-                    *ctx_last_thumb_key = generate_box_key(thumb_hash_str);
-                    f32 mouse_drag_delta = mouse_pos - *ctx_thumb_mouse_anchor;
-                    f32 target = *ctx_drag_scroll_anchor + mouse_drag_delta * thumb_delta_scale;
+                    f32 mouse_drag_delta = mouse_pos - *drag_mouse_anchor;
+                    f32 target = *area_drag_scroll_anchor + mouse_drag_delta * thumb_delta_scale;
                     *scroll_delta = clamp(target, 0.f, scroll_max_delta);
                     start_timed_lerp(scroll_anim, *scroll_delta, *scroll_delta, g_ui_context->current_time, 0.f);
                 }
@@ -1358,7 +1343,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
             ui_set_desired_cursor(UI_CURSOR_ARROW);
 
         /* Expand scrollbar (track & thumb) with a fade-out transition when mouse hovers over it */
-        if (ui_pressed(thumb_flags) || ui_hovered(bar_flags))
+        if (ui_dragging(thumb_flags) || ui_hovered(bar_flags))
         {
             scroll_ctx.last_area->idle_timer = 0.f; // to suppress thumb auto-hide transition
             last_bar->anim_state = TRANSITION_FORWARD;
@@ -1629,8 +1614,8 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                 if (update_transition(&result.last_box->active_t, 24.f, 0.f))
                     result.last_box->anim_state = TRANSITION_IDLE;
             }
-            bg_color_transition =
-                lerp_color(ui_hovered(result.flags) ? bg_color_hover : bg_color, bg_color_press, result.last_box->active_t);
+            bg_color_transition = lerp_color(ui_hovered(result.flags) ? bg_color_hover : bg_color, bg_color_press,
+                                             result.last_box->active_t);
         }
     }
 

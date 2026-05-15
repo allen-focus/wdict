@@ -305,10 +305,6 @@ struct UIBox
     TimedLerpAnimation scroll_anim_x;
     TimedLerpAnimation scroll_anim_y;
 
-    // scrollbar thumb drag state (lives in scroll area box so it dies with the area)
-    BoxKey pressed_thumb_x_key;
-    BoxKey pressed_thumb_y_key;
-
     // Scroll-value anchor: recorded when thumb press starts.
     // Used by: scrollbar drag formula  new_scroll = anchor + mouse_delta * scale
     Position drag_scroll_anchor;
