@@ -271,6 +271,49 @@ void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to)
     to->active_tab = tab;
 }
 
+Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, const Axis2 axis)
+{
+    if (!from || !tab || !anchor || anchor->child_a)
+        return NULL;
+
+    /* Find and remove tab from source panel */
+    PanelTab** prev = &from->tab_first;
+    b32 found = False;
+    while (*prev)
+    {
+        if (*prev == tab)
+        {
+            found = True;
+            break;
+        }
+        prev = &(*prev)->next;
+    }
+    if (!found)
+        return NULL;
+
+    *prev = tab->next;
+    panel_tab_list_refresh_last(from);
+    tab->next = NULL;
+    if (from->active_tab == tab)
+        from->active_tab = tab->next ? tab->next : from->tab_first;
+
+    /* Split the anchor panel; child_a inherits anchor's tabs, child_b gets a default */
+    if (!panel_split(anchor, axis))
+        return NULL;
+
+    /* child_b is the newly created second child */
+    Panel* child_b = anchor->child_b;
+
+    /* Free child_b's auto-generated default tab and replace with the moved tab */
+    panel_tab_close(child_b, child_b->tab_first);
+
+    child_b->tab_first = tab;
+    child_b->tab_last = tab;
+    child_b->active_tab = tab;
+
+    return child_b;
+}
+
 void panel_tabs_cleanup(Panel* panel)
 {
     /* Remove undeclared tabs */

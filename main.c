@@ -45,6 +45,7 @@ typedef enum
     CMD_TAB_CLOSE,
     CMD_TAB_MOVE,
     CMD_TAB_MOVE_TO_PANEL,
+    CMD_TAB_TO_NEW_PANEL,
 } CmdKind;
 
 typedef struct WindowContext WindowContext;
@@ -73,6 +74,7 @@ struct CmdNode
             Panel* to_panel;
             PanelTab* tab;
             i32 delta;
+            Axis2 axis;
         } panel_action;
         b32* toggle_check;
     };
@@ -481,6 +483,11 @@ static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
             case CMD_TAB_MOVE_TO_PANEL:
                 if (n->panel_action.target && n->panel_action.panel && n->panel_action.to_panel && n->panel_action.tab)
                     panel_tab_move_to_panel(n->panel_action.panel, n->panel_action.tab, n->panel_action.to_panel);
+                break;
+            case CMD_TAB_TO_NEW_PANEL:
+                if (n->panel_action.target && n->panel_action.panel && n->panel_action.to_panel && n->panel_action.tab)
+                    panel_tab_to_new_panel(n->panel_action.panel, n->panel_action.tab, n->panel_action.to_panel,
+                                           n->panel_action.axis);
                 break;
             default:
                 break;
@@ -1111,6 +1118,21 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                             n->panel_action.to_panel = next_panel;
                             n->panel_action.tab = at;
                         }
+                    }
+                    return 0;
+                }
+                /* Turn tab into new panel: Ctrl+Shift+T (horizontal) / Ctrl+Shift+G (vertical) */
+                if (wparam == 'F' || wparam == 'G')
+                {
+                    PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
+                    if (at && ctx->hovered_panel)
+                    {
+                        CmdNode* n = cmd_push(shared, CMD_TAB_TO_NEW_PANEL);
+                        n->panel_action.target = ctx;
+                        n->panel_action.panel = ctx->hovered_panel;
+                        n->panel_action.to_panel = ctx->hovered_panel;
+                        n->panel_action.tab = at;
+                        n->panel_action.axis = (wparam == 'F') ? Axis2_X : Axis2_Y;
                     }
                     return 0;
                 }
