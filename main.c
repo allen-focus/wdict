@@ -27,9 +27,9 @@
 #define MAX_WINDOWS      16
 #define CMD_ARENA_SIZE   KB(64)
 
-#define PANEL_BOUNDARY_WIDTH 8.0f
-#define PANEL_PCT_MIN        0.05f
-#define PANEL_PCT_MAX        0.95f
+#define PANEL_BOUNDARY 3.0f
+#define PANEL_PCT_MIN  0.05f
+#define PANEL_PCT_MAX  0.95f
 
 typedef enum
 {
@@ -92,6 +92,7 @@ typedef struct
 
     Color border_normal;
     Color border_focus;
+    Color border_press;
 
     Color accent;
     Color accent_hover;
@@ -170,6 +171,7 @@ static const Theme s_theme_light = {
 
     .border_normal   = { LIGHT_4,  255 },
     .border_focus    = { BLUE_3,   255 },
+    .border_press    = { BLUE_5,   255 },
 
     .accent          = { BLUE_2,   255 },
     .accent_hover    = { BLUE_3,   255 },
@@ -202,6 +204,7 @@ static const Theme s_theme_dark = {
 
     .border_normal   = { DARK_2,   255 },
     .border_focus    = { BLUE_2,   255 },
+    .border_press    = { BLUE_4,   255 },
 
     .accent          = { BLUE_2,   255 },
     .accent_hover    = { BLUE_3,   255 },
@@ -443,7 +446,7 @@ static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
 // Panel rendering helpers
 //
 
-static void panel_render_boundary(const Panel* panel, const Rect panel_rect)
+static void panel_render_boundary(const Panel* panel, const Rect panel_rect, const Theme* theme)
 {
     Assert(panel->child_a);
     Assert(panel->child_b);
@@ -452,34 +455,33 @@ static void panel_render_boundary(const Panel* panel, const Rect panel_rect)
     Panel* child_b = panel->child_b;
 
     Rect child_a_rect = panel_calc_rect_from_parent(child_a, panel_rect);
-    f32 half_boundary = PANEL_BOUNDARY_WIDTH * 0.5f;
     Position bound_pos;
     f32 bound_w, bound_h;
     if (panel->split_axis == Axis2_X)
     {
-        bound_pos.x = child_a_rect.xmax - half_boundary;
+        bound_pos.x = child_a_rect.xmax - (PANEL_BOUNDARY / 2);
         bound_pos.y = child_a_rect.ymin;
-        bound_w = PANEL_BOUNDARY_WIDTH;
+        bound_w = PANEL_BOUNDARY;
         bound_h = child_a_rect.ymax - child_a_rect.ymin;
     }
     else
     {
         bound_pos.x = child_a_rect.xmin;
-        bound_pos.y = child_a_rect.ymax - half_boundary;
+        bound_pos.y = child_a_rect.ymax - (PANEL_BOUNDARY / 2);
         bound_w = child_a_rect.xmax - child_a_rect.xmin;
-        bound_h = PANEL_BOUNDARY_WIDTH;
+        bound_h = PANEL_BOUNDARY;
     }
 
-    ui_box({
-        .sizing = { fixed(bound_w), fixed(bound_h) },
-        .flags = BoxFlag_Float,
-        .float_offset = bound_pos,
-    })
+    ui_box({ .sizing = { fixed(bound_w), fixed(bound_h) },
+             .flags = BoxFlag_Float,
+             .float_offset = bound_pos,
+             .direction = (panel->split_axis == Axis2_X) ? LAYOUT_LEFT_TO_RIGHT : LAYOUT_TOP_TO_BOTTOM })
     {
         u8 key_buf[HASH_STR_MAX_LENGTH];
         i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_bound_%p", (void*)panel);
         String key = { key_buf, key_len };
 
+        /* Handle interaction */
         UIBoxInteractResult result = ui_box_interact(box, key);
         UISignalFlags flags = result.flags;
         if (ui_hovered(flags))
@@ -501,17 +503,46 @@ static void panel_render_boundary(const Panel* panel, const Rect panel_rect)
             child_a->pct_of_parent = clamp(child_a->drag_saved_pct + dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
             child_b->pct_of_parent = clamp(child_a->drag_saved_partner_pct - dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
         }
+
+        /* Handle transition */
+        if (result.last_box)
+        {
+            update_transition(&result.last_box->hot_t, 20.f, ui_hovered(flags) ? 1.f : 0.f);
+            update_transition(&result.last_box->active_t, 20.f, ui_dragging(flags) || ui_pressed(flags) ? 1.f : 0.f);
+        }
+        f32 hot_t = result.last_box ? result.last_box->hot_t : 0.f;
+        f32 active_t = result.last_box ? result.last_box->active_t : 0.f;
+        Color pad_color = lerp_color((Color){ 0, 0, 0, 0 }, theme->border_focus, hot_t);
+        Color line_color = lerp_color(theme->border_normal, theme->border_focus, hot_t);
+        pad_color = lerp_color(pad_color, theme->border_press, active_t);
+        line_color = lerp_color(line_color, theme->border_press, active_t);
+
+        /* Draw split line */
+        // clang-format off
+        if (panel->split_axis == Axis2_X)
+        {
+            ui_box({ .sizing = { fixed(PANEL_BOUNDARY / 3), fixed(bound_h) }, .color = pad_color }) { }
+            ui_box({ .sizing = { fixed(PANEL_BOUNDARY / 3), fixed(bound_h) }, .color = line_color }) { }
+            ui_box({ .sizing = { fixed(PANEL_BOUNDARY / 3), fixed(bound_h) }, .color = pad_color }) { }
+        }
+        else
+        {
+            ui_box({ .sizing = { fixed(bound_w), fixed(PANEL_BOUNDARY / 3) }, .color = pad_color }) { }
+            ui_box({ .sizing = { fixed(bound_w), fixed(PANEL_BOUNDARY / 3) }, .color = line_color }) { }
+            ui_box({ .sizing = { fixed(bound_w), fixed(PANEL_BOUNDARY / 3) }, .color = pad_color }) { }
+        }
+        // clang-format on
     }
 }
 
-static void panel_render_boundaries(const Panel* root, const Rect root_rect)
+static void panel_render_boundaries(const Panel* root, const Rect root_rect, const Theme* theme)
 {
     for (const Panel* p = root; p; p = panel_iter_next(p))
     {
         if (!p->child_a)
             continue;
         Rect panel_rect = panel_calc_rect(p, root_rect);
-        panel_render_boundary(p, panel_rect);
+        panel_render_boundary(p, panel_rect, theme);
     }
 }
 
@@ -543,7 +574,7 @@ static void process_frame(WindowContext* ctx)
             .color = theme->bg_base,
         })
         {
-            panel_render_boundaries(ctx->root_panel, root_rect);
+            panel_render_boundaries(ctx->root_panel, root_rect, theme);
 
             for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
             {
@@ -565,8 +596,6 @@ static void process_frame(WindowContext* ctx)
                     .flags = BoxFlag_Float,
                     .float_offset = { inner.xmin, inner.ymin },
                     .color = theme->bg_surface,
-                    .rect_style = { .border_color = theme->border_normal, .border_thickness = 1 },
-                    .padding = s_padding_small,
                     .child_gap = s_child_gap_small,
                     .direction = LAYOUT_TOP_TO_BOTTOM,
                 })
@@ -1098,9 +1127,7 @@ i32 WinMainCRTStartup()
 
         TracyCFrameMark;
         for (WindowContext* w = shared.first_window; w; w = w->next)
-        {
             process_frame(w);
-        }
     }
 
     /* Clean up remaining windows */

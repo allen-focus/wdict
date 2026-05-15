@@ -1091,7 +1091,7 @@ static f32 lerp_f32(f32 a, f32 b, f32 t)
     return a + (b - a) * t;
 }
 
-static Color lerp_color(const Color a, const Color b, const f32 t)
+Color lerp_color(const Color a, const Color b, const f32 t)
 {
     Color c = {
         .r = lerp_u8(a.r, b.r, t), .g = lerp_u8(a.g, b.g, t), .b = lerp_u8(a.b, b.b, t), .a = lerp_u8(a.a, b.a, t)
@@ -1104,7 +1104,7 @@ static void approach_f32(f32* value, const f32 target, const f32 speed)
     *value += (target - *value) * min(speed * g_ui_context->frame_delta_time, 1.f);
 }
 
-static b32 update_transition(f32* transition, const f32 speed, const f32 target)
+b32 update_transition(f32* transition, const f32 speed, const f32 target)
 {
     Assert(target >= 0.f && target <= 1.f);
 

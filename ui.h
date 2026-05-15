@@ -500,6 +500,9 @@ typedef struct
 
 extern UIContext* g_ui_context;
 
+Color lerp_color(const Color a, const Color b, const f32 t);
+b32 update_transition(f32* transition, const f32 speed, const f32 target);
+
 ///
 
 void ui_init(const HWND window, UIContext* ui_context, struct Renderer* renderer, GlyphRasterCache* raster_cache,
