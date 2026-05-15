@@ -181,7 +181,7 @@ typedef struct
     isize len;
 } String;
 
-String str_clone(Arena* arena, String s);
+String str_clone(Arena* arena, const String s);
 String str_slice(String s, const isize start, const isize end);
 b32 str_compare(const String a, const String b);
 String str_concat(Arena* arena, const String a, const String b);

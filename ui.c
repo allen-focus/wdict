@@ -86,8 +86,7 @@ static TextHash extract_hash_str(const String* text)
                 if (text->data[i + 1] == '#')
                 {
                     // Init display string
-                    text_hash.display_str.data = text->data;
-                    text_hash.display_str.len = i;
+                    text_hash.display_str = str_clone(&g_ui_context->arena, (String){ text->data, i });
 
                     if (text->len > i + 2)
                         if (text->data[i + 2] == '#')

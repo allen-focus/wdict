@@ -248,7 +248,7 @@ void slice_grow(Arena* arena, void* slice, const isize size)
 // string
 //
 
-String str_clone(Arena* arena, String s)
+String str_clone(Arena* arena, const String s)
 {
     String s_clone = { .data = (u8*)arena_push(arena, sizeof(u8), _Alignof(u8), s.len), .len = s.len };
     Assert(s_clone.data);
