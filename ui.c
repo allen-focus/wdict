@@ -262,6 +262,7 @@ UIBox* ui_box_start(const BoxConfig* config)
     box->flags = config->flags;
     box->size.width = config->sizing.width.mode == SIZING_MODE_FIXED ? config->sizing.width.min_max.min : 0;
     box->size.height = config->sizing.height.mode == SIZING_MODE_FIXED ? config->sizing.height.min_max.min : 0;
+    Assert(box->size.width >= 0.f && box->size.height >= 0.f);
     if (axis_has_grow_attribute(config->sizing.width.mode) && config->sizing.width.min_max.max == 0)
         box->config.sizing.width.min_max.max = INFINITY;
     if (axis_has_grow_attribute(config->sizing.height.mode) && config->sizing.height.min_max.max == 0)

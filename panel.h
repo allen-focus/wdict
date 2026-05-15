@@ -8,6 +8,13 @@ typedef enum
     Axis2_Y,
 } Axis2;
 
+typedef enum
+{
+    PANEL_ANIM_NONE = 0,
+    PANEL_ANIM_CLOSING,
+    PANEL_ANIM_OPENING,
+} PanelAnimState;
+
 typedef struct Panel Panel;
 struct Panel
 {
@@ -20,6 +27,11 @@ struct Panel
     Axis2 split_axis;
     f32 drag_saved_pct;
     f32 drag_saved_partner_pct;
+
+    PanelAnimState anim_state;
+    f32 anim_from_pct;
+    f32 anim_to_pct;
+    f64 anim_started_at;
 };
 
 Panel* panel_iter_next(const Panel* panel);
@@ -28,3 +40,4 @@ Rect panel_calc_rect_from_parent(const Panel* child, const Rect parent_rect);
 Panel* panel_split(Panel* panel, const Axis2 axis);
 Panel* panel_remove(Panel* panel);
 void panel_free_tree(Panel* root);
+Panel* panel_update_animations(Panel* root, f64 now);

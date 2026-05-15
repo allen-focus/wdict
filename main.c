@@ -429,10 +429,8 @@ static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
             case CMD_CLOSE_PANEL:
                 if (n->panel_action.target && n->panel_action.panel)
                 {
-                    Panel* old_parent = n->panel_action.panel->parent;
-                    Panel* survivor = panel_remove(n->panel_action.panel);
-                    if (old_parent == ctx->root_panel)
-                        ctx->root_panel = survivor;
+                    n->panel_action.panel->anim_state = PANEL_ANIM_CLOSING;
+                    n->panel_action.panel->anim_to_pct = 0.0f;
                 }
                 break;
             default:
@@ -564,6 +562,7 @@ static void process_frame(WindowContext* ctx)
     cmd_execute_all(shared, ctx);
     isize arena_pos_backup = ui_frame_begin(ui_context);
     {
+        ctx->root_panel = panel_update_animations(ctx->root_panel, g_ui_context->current_time);
         f32 client_w = (f32)ui_context->client_width;
         f32 client_h = (f32)ui_context->client_height;
         Rect root_rect = { 0, 0, client_w, client_h };
@@ -583,8 +582,10 @@ static void process_frame(WindowContext* ctx)
                 Rect rect = panel_calc_rect(p, root_rect);
                 f32 pad = 2.0f;
                 Rect inner = { rect.xmin + pad, rect.ymin + pad, rect.xmax - pad, rect.ymax - pad };
-                f32 iw = inner.xmax - inner.xmin;
-                f32 ih = inner.ymax - inner.ymin;
+                f32 iw = max(0.0f, inner.xmax - inner.xmin);
+                f32 ih = max(0.0f, inner.ymax - inner.ymin);
+                if (iw < 1.0f || ih < 1.0f)
+                    continue;
 
                 b32 mouse_in = ui_context->mouse_pos.x >= rect.xmin && ui_context->mouse_pos.x < rect.xmax &&
                                ui_context->mouse_pos.y >= rect.ymin && ui_context->mouse_pos.y < rect.ymax;
@@ -626,7 +627,7 @@ static void process_frame(WindowContext* ctx)
                         UISignalFlags close_flags =
                             ui_button(close_str, font_ui, 12, (Sizing){ fixed(20), fixed(20) }, (Padding){ 0, 0, 0, 0 },
                                       theme->danger, theme->accent_fg, theme->danger, theme->danger);
-                        if (ui_lclicked(close_flags))
+                        if (p->parent && ui_lclicked(close_flags))
                         {
                             CmdNode* n = cmd_push(shared, CMD_CLOSE_PANEL);
                             n->panel_action.target = ctx;
