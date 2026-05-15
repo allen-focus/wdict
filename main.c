@@ -41,6 +41,8 @@ typedef enum
     CMD_SPLIT_PANEL_H,
     CMD_SPLIT_PANEL_V,
     CMD_CLOSE_PANEL,
+    CMD_TAB_NEW,
+    CMD_TAB_CLOSE,
 } CmdKind;
 
 typedef struct WindowContext WindowContext;
@@ -66,6 +68,7 @@ struct CmdNode
         {
             WindowContext* target;
             Panel* panel;
+            PanelTab* tab;
         } panel_action;
         b32* toggle_check;
     };
@@ -365,6 +368,12 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32
     /* Init per-window root panel */
     ctx->root_panel = (Panel*)calloc(1, sizeof(*ctx->root_panel));
     ctx->root_panel->pct_of_parent = 1.0f;
+    {
+        u8 name_buf[PANEL_TAB_NAME_MAX];
+        isize name_len;
+        panel_tab_generate_default_name(ctx->root_panel, name_buf, sizeof(name_buf), &name_len);
+        panel_tab_declare(ctx->root_panel, (String){ name_buf, name_len });
+    }
 
     /* Render first frames to rasterize glyphs, then show */
     process_frame(ctx);
@@ -431,6 +440,34 @@ static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
                 {
                     n->panel_action.panel->anim_state = PANEL_ANIM_CLOSING;
                     n->panel_action.panel->anim_to_pct = 0.0f;
+                }
+                break;
+            case CMD_TAB_NEW:
+                if (n->panel_action.target && n->panel_action.panel)
+                {
+                    u8 name_buf[PANEL_TAB_NAME_MAX];
+                    isize name_len;
+                    panel_tab_generate_default_name(n->panel_action.panel, name_buf, sizeof(name_buf), &name_len);
+                    panel_tab_declare(n->panel_action.panel, (String){ name_buf, name_len });
+                }
+                break;
+            case CMD_TAB_CLOSE:
+                if (n->panel_action.target && n->panel_action.panel && n->panel_action.tab)
+                {
+                    Panel* p = n->panel_action.panel;
+                    /* If this is the only tab left, close the panel instead */
+                    if (p->tab_first && !p->tab_first->next && p->tab_first == n->panel_action.tab)
+                    {
+                        if (p->parent)
+                        {
+                            p->anim_state = PANEL_ANIM_CLOSING;
+                            p->anim_to_pct = 0.0f;
+                        }
+                    }
+                    else
+                    {
+                        panel_tab_close(p, n->panel_action.tab);
+                    }
                 }
                 break;
             default:
@@ -592,6 +629,13 @@ static void process_frame(WindowContext* ctx)
                 if (!ctx->hovered_panel && mouse_in)
                     ctx->hovered_panel = p;
 
+                /* Re-declare all existing tabs so they survive cleanup */
+                for (PanelTab* tab = p->tab_first; tab; tab = tab->next)
+                {
+                    String tab_name = { tab->name, tab->name_len };
+                    panel_tab_declare(p, tab_name);
+                }
+
                 ui_box({
                     .sizing = { fixed(iw), fixed(ih) },
                     .flags = BoxFlag_Float,
@@ -607,26 +651,96 @@ static void process_frame(WindowContext* ctx)
 
                     ui_box_interact(box, key);
 
-                    /* Panel header */
+                    /* Tab bar */
                     ui_box({
                         .sizing = { fit_grow({}), fit({}) },
                         .direction = LAYOUT_LEFT_TO_RIGHT,
-                        .child_gap = s_child_gap_small,
+                        .child_gap = 2,
                     })
                     {
-                        ui_text(str("Panel"),
-                                &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_secondary });
-                        ui_box({ .sizing = { grow({}), fit({}) } })
+                        PanelTab* active = panel_tab_get_active(p);
+
+                        for (PanelTab* tab = p->tab_first; tab; tab = tab->next)
                         {
+                            b32 is_active = (tab == active);
+
+                            u8 tab_key[HASH_STR_MAX_LENGTH];
+                            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key),
+                                                       "###tab_%p_%.*s", (void*)p, (int)tab->name_len, tab->name);
+                            String tab_key_str = { tab_key, tab_key_len };
+
+                            Color bg_normal = is_active ? theme->bg_base : (Color){ 0, 0, 0, 0 };
+                            Color bg_hover = is_active ? theme->bg_base : theme->bg_overlay;
+                            Color fg = is_active ? theme->accent : theme->fg_secondary;
+                            f32 font_sz = 12;
+
+                            ui_box({
+                                .sizing = { fit({}), fit({}) },
+                                .padding = { 4, 10, 4, 10 },
+                                .direction = LAYOUT_LEFT_TO_RIGHT,
+                                .child_gap = 4,
+                                .alignment = { ALIGN_START, ALIGN_CENTER },
+                                .rect_style = { .corner_radius = 4 },
+                            })
+                            {
+                                UIBoxInteractResult r = ui_box_interact(box, tab_key_str);
+                                if (r.last_box)
+                                    update_transition(&r.last_box->hot_t, 20.f, ui_hovered(r.flags) ? 1.f : 0.f);
+                                f32 hot = r.last_box ? r.last_box->hot_t : 0.f;
+                                box->config.color = lerp_color(bg_normal, bg_hover, hot);
+
+                                if (ui_lclicked(r.flags))
+                                    panel_tab_activate(p, tab);
+
+                                ui_text((String){ tab->name, tab->name_len },
+                                        &(TextConfig){ .font = font_ui, .font_size = font_sz, .color = fg,
+                                                       .line_height = font_sz });
+
+                                /* Close button */
+                                u8 ck[HASH_STR_MAX_LENGTH];
+                                i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%p_%.*s", (void*)p, (int)tab->name_len,
+                                                  tab->name);
+                                Color cb_normal = is_active ? theme->fg_secondary
+                                                            : (Color){ 0, 0, 0, 0 };
+                                Color cb_hover = theme->fg_secondary;
+                                UISignalFlags cf = ui_button((String){ ck, cl }, font_ui, 10,
+                                                              (Sizing){ fixed(14), fixed(14) }, (Padding){ 0 },
+                                                              cb_normal, cb_normal, cb_hover, cb_hover);
+                                if (ui_lclicked(cf))
+                                {
+                                    CmdNode* n = cmd_push(shared, CMD_TAB_CLOSE);
+                                    n->panel_action.target = ctx;
+                                    n->panel_action.panel = p;
+                                    n->panel_action.tab = tab;
+                                }
+                            }
                         }
 
+                        /* Spacer */
+                        ui_box({ .sizing = { grow({}), fit({}) } }) { }
+
+                        /* New tab button */
+                        u8 plus_key[HASH_STR_MAX_LENGTH];
+                        i32 plus_len = snprintf((char*)plus_key, sizeof(plus_key), "+##tab_add_%p", (void*)p);
+                        UISignalFlags plus_flags =
+                            ui_button((String){ plus_key, plus_len }, font_ui, 12, (Sizing){ fixed(22), fixed(22) },
+                                      (Padding){ 0 }, (Color){ 0, 0, 0, 0 }, theme->fg_secondary, theme->bg_overlay,
+                                      theme->bg_base);
+                        if (ui_lclicked(plus_flags))
+                        {
+                            CmdNode* n = cmd_push(shared, CMD_TAB_NEW);
+                            n->panel_action.target = ctx;
+                            n->panel_action.panel = p;
+                        }
+
+                        /* Close panel button */
                         u8 close_key[HASH_STR_MAX_LENGTH];
                         i32 close_len = snprintf((char*)close_key, sizeof(close_key), "X##panel_close_%p", (void*)p);
                         String close_str = { close_key, close_len };
-
                         UISignalFlags close_flags =
-                            ui_button(close_str, font_ui, 12, (Sizing){ fixed(20), fixed(20) }, (Padding){ 0, 0, 0, 0 },
-                                      theme->danger, theme->accent_fg, theme->danger, theme->danger);
+                            ui_button(close_str, font_ui, 12, (Sizing){ fixed(22), fixed(22) }, (Padding){ 0 },
+                                      (Color){ 0, 0, 0, 0 }, theme->fg_secondary, theme->danger,
+                                      theme->danger);
                         if (p->parent && ui_lclicked(close_flags))
                         {
                             CmdNode* n = cmd_push(shared, CMD_CLOSE_PANEL);
@@ -635,52 +749,74 @@ static void process_frame(WindowContext* ctx)
                         }
                     }
 
-                    /* Panel content */
-                    u8 sa_key[HASH_STR_MAX_LENGTH];
-                    i32 sa_len = snprintf((char*)sa_key, sizeof(sa_key), "panel_scroll_%p", (void*)p);
-                    ui_scrollable_area({
-                        (String){ sa_key, sa_len },
-                        (Sizing){ grow({}), grow({}) },
-                        theme->bg_base,
-                        s_padding_small,
-                        theme->scrollbar_thumb,
-                    })
+                    /* Panel content — rendered only if an active tab exists */
+                    PanelTab* active_tab = panel_tab_get_active(p);
+                    if (active_tab)
                     {
-                        ui_box({
-                            .sizing = { fixed(400), fit_grow({}) },
-                            .color = theme->bg_surface,
-                            .padding = s_padding_small,
-                            .child_gap = s_child_gap_medium,
-                            .direction = LAYOUT_TOP_TO_BOTTOM,
+                        u8 sa_key[HASH_STR_MAX_LENGTH];
+                        i32 sa_len = snprintf((char*)sa_key, sizeof(sa_key), "panel_scroll_%p", (void*)p);
+                        ui_scrollable_area({
+                            (String){ sa_key, sa_len },
+                            (Sizing){ grow({}), grow({}) },
+                            theme->bg_base,
+                            s_padding_small,
+                            theme->scrollbar_thumb,
                         })
                         {
-                            ui_text(
-                                str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
-                                &(TextConfig){
-                                    .font = font_ui, .font_size = 12, .color = theme->fg_primary, .line_height = 24 });
-                            ui_text(str("Ctrl+W closes the panel under the mouse cursor."),
-                                    &(TextConfig){ .font = font_ui,
-                                                   .font_size = 12,
-                                                   .color = theme->fg_secondary,
-                                                   .line_height = 24 });
-
-                            u8 button_key[HASH_STR_MAX_LENGTH];
-                            i32 button_len = snprintf((char*)button_key, sizeof(button_key),
-                                                      "New Window##panel_button_%p", (void*)p);
-                            String button_str = { button_key, button_len };
-
-                            UISignalFlags button_flags =
-                                ui_button(button_str, font_mono, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                          theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
-                            if (ui_lclicked(button_flags))
+                            ui_box({
+                                .sizing = { fixed(400), fit_grow({}) },
+                                .color = theme->bg_surface,
+                                .padding = s_padding_small,
+                                .child_gap = s_child_gap_medium,
+                                .direction = LAYOUT_TOP_TO_BOTTOM,
+                            })
                             {
-                                CmdNode* n = cmd_push(shared, CMD_CREATE_WINDOW);
-                                n->create_win.width = CLIENT_WIDTH;
-                                n->create_win.height = CLIENT_HEIGHT;
+                                String tab_label = { active_tab->name, active_tab->name_len };
+                                ui_text(tab_label,
+                                        &(TextConfig){ .font = font_ui, .font_size = 14, .color = theme->accent,
+                                                       .line_height = 20 });
+
+                                ui_text(
+                                    str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
+                                    &(TextConfig){ .font = font_ui, .font_size = 12, .color = theme->fg_primary,
+                                                   .line_height = 24 });
+                                ui_text(str("Ctrl+W closes the panel under the mouse cursor."),
+                                        &(TextConfig){ .font = font_ui,
+                                                       .font_size = 12,
+                                                       .color = theme->fg_secondary,
+                                                       .line_height = 24 });
+                                ui_text(str("Ctrl+T adds a new tab to the hovered panel."),
+                                        &(TextConfig){ .font = font_ui,
+                                                       .font_size = 12,
+                                                       .color = theme->fg_secondary,
+                                                       .line_height = 24 });
+
+                                u8 button_key[HASH_STR_MAX_LENGTH];
+                                i32 button_len = snprintf((char*)button_key, sizeof(button_key),
+                                                          "New Window##panel_button_%p", (void*)p);
+                                String button_str = { button_key, button_len };
+
+                                UISignalFlags button_flags =
+                                    ui_button(button_str, font_mono, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                              theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
+                                if (ui_lclicked(button_flags))
+                                {
+                                    CmdNode* n = cmd_push(shared, CMD_CREATE_WINDOW);
+                                    n->create_win.width = CLIENT_WIDTH;
+                                    n->create_win.height = CLIENT_HEIGHT;
+                                }
                             }
                         }
                     }
                 }
+            }
+
+            /* Clean up tabs not declared this frame */
+            for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
+            {
+                if (p->child_a)
+                    continue;
+                panel_tabs_cleanup(p);
             }
         }
     }
@@ -880,7 +1016,12 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             }
             if (wparam == 'T' && ctrl)
             {
-                cmd_push(shared, CMD_TOGGLE_THEME);
+                if (ctx && ctx->hovered_panel)
+                {
+                    CmdNode* n = cmd_push(shared, CMD_TAB_NEW);
+                    n->panel_action.target = ctx;
+                    n->panel_action.panel = ctx->hovered_panel;
+                }
                 return 0;
             }
             if (wparam == VK_F11)
@@ -912,11 +1053,16 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             }
             if (wparam == 'W' && ctrl)
             {
-                if (ctx && ctx->hovered_panel && ctx->hovered_panel->parent)
+                if (ctx && ctx->hovered_panel)
                 {
-                    CmdNode* n = cmd_push(shared, CMD_CLOSE_PANEL);
-                    n->panel_action.target = ctx;
-                    n->panel_action.panel = ctx->hovered_panel;
+                    PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
+                    if (at)
+                    {
+                        CmdNode* n = cmd_push(shared, CMD_TAB_CLOSE);
+                        n->panel_action.target = ctx;
+                        n->panel_action.panel = ctx->hovered_panel;
+                        n->panel_action.tab = at;
+                    }
                 }
                 return 0;
             }

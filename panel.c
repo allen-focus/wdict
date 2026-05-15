@@ -2,8 +2,11 @@
 #include "utils.h"
 
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 
-#define PANEL_ANIM_DURATION 0.1f
+#define PANEL_ANIM_DURATION  0.1f
+#define PANEL_STACK_CAPACITY 16
 
 Panel* panel_iter_next(const Panel* panel)
 {
@@ -48,6 +51,168 @@ Rect panel_calc_rect(const Panel* panel, const Rect root_rect)
     return panel_calc_rect_from_parent(panel, parent_rect);
 }
 
+//
+// Tab management
+//
+
+void panel_tab_generate_default_name(const Panel* panel, u8* buf, const isize buf_size, isize* out_len)
+{
+    isize next_num = 1;
+    for (const PanelTab* tab = panel->tab_first; tab; tab = tab->next)
+    {
+        isize num = 0;
+        if (sscanf((const char*)tab->name, "Tab %zd", &num) == 1)
+        {
+            if (num >= next_num)
+                next_num = num + 1;
+        }
+    }
+    *out_len = (isize)snprintf((char*)buf, buf_size, "Tab %zd", next_num);
+}
+
+PanelTab* panel_tab_declare(Panel* panel, const String name)
+{
+    Assert(name.len > 0 && name.len < PANEL_TAB_NAME_MAX);
+
+    /* Search for existing tab by name */
+    for (PanelTab* tab = panel->tab_first; tab; tab = tab->next)
+        if (tab->name_len == name.len && memcmp(tab->name, name.data, (size_t)name.len) == 0)
+        {
+            tab->frame_declared = True;
+            return tab;
+        }
+
+    /* Create new tab */
+    PanelTab* tab = (PanelTab*)calloc(1, sizeof(PanelTab));
+    if (!tab)
+        return NULL;
+    memcpy(tab->name, name.data, (size_t)name.len);
+    tab->name_len = name.len;
+    tab->frame_declared = True;
+
+    /* Append to linked list */
+    if (!panel->tab_last)
+    {
+        panel->tab_first = tab;
+        panel->tab_last = tab;
+    }
+    else
+    {
+        panel->tab_last->next = tab;
+        panel->tab_last = tab;
+    }
+
+    /* Auto-activate first tab */
+    if (!panel->active_tab)
+        panel->active_tab = tab;
+
+    return tab;
+}
+
+PanelTab* panel_tab_get_active(Panel* panel)
+{
+    if (panel->active_tab)
+        return panel->active_tab;
+    /* Auto-select first tab if none is active */
+    if (panel->tab_first)
+        panel->active_tab = panel->tab_first;
+    return panel->active_tab;
+}
+
+void panel_tab_activate(Panel* panel, PanelTab* tab)
+{
+    if (!tab)
+        return;
+    /* Verify the tab belongs to this panel */
+    for (PanelTab* t = panel->tab_first; t; t = t->next)
+    {
+        if (t == tab)
+        {
+            panel->active_tab = tab;
+            return;
+        }
+    }
+}
+
+static void panel_tab_list_refresh_last(Panel* panel)
+{
+    if (!panel->tab_first)
+    {
+        panel->tab_last = NULL;
+        return;
+    }
+    PanelTab* t = panel->tab_first;
+    while (t->next)
+        t = t->next;
+    panel->tab_last = t;
+}
+
+void panel_tab_close(Panel* panel, PanelTab* tab)
+{
+    if (!tab)
+        return;
+
+    /* Unlink from singly-linked list */
+    PanelTab** prev = &panel->tab_first;
+    while (*prev && *prev != tab)
+        prev = &(*prev)->next;
+
+    if (*prev != tab)
+        return; /* tab not found in this panel */
+
+    *prev = tab->next;
+    panel_tab_list_refresh_last(panel);
+
+    /* Reassign active tab if needed */
+    if (panel->active_tab == tab)
+        panel->active_tab = tab->next ? tab->next : panel->tab_first;
+
+    free(tab);
+}
+
+void panel_tabs_cleanup(Panel* panel)
+{
+    /* Remove undeclared tabs */
+    PanelTab** prev = &panel->tab_first;
+    while (*prev)
+    {
+        PanelTab* tab = *prev;
+        if (!tab->frame_declared)
+        {
+            /* Unlink */
+            *prev = tab->next;
+            if (panel->active_tab == tab)
+                panel->active_tab = tab->next ? tab->next : panel->tab_first;
+            free(tab);
+        }
+        else
+        {
+            /* Reset flag for next frame */
+            tab->frame_declared = False;
+            prev = &tab->next;
+        }
+    }
+    panel_tab_list_refresh_last(panel);
+}
+
+static void panel_free_tabs(Panel* panel)
+{
+    PanelTab* tab = panel->tab_first;
+    while (tab)
+    {
+        PanelTab* next = tab->next;
+        free(tab);
+        tab = next;
+    }
+    panel->tab_first = NULL;
+    panel->tab_last = NULL;
+    panel->active_tab = NULL;
+}
+
+//
+// Panel lifecycle
+//
+
 Panel* panel_split(Panel* panel, const Axis2 axis)
 {
     if (!panel || panel->child_a)
@@ -62,9 +227,31 @@ Panel* panel_split(Panel* panel, const Axis2 axis)
         return NULL;
     }
 
-    /* child_a was the original content — start at 100%, child_b starts invisible at 0% */
-    *child_a = (Panel){ .parent = panel, .next = child_b, .pct_of_parent = 1.0f };
-    *child_b = (Panel){ .parent = panel, .prev = child_a, .pct_of_parent = 0.0f };
+    /* child_a inherits the parent's tabs */
+    child_a->tab_first = panel->tab_first;
+    child_a->tab_last = panel->tab_last;
+    child_a->active_tab = panel->active_tab;
+    panel->tab_first = NULL;
+    panel->tab_last = NULL;
+    panel->active_tab = NULL;
+
+    /* child_b gets one default tab */
+    {
+        u8 name_buf[PANEL_TAB_NAME_MAX];
+        isize name_len;
+        panel_tab_generate_default_name(child_b, name_buf, sizeof(name_buf), &name_len);
+        panel_tab_declare(child_b, (String){ name_buf, name_len });
+    }
+
+    /* Set tree relationship fields without overwriting tab data */
+    child_a->parent = panel;
+    child_a->next = child_b;
+    child_a->pct_of_parent = 1.0f;
+
+    child_b->parent = panel;
+    child_b->prev = child_a;
+    child_b->pct_of_parent = 0.0f;
+
     panel->split_axis = axis;
     panel->child_a = child_a;
     panel->child_b = child_b;
@@ -109,6 +296,7 @@ Panel* panel_remove(Panel* panel)
             grandparent->child_b = survivor;
     }
 
+    panel_free_tabs(panel);
     free(panel);
     free(parent);
 
@@ -123,6 +311,7 @@ static void panel_free_node(Panel* panel)
         panel_free_node(child);
         child = next;
     }
+    panel_free_tabs(panel);
     free(panel);
 }
 
@@ -134,7 +323,7 @@ void panel_free_tree(Panel* root)
 
 Panel* panel_update_animations(Panel* root, f64 now)
 {
-    Stack(Panel*, 16) pending_remove;
+    Stack(Panel*, PANEL_STACK_CAPACITY) pending_remove;
     pending_remove.depth = 0;
 
     for (Panel* p = root; p; p = panel_iter_next(p))
@@ -174,7 +363,10 @@ Panel* panel_update_animations(Panel* root, f64 now)
         if (t >= 1.0f)
         {
             if (p->anim_state == PANEL_ANIM_CLOSING)
+            {
+                Assert(pending_remove.depth < PANEL_STACK_CAPACITY);
                 pending_remove.items[pending_remove.depth++] = p;
+            }
             p->anim_state = PANEL_ANIM_NONE;
             p->anim_started_at = 0.0;
         }
