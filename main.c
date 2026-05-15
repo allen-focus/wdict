@@ -43,6 +43,7 @@ typedef enum
     CMD_CLOSE_PANEL,
     CMD_TAB_NEW,
     CMD_TAB_CLOSE,
+    CMD_TAB_MOVE,
 } CmdKind;
 
 typedef struct WindowContext WindowContext;
@@ -69,6 +70,7 @@ struct CmdNode
             WindowContext* target;
             Panel* panel;
             PanelTab* tab;
+            i32 delta;
         } panel_action;
         b32* toggle_check;
     };
@@ -469,6 +471,10 @@ static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
                         panel_tab_close(p, n->panel_action.tab);
                     }
                 }
+                break;
+            case CMD_TAB_MOVE:
+                if (n->panel_action.target && n->panel_action.panel && n->panel_action.tab)
+                    panel_tab_move(n->panel_action.panel, n->panel_action.tab, n->panel_action.delta);
                 break;
             default:
                 break;
@@ -1065,6 +1071,24 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     }
                 }
                 return 0;
+            }
+
+            /* Tab move: Ctrl+Shift+Left/Right moves active tab in hovered panel */
+            if (ctrl && shift && ctx && ctx->hovered_panel)
+            {
+                if (wparam == VK_LEFT || wparam == VK_RIGHT)
+                {
+                    PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
+                    if (at)
+                    {
+                        CmdNode* n = cmd_push(shared, CMD_TAB_MOVE);
+                        n->panel_action.target = ctx;
+                        n->panel_action.panel = ctx->hovered_panel;
+                        n->panel_action.tab = at;
+                        n->panel_action.delta = (wparam == VK_LEFT) ? -1 : +1;
+                    }
+                    return 0;
+                }
             }
 
             TextAction action = { 0 };

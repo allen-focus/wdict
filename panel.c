@@ -170,6 +170,64 @@ void panel_tab_close(Panel* panel, PanelTab* tab)
     free(tab);
 }
 
+void panel_tab_move(Panel* panel, PanelTab* tab, const i32 delta)
+{
+    if (!tab || delta == 0)
+        return;
+
+    /* Find current index and previous-pointer */
+    isize cur_index = 0;
+    PanelTab** prev_ptr = &panel->tab_first;
+    b32 found = False;
+    for (PanelTab* t = panel->tab_first; t; t = t->next, cur_index++)
+    {
+        if (t == tab)
+        {
+            found = True;
+            break;
+        }
+        prev_ptr = &t->next;
+    }
+    if (!found)
+        return;
+
+    /* Compute target index, clamped */
+    isize new_index = cur_index + delta;
+    if (new_index < 0)
+        new_index = 0;
+
+    /* Unlink from current position */
+    *prev_ptr = tab->next;
+    panel_tab_list_refresh_last(panel);
+    tab->next = NULL;
+
+    /* Count remaining tabs */
+    isize remaining = 0;
+    for (PanelTab* t = panel->tab_first; t; t = t->next)
+        remaining++;
+    if (new_index > remaining)
+        new_index = remaining;
+
+    /* Insert at target index */
+    if (new_index == 0)
+    {
+        tab->next = panel->tab_first;
+        panel->tab_first = tab;
+        if (!panel->tab_last)
+            panel->tab_last = tab;
+    }
+    else
+    {
+        PanelTab* prev = panel->tab_first;
+        for (isize i = 1; i < new_index; i++)
+            prev = prev->next;
+        tab->next = prev->next;
+        prev->next = tab;
+        if (!tab->next)
+            panel->tab_last = tab;
+    }
+}
+
 void panel_tabs_cleanup(Panel* panel)
 {
     /* Remove undeclared tabs */
