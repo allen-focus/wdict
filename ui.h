@@ -76,6 +76,8 @@ typedef enum
     UI_CURSOR_ARROW,
     UI_CURSOR_IBEAM,
     UI_CURSOR_HAND,
+    UI_CURSOR_HORIZONTAL,
+    UI_CURSOR_VERTICAL,
 } Cursor;
 
 //
@@ -159,7 +161,7 @@ typedef struct
 } Sizing;
 
 //
-// Box flags
+// Box
 //
 
 typedef enum
@@ -168,10 +170,6 @@ typedef enum
     BoxFlag_Clip = (1 << 0),
     BoxFlag_Float = (1 << 1),
 } BoxFlags;
-
-//
-// Box
-//
 
 typedef enum
 {
@@ -321,6 +319,12 @@ struct UIBox
     Position drag_mouse_anchor;
 };
 
+typedef struct
+{
+    UISignalFlags flags;
+    UIBox* last_box;
+} UIBoxInteractResult;
+
 //
 // Text Edit
 //
@@ -403,7 +407,8 @@ typedef struct
     draw_text_fn draw_text;
 } UIRenderFunc;
 
-typedef struct UIContext
+typedef struct UIContext UIContext;
+struct UIContext
 {
     /* OS specific */
     HWND window;
@@ -461,18 +466,12 @@ typedef struct UIContext
     Position ime_cursor_screen_pos;
 
     /* nesting */
-    struct UIContext* prev_context;
-} UIContext;
+    UIContext* prev_context;
+};
 
 //
 // Widget
 //
-
-typedef struct
-{
-    UIBox* box;
-    b32 found;
-} UIBoxFindResult;
 
 typedef struct
 {
@@ -483,8 +482,8 @@ typedef struct
     Vec2F32 thumb_delta_scale;
     UIBox* area;
     UISignalFlags area_flags;
-    UIBoxFindResult last_area_result;
-    UIBoxFindResult last_content_result;
+    UIBox* last_area;
+    UIBox* last_content;
     Color thumb_color;
     b32 fixed_track;
     f32 cursor_content_x;
@@ -513,7 +512,7 @@ void ui_deinit(UIContext* ui_context);
 
 UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
-UISignalFlags ui_box_interact(UIBox* box, const String hash_str);
+UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str);
 Position ui_box_drag_delta(const UIBox* box);
 UIBox* ui_text(const String text, const TextConfig* text_config);
 

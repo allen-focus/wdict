@@ -124,17 +124,15 @@ static BoxKey generate_box_key(String hash_str)
     return key;
 }
 
-static UIBoxFindResult find_or_insert_box_with_same_hash_str(const String hash_str)
+static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
 {
-    UIBoxFindResult result = { 0 };
+    UIBox* last_box = NULL;
 
     UIBoxCache* box_cache = &g_ui_context->box_cache;
     BoxKey key = { .len = hash_str.len };
     memcpy(key.str, hash_str.data, hash_str.len);
 
     LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&box_cache->lru_cache, &key);
-    UIBox* last_box =
-        (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
 
     // NOTE:
     //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
@@ -143,23 +141,24 @@ static UIBoxFindResult find_or_insert_box_with_same_hash_str(const String hash_s
     switch (lru_result.signal)
     {
         case LRU_SIGNAL_FOUND:
-            // Detect duplicate box key
-            if (g_ui_context->frame_index != 0)
-                if (last_box->last_frame_index == g_ui_context->frame_index)
-                    Assert(0);
-            result.found = True;
+            // // Detect duplicate box key
+            // if (g_ui_context->frame_index != 0)
+            //     if (last_box->last_frame_index == g_ui_context->frame_index)
+            //         Assert(0);
+            last_box =
+                (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
             break;
         case LRU_SIGNAL_TOINSERT:
+            last_box =
+                (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
             memcpy(&last_box->key, &key, sizeof(key));
-            result.found = False;
             break;
         case LRU_SIGNAL_TOEVICT:
         default:
             Assert(0);
     }
-    result.box = last_box;
 
-    return result;
+    return last_box;
 }
 
 static void box_cache_remove_unused()
@@ -708,15 +707,16 @@ static void ui_box_resolve_position(UIBox* box)
     if (box->key.len)
     {
         String box_hash_str = { box->key.str, box->key.len };
-        UIBoxFindResult result = find_or_insert_box_with_same_hash_str(box_hash_str);
-        result.box->size = box->size;
-        result.box->position = box->position;
+        UIBox* last_box = find_or_insert_box_with_same_hash_str(box_hash_str);
+        Assert(last_box);
+        last_box->size = box->size;
+        last_box->position = box->position;
 
         // NOTE:
         //   Update `last_frame_index` here because this is the final box that will be used for the current frame.
         //   This enables duplicate detection: during lookup, if a box is already marked with the current frame index,
         //   it indicates a duplicate key (panic condition).
-        result.box->last_frame_index = g_ui_context->frame_index;
+        last_box->last_frame_index = g_ui_context->frame_index;
     }
 }
 
@@ -1007,7 +1007,7 @@ static b32 rect_contains_point(Rect r, Position p)
 static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
 {
     *flags = UI_Signal_Flag_None;
-    Rect last_box_rect = {
+    Rect box_rect = {
         .xmin = box->position.x,
         .ymin = box->position.y,
         .xmax = box->position.x + box->size.width,
@@ -1024,7 +1024,7 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
         box->drag_mouse_anchor = (Position){ 0 };
     }
 
-    if (rect_contains_point(last_box_rect, g_ui_context->mouse_pos))
+    if (rect_contains_point(box_rect, g_ui_context->mouse_pos))
     {
         *flags |= UI_Signal_Flag_Hovered;
         if (g_ui_context->mouse_lclick)
@@ -1051,14 +1051,14 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
     }
 }
 
-UISignalFlags ui_box_interact(UIBox* box, const String hash_str)
+UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str)
 {
-    UISignalFlags flags = UI_Signal_Flag_None;
-    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(hash_str);
-    if (result.found)
-        update_interaction_flags(result.box, &flags);
+    UIBoxInteractResult result = { .flags = UI_Signal_Flag_None, .last_box = NULL };
+    result.last_box = find_or_insert_box_with_same_hash_str(hash_str);
+    if (result.last_box)
+        update_interaction_flags(result.last_box, &result.flags);
     update_box_key(box, hash_str);
-    return flags;
+    return result;
 }
 
 Position ui_box_drag_delta(const UIBox* box)
@@ -1230,7 +1230,7 @@ static ScrollBarLayout make_scrollbar_layout(b32 is_horizontal, f32 thumb_thickn
 static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_size)
 {
 
-    UIBox* last_area = scroll_ctx.last_area_result.box;
+    UIBox* last_area = scroll_ctx.last_area;
 
     // clang-format off
     f32 mouse_pos                          = is_horizontal ? g_ui_context->mouse_pos.x                      : g_ui_context->mouse_pos.y;
@@ -1254,17 +1254,16 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     UISignalFlags bar_flags = UI_Signal_Flag_None;
     String bar_hash_str =
         str_concat(&g_ui_context->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hbar)") : str(" (vbar)"));
-    UIBoxFindResult bar_result = find_or_insert_box_with_same_hash_str(bar_hash_str);
+    UIBox* last_bar = find_or_insert_box_with_same_hash_str(bar_hash_str);
 
     UISignalFlags thumb_flags = UI_Signal_Flag_None;
     String thumb_hash_str =
         str_concat(&g_ui_context->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hthumb)") : str(" (vthumb)"));
-    UIBoxFindResult thumb_result = find_or_insert_box_with_same_hash_str(thumb_hash_str);
+    UIBox* last_thumb = find_or_insert_box_with_same_hash_str(thumb_hash_str);
 
     /* [THUMB] Handle interaction and transition */
-    if (thumb_result.found)
+    if (last_thumb)
     {
-        UIBox* last_thumb = thumb_result.box;
         f32* ctx_thumb_mouse_anchor =
             is_horizontal ? &last_thumb->drag_mouse_anchor.x : &last_thumb->drag_mouse_anchor.y;
         String last_pressed_scroll_thumb_hash_str = { ctx_last_thumb_key->str, ctx_last_thumb_key->len };
@@ -1352,9 +1351,8 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     }
 
     /* [WHOLE BAR] Handle interaction and transition */
-    if (bar_result.found)
+    if (last_bar)
     {
-        UIBox* last_bar = bar_result.box;
         update_interaction_flags(last_bar, &bar_flags);
         if (ui_hovered(thumb_flags) || ui_hovered(bar_flags))
             ui_set_desired_cursor(UI_CURSOR_ARROW);
@@ -1362,7 +1360,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
         /* Expand scrollbar (track & thumb) with a fade-out transition when mouse hovers over it */
         if (ui_pressed(thumb_flags) || ui_hovered(bar_flags))
         {
-            scroll_ctx.last_area_result.box->idle_timer = 0.f; // to suppress thumb auto-hide transition
+            scroll_ctx.last_area->idle_timer = 0.f; // to suppress thumb auto-hide transition
             last_bar->anim_state = TRANSITION_FORWARD;
             if (last_bar->anim_state == TRANSITION_FORWARD)
                 update_transition(&last_bar->hot_t, 14.f, 1.f);
@@ -1370,9 +1368,9 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
             /* Click to jump to clicked position */
             if (ui_lclicked(bar_flags) && !ui_pressed(thumb_flags))
             {
-                Assert(thumb_result.box);
+                Assert(last_thumb);
                 f32 last_bar_position = is_horizontal ? last_bar->position.x : last_bar->position.y;
-                f32 last_thumb_size = is_horizontal ? thumb_result.box->size.width : thumb_result.box->size.height;
+                f32 last_thumb_size = is_horizontal ? last_thumb->size.width : last_thumb->size.height;
                 f32 target = (mouse_pos - last_bar_position - last_thumb_size / 2) * thumb_delta_scale;
                 start_timed_lerp(scroll_anim, *scroll_delta, target, g_ui_context->current_time, SCROLL_ANIM_DURATION);
             }
@@ -1452,26 +1450,22 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
     /* Create area box */
     scroll_ctx.area =
         ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .flags = BoxFlag_Clip });
-    update_box_key(scroll_ctx.area, config->hash_str);
 
     /* Handle interaction and animation */
-    scroll_ctx.area_flags = UI_Signal_Flag_None;
-    scroll_ctx.last_area_result = find_or_insert_box_with_same_hash_str(config->hash_str);
+    UIBoxInteractResult result = ui_box_interact(scroll_ctx.area, config->hash_str);
+    scroll_ctx.area_flags = result.flags;
+    scroll_ctx.last_area = result.last_box;
     String content_hash_str = str_concat(&g_ui_context->arena, config->hash_str, str(" (content box)"));
-    UIBox* last_area = NULL;
-    if (scroll_ctx.last_area_result.found)
+    if (scroll_ctx.last_area)
     {
-        last_area = scroll_ctx.last_area_result.box;
-        update_interaction_flags(last_area, &scroll_ctx.area_flags);
-
         /* Update scroll delta */
-        last_area->scroll_delta.x = evaluate_timed_lerp(&last_area->scroll_anim_x, now);
-        last_area->scroll_delta.y = evaluate_timed_lerp(&last_area->scroll_anim_y, now);
-        scroll_ctx.delta = last_area->scroll_delta;
+        scroll_ctx.last_area->scroll_delta.x = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_x, now);
+        scroll_ctx.last_area->scroll_delta.y = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_y, now);
+        scroll_ctx.delta = scroll_ctx.last_area->scroll_delta;
 
         /* Prepare content result for _end() */
-        scroll_ctx.last_content_result = find_or_insert_box_with_same_hash_str(content_hash_str);
-        Assert(scroll_ctx.last_content_result.found);
+        scroll_ctx.last_content = find_or_insert_box_with_same_hash_str(content_hash_str);
+        Assert(scroll_ctx.last_content);
     }
 
     /* Create container & inner container & content box */
@@ -1491,19 +1485,19 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
     Size thumb_size = { 0 };
 
     /* Calculate thumb delta and size */
-    if (scroll_ctx.last_content_result.found)
+    if (scroll_ctx.last_content)
     {
-        Assert(scroll_ctx.last_area_result.found);
+        Assert(scroll_ctx.last_area);
 
         /* Reserve padding on both ends of the scrollbar */
-        Size virtual_area_size = scroll_ctx.last_area_result.box->size;
-        Size content_size = scroll_ctx.last_content_result.box->size;
+        Size virtual_area_size = scroll_ctx.last_area->size;
+        Size content_size = scroll_ctx.last_content->size;
 
         /* Compute max scroll delta and clamp targets */
         scroll_ctx.max_delta.x = content_size.width - virtual_area_size.width;
         scroll_ctx.max_delta.y = content_size.height - virtual_area_size.height;
 
-        UIBox* last_area = scroll_ctx.last_area_result.box;
+        UIBox* last_area = scroll_ctx.last_area;
         last_area->scroll_anim_x.target = clamp(last_area->scroll_anim_x.target, 0, scroll_ctx.max_delta.x);
         last_area->scroll_anim_y.target = clamp(last_area->scroll_anim_y.target, 0, scroll_ctx.max_delta.y);
 
@@ -1584,11 +1578,11 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
     ui_box_end(scroll_ctx.area->child_first->child_first->child_first); // Content
     ui_box_end(scroll_ctx.area->child_first->child_first); // Inner Container
     if (bar_flags & SCROLLBAR_HORIZONTAL)
-        if (scroll_ctx.last_area_result.found)
+        if (scroll_ctx.last_area)
             scrollbar(scroll_ctx, True, thumb_size.width);
     ui_box_end(scroll_ctx.area->child_first); // Container
     if (bar_flags & SCROLLBAR_VERTICAL)
-        if (scroll_ctx.last_area_result.found)
+        if (scroll_ctx.last_area)
             scrollbar(scroll_ctx, False, thumb_size.height);
     ui_box_end(scroll_ctx.area);
 }
@@ -1603,54 +1597,49 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
 {
     Color bg_color_transition = bg_color;
 
-    /* Get last button from cache */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
-    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
 
-    /* Handle interaction and transition */
-    UISignalFlags flags = UI_Signal_Flag_None;
-    if (result.found)
-    {
-        UIBox* last_box = result.box;
-        update_interaction_flags(last_box, &flags);
-
-        /* Transition */
-        if (ui_hovered(flags))
-            bg_color_transition = bg_color_hover;
-        if (ui_clicked(flags) || (last_box->active_t > 0))
-        {
-            if (ui_clicked(flags))
-            {
-                last_box->anim_state = TRANSITION_FORWARD;
-                last_box->active_t = 0.f;
-            }
-            if (last_box->anim_state == TRANSITION_IDLE || last_box->anim_state == TRANSITION_FORWARD)
-            {
-                if (update_transition(&last_box->active_t, 30.f, 1.f))
-                    last_box->anim_state = TRANSITION_REVERSE;
-            }
-            else
-            {
-                if (update_transition(&last_box->active_t, 24.f, 0.f))
-                    last_box->anim_state = TRANSITION_IDLE;
-            }
-            bg_color_transition =
-                lerp_color(ui_hovered(flags) ? bg_color_hover : bg_color, bg_color_press, last_box->active_t);
-        }
-    }
-
-    /* Create button box and text */
+    /* Create button box */
     UIBox* box = ui_box_start(&(BoxConfig){ .sizing = sizing,
-                                            .color = bg_color_transition,
                                             .rect_style = { .corner_radius = 4 },
                                             .padding = padding,
                                             .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-    update_box_key(box, text_hash.hash_str);
+
+    /* Handle interaction and transition */
+    UIBoxInteractResult result = ui_box_interact(box, text_hash.hash_str);
+    if (result.last_box)
+    {
+        /* Transition */
+        if (ui_hovered(result.flags))
+            bg_color_transition = bg_color_hover;
+        if (ui_clicked(result.flags) || (result.last_box->active_t > 0))
+        {
+            if (ui_clicked(result.flags))
+            {
+                result.last_box->anim_state = TRANSITION_FORWARD;
+                result.last_box->active_t = 0.f;
+            }
+            if (result.last_box->anim_state == TRANSITION_IDLE || result.last_box->anim_state == TRANSITION_FORWARD)
+            {
+                if (update_transition(&result.last_box->active_t, 30.f, 1.f))
+                    result.last_box->anim_state = TRANSITION_REVERSE;
+            }
+            else
+            {
+                if (update_transition(&result.last_box->active_t, 24.f, 0.f))
+                    result.last_box->anim_state = TRANSITION_IDLE;
+            }
+            bg_color_transition =
+                lerp_color(ui_hovered(result.flags) ? bg_color_hover : bg_color, bg_color_press, result.last_box->active_t);
+        }
+    }
+
+    box->config.color = bg_color_transition;
     ui_text(text_hash.display_str,
             &(TextConfig){ .font = font, .font_size = font_size, .color = text_color, .line_height = font_size });
     ui_box_end(box);
 
-    return flags;
+    return result.flags;
 }
 
 UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
@@ -1663,39 +1652,34 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     f32 pad_width = 0.f;
     f32 shadow_offset_x = 0.f;
 
-    /* Get last button from cache */
-    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(hash_str);
-
-    /* Handle interaction and transition */
-    UISignalFlags flags = UI_Signal_Flag_None;
-    if (result.found)
-    {
-        UIBox* last_container = result.box;
-        update_interaction_flags(last_container, &flags);
-
-        /* Transition */
-        if (ui_lclicked(flags) || (last_container->active_t > 0))
-        {
-            if (ui_lclicked(flags))
-                last_container->anim_state = *check ? TRANSITION_REVERSE : TRANSITION_FORWARD;
-            if (last_container->anim_state != TRANSITION_IDLE)
-                if (update_transition(&last_container->active_t, 18.f,
-                                      last_container->anim_state == TRANSITION_REVERSE ? 0.f : 1.f))
-                    last_container->anim_state = TRANSITION_IDLE;
-        }
-        bg_color_transition = lerp_color(bg_color_transition, bg_color_active, last_container->active_t);
-        status_color_ok.a = lerp_u8(0, 255, last_container->active_t);
-        status_color_cancel.a = lerp_u8(255, 0, last_container->active_t);
-        pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, last_container->active_t);
-        shadow_offset_x = lerp_f32(1.f, -1.f, last_container->active_t);
-    }
-
     /* Create checkbox */
     UIBox* container = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT * 2), fixed(CHECKBOX_HEIGHT) },
-                                                  .color = bg_color_transition,
                                                   .rect_style = { .corner_radius = CHECKBOX_HEIGHT / 2 },
                                                   .padding = { CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD },
                                                   .alignment = { ALIGN_START, ALIGN_CENTER } });
+
+    /* Handle interaction and transition */
+    UIBoxInteractResult result = ui_box_interact(container, hash_str);
+    if (result.last_box)
+    {
+        /* Transition */
+        if (ui_lclicked(result.flags) || (result.last_box->active_t > 0))
+        {
+            if (ui_lclicked(result.flags))
+                result.last_box->anim_state = *check ? TRANSITION_REVERSE : TRANSITION_FORWARD;
+            if (result.last_box->anim_state != TRANSITION_IDLE)
+                if (update_transition(&result.last_box->active_t, 18.f,
+                                      result.last_box->anim_state == TRANSITION_REVERSE ? 0.f : 1.f))
+                    result.last_box->anim_state = TRANSITION_IDLE;
+        }
+        bg_color_transition = lerp_color(bg_color_transition, bg_color_active, result.last_box->active_t);
+        status_color_ok.a = lerp_u8(0, 255, result.last_box->active_t);
+        status_color_cancel.a = lerp_u8(255, 0, result.last_box->active_t);
+        pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, result.last_box->active_t);
+        shadow_offset_x = lerp_f32(1.f, -1.f, result.last_box->active_t);
+    }
+
+    container->config.color = bg_color_transition;
     {
         /* left padding */
         UIBox* pad_left = ui_box_start(
@@ -1721,10 +1705,9 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
         ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(6), grow({}) } }));
         ui_box_end(pad_right);
     }
-    update_box_key(container, hash_str);
     ui_box_end(container);
 
-    return flags;
+    return result.flags;
 }
 
 static isize scan_codepoint_forward(const byte* base, const isize text_len, isize pos, isize count)
@@ -1851,7 +1834,6 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 
     /* Handle input */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
-    UIBoxFindResult result = find_or_insert_box_with_same_hash_str(text_hash.hash_str);
     String content_key = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (content box)"));
     isize cursor_before = state->cursor;
     b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
@@ -2029,14 +2011,13 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         if (is_focused && g_ui_context->mouse_press && !g_ui_context->mouse_lclick && state->text_len > 0 &&
             (g_ui_context->mouse_delta.x != 0.f || g_ui_context->mouse_delta.y != 0.f))
         {
-            UIBoxFindResult inner_result = find_or_insert_box_with_same_hash_str(content_key);
-            if (inner_result.found)
+            UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
+            if (last_inner_box)
             {
-                UIBox* inner_box = inner_result.box;
-                f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
-                b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y &&
+                f32 click_x = g_ui_context->mouse_pos.x - last_inner_box->position.x - padding.left;
+                b32 inside_y = g_ui_context->mouse_pos.y >= last_inner_box->position.y &&
                                g_ui_context->mouse_pos.y <=
-                                   inner_box->position.y + inner_box->size.height - SCROLLBAR_THICKNESS_MAX;
+                                   last_inner_box->position.y + last_inner_box->size.height - SCROLLBAR_THICKNESS_MAX;
                 if (click_x >= 0.f && inside_y)
                 {
                     state->cursor =
@@ -2047,62 +2028,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
     }
 
-    UISignalFlags flags = UI_Signal_Flag_None;
-    if (result.found)
-    {
-        UIBox* last_box = result.box;
-        update_interaction_flags(last_box, &flags);
-        if (ui_hovered(flags))
-            ui_set_desired_cursor(UI_CURSOR_IBEAM);
-
-        /* Transition */
-        if (ui_lclicked(flags) || is_focused)
-        {
-            if (ui_lclicked(flags))
-            {
-                g_ui_context->focused_box_key = generate_box_key(text_hash.hash_str);
-
-                /* Position cursor at click point */
-                if (state->text_len > 0)
-                {
-                    UIBoxFindResult inner_result = find_or_insert_box_with_same_hash_str(content_key);
-                    if (inner_result.found)
-                    {
-                        UIBox* inner_box = inner_result.box;
-                        f32 click_x = g_ui_context->mouse_pos.x - inner_box->position.x - padding.left;
-                        b32 inside_y = g_ui_context->mouse_pos.y >= inner_box->position.y &&
-                                       g_ui_context->mouse_pos.y <=
-                                           inner_box->position.y + inner_box->size.height - SCROLLBAR_THICKNESS_MAX;
-                        if (click_x >= 0.f && inside_y)
-                        {
-                            state->cursor = find_cursor_at_x(state->base, state->text_len, click_x,
-                                                             g_ui_context->raster_cache, font, font_size,
-                                                             g_ui_context->dpi, get_text_width, g_ui_context->renderer);
-                            state->mark = state->cursor;
-
-                            if (ui_double_clicked(flags))
-                            {
-                                isize word_start = scan_word_backward(state->base, state->cursor);
-                                isize word_end = scan_word_forward(state->base, state->text_len, state->cursor);
-                                while (word_start < word_end && !is_word_char(state->base[word_start]))
-                                    word_start++;
-                                while (word_end > word_start && !is_word_char(state->base[word_end - 1]))
-                                    word_end--;
-                                state->mark = word_start;
-                                state->cursor = word_end;
-                            }
-                        }
-                    }
-                }
-            }
-            update_transition(&last_box->active_t, 20.f, 1.f);
-        }
-        else
-        {
-            update_transition(&last_box->active_t, 18.f, 0.f);
-        }
-        border_color_transition.a = lerp_u8(0, border_color.a, last_box->active_t);
-    }
+    /* Cursor glide/trail animation */
     update_transition(&state->copy_t, 1.5f, 0.f);
     if (is_focused)
     {
@@ -2117,13 +2043,71 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         approach_f32(&state->cursor_trail_x, cursor_x, 10.f);
     }
 
-    /* Create text feild box and text */
+    /* Create text field box */
     UIBox* box = ui_box_start(&(BoxConfig){
         .sizing = { sizing_x, text_container_height },
-        .rect_style = { .corner_radius = 4, .border_color = border_color_transition, .border_thickness = 2 },
+        .rect_style = { .corner_radius = 4, .border_thickness = 2 },
         .color = bg_color,
         .flags = BoxFlag_Clip,
     });
+
+    /* Handle interaction and transition */
+    UIBoxInteractResult result = ui_box_interact(box, text_hash.hash_str);
+    if (result.last_box)
+    {
+        if (ui_hovered(result.flags))
+            ui_set_desired_cursor(UI_CURSOR_IBEAM);
+
+        /* Transition */
+        if (ui_lclicked(result.flags) || is_focused)
+        {
+            if (ui_lclicked(result.flags))
+            {
+                g_ui_context->focused_box_key = generate_box_key(text_hash.hash_str);
+
+                /* Position cursor at click point */
+                if (state->text_len > 0)
+                {
+                    UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
+                    if (last_inner_box)
+                    {
+                        f32 click_x = g_ui_context->mouse_pos.x - last_inner_box->position.x - padding.left;
+                        b32 inside_y = g_ui_context->mouse_pos.y >= last_inner_box->position.y &&
+                                       g_ui_context->mouse_pos.y <= last_inner_box->position.y +
+                                                                        last_inner_box->size.height -
+                                                                        SCROLLBAR_THICKNESS_MAX;
+                        if (click_x >= 0.f && inside_y)
+                        {
+                            state->cursor = find_cursor_at_x(state->base, state->text_len, click_x,
+                                                             g_ui_context->raster_cache, font, font_size,
+                                                             g_ui_context->dpi, get_text_width, g_ui_context->renderer);
+                            state->mark = state->cursor;
+
+                            if (ui_double_clicked(result.flags))
+                            {
+                                isize word_start = scan_word_backward(state->base, state->cursor);
+                                isize word_end = scan_word_forward(state->base, state->text_len, state->cursor);
+                                while (word_start < word_end && !is_word_char(state->base[word_start]))
+                                    word_start++;
+                                while (word_end > word_start && !is_word_char(state->base[word_end - 1]))
+                                    word_end--;
+                                state->mark = word_start;
+                                state->cursor = word_end;
+                            }
+                        }
+                    }
+                }
+            }
+            update_transition(&result.last_box->active_t, 20.f, 1.f);
+        }
+        else
+        {
+            update_transition(&result.last_box->active_t, 18.f, 0.f);
+        }
+        border_color_transition.a = lerp_u8(0, border_color.a, result.last_box->active_t);
+    }
+
+    box->config.rect_style.border_color = border_color_transition;
     {
         b32 cursor_moved = state->cursor != cursor_before;
 
@@ -2292,10 +2276,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         ui_scrollable_area_end(scroll_ctx);
     }
     ui_box_end(box);
-    update_box_key(box, text_hash.hash_str);
 
     /* Update IME candidate window position */
-    if (is_focused && result.found)
+    if (is_focused && result.last_box)
     {
         f32 ime_cursor_x = 0.f;
         if (state->composition_len > 0)
@@ -2312,12 +2295,11 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
         f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
 
-        UIBox* last_box = result.box;
-        LONG cx = (LONG)((last_box->position.x + padding.left + ime_cursor_x) * dpi_scale);
-        LONG cy = (LONG)((last_box->position.y + last_box->size.height + IME_OFFSET_TOP) * dpi_scale);
+        LONG cx = (LONG)((result.last_box->position.x + padding.left + ime_cursor_x) * dpi_scale);
+        LONG cy = (LONG)((result.last_box->position.y + result.last_box->size.height + IME_OFFSET_TOP) * dpi_scale);
 
         win32_ime_update_candidate(g_ui_context->window, cx, cy, &g_ui_context->ime_cursor_screen_pos);
     }
 
-    return flags;
+    return result.flags;
 }
