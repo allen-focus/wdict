@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cmd.h"
 #include "utils.h"
 
 typedef enum
@@ -29,6 +30,8 @@ struct PanelTab
 typedef struct Panel Panel;
 struct Panel
 {
+    u32 id;
+
     Panel* child_a;
     Panel* child_b;
     Panel* next;
@@ -50,6 +53,8 @@ struct Panel
 };
 
 Panel* panel_iter_next(const Panel* panel);
+Panel* panel_alloc(void);
+Panel* panel_find_by_id(const Panel* root, u32 id);
 Rect panel_calc_rect(const Panel* panel, const Rect root_rect);
 Rect panel_calc_rect_from_parent(const Panel* child, const Rect parent_rect);
 Panel* panel_split(Panel* panel, const Axis2 axis);

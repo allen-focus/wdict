@@ -21,27 +21,13 @@
 
 ///
 
-#define CLIENT_WIDTH  600
-#define CLIENT_HEIGHT 600
+#define CLIENT_WIDTH  1000
+#define CLIENT_HEIGHT 750
 
 #define MAX_TITLE_LENGTH 64
 #define TEXT_BUFFER_SIZE 1024
 #define MAX_WINDOWS      16
 #define CMD_ARENA_SIZE   KB(64)
-
-#define PANEL_BOUNDARY 3.0f
-#define PANEL_PCT_MIN  0.05f
-#define PANEL_PCT_MAX  0.95f
-
-typedef struct WindowContext WindowContext;
-
-typedef struct
-{
-    WindowContext* ctx;
-    Panel* panel;
-    Panel* to_panel;
-    PanelTab* tab;
-} CmdPayload;
 
 typedef enum
 {
@@ -336,7 +322,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32
     window_list_add(shared, ctx);
 
     /* Init per-window root panel */
-    ctx->root_panel = (Panel*)calloc(1, sizeof(*ctx->root_panel));
+    ctx->root_panel = panel_alloc();
     ctx->root_panel->pct_of_parent = 1.0f;
     {
         u8 name_buf[PANEL_TAB_NAME_MAX];
@@ -480,128 +466,21 @@ static void cmd_tab_to_new_panel(void* userdata, void* payload, isize payload_si
 }
 
 //
-// Panel rendering helpers
+// Panel rendering
 //
 
-static void panel_render_boundary(const Panel* panel, const Rect panel_rect, const Theme* theme)
-{
-    Assert(panel->child_a);
-    Assert(panel->child_b);
-
-    Panel* child_a = panel->child_a;
-    Panel* child_b = panel->child_b;
-
-    Rect child_a_rect = panel_calc_rect_from_parent(child_a, panel_rect);
-    Position bound_pos;
-    f32 bound_w, bound_h;
-    if (panel->split_axis == Axis2_X)
-    {
-        bound_pos.x = child_a_rect.xmax - (PANEL_BOUNDARY / 2);
-        bound_pos.y = child_a_rect.ymin;
-        bound_w = PANEL_BOUNDARY;
-        bound_h = child_a_rect.ymax - child_a_rect.ymin;
-    }
-    else
-    {
-        bound_pos.x = child_a_rect.xmin;
-        bound_pos.y = child_a_rect.ymax - (PANEL_BOUNDARY / 2);
-        bound_w = child_a_rect.xmax - child_a_rect.xmin;
-        bound_h = PANEL_BOUNDARY;
-    }
-
-    ui_box({ .sizing = { fixed(bound_w), fixed(bound_h) },
-             .flags = BoxFlag_Float,
-             .float_offset = bound_pos,
-             .direction = (panel->split_axis == Axis2_X) ? LAYOUT_LEFT_TO_RIGHT : LAYOUT_TOP_TO_BOTTOM })
-    {
-        u8 key_buf[HASH_STR_MAX_LENGTH];
-        i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_bound_%p", (void*)panel);
-        String key = { key_buf, key_len };
-
-        /* Handle interaction */
-        UIBoxInteractResult result = ui_box_interact(box, key);
-        UISignalFlags flags = result.flags;
-        if (ui_hovered(flags))
-        {
-            Cursor cur = (panel->split_axis == Axis2_X) ? UI_CURSOR_HORIZONTAL : UI_CURSOR_VERTICAL;
-            ui_set_desired_cursor(cur);
-        }
-        if (ui_lclicked(flags))
-        {
-            child_a->drag_saved_pct = child_a->pct_of_parent;
-            child_a->drag_saved_partner_pct = child_b->pct_of_parent;
-        }
-        if (ui_dragging(flags))
-        {
-            Position delta = ui_box_drag_delta(result.last_box);
-            f32 parent_dim = (panel->split_axis == Axis2_X) ? (panel_rect.xmax - panel_rect.xmin)
-                                                            : (panel_rect.ymax - panel_rect.ymin);
-            f32 dp = (panel->split_axis == Axis2_X ? delta.x : delta.y) / parent_dim;
-            child_a->pct_of_parent = clamp(child_a->drag_saved_pct + dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
-            child_b->pct_of_parent = clamp(child_a->drag_saved_partner_pct - dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
-        }
-
-        /* Handle transition */
-        if (result.last_box)
-        {
-            update_transition(&result.last_box->hot_t, 20.f,
-                              ui_hovered(flags) || ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f);
-            update_transition(&result.last_box->active_t, 20.f, ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f);
-        }
-        f32 hot_t = result.last_box ? result.last_box->hot_t : 0.f;
-        f32 active_t = result.last_box ? result.last_box->active_t : 0.f;
-        Color pad_color = lerp_color((Color){ 0, 0, 0, 0 }, theme->border_focus, hot_t);
-        Color line_color = lerp_color(theme->border_normal, theme->border_focus, hot_t);
-        pad_color = lerp_color(pad_color, theme->border_press, active_t);
-        line_color = lerp_color(line_color, theme->border_press, active_t);
-
-        /* Draw split line */
-        // clang-format off
-        if (panel->split_axis == Axis2_X)
-        {
-            ui_box({ .sizing = { fixed(PANEL_BOUNDARY / 3), fixed(bound_h) }, .color = pad_color }) { }
-            ui_box({ .sizing = { fixed(PANEL_BOUNDARY / 3), fixed(bound_h) }, .color = line_color }) { }
-            ui_box({ .sizing = { fixed(PANEL_BOUNDARY / 3), fixed(bound_h) }, .color = pad_color }) { }
-        }
-        else
-        {
-            ui_box({ .sizing = { fixed(bound_w), fixed(PANEL_BOUNDARY / 3) }, .color = pad_color }) { }
-            ui_box({ .sizing = { fixed(bound_w), fixed(PANEL_BOUNDARY / 3) }, .color = line_color }) { }
-            ui_box({ .sizing = { fixed(bound_w), fixed(PANEL_BOUNDARY / 3) }, .color = pad_color }) { }
-        }
-        // clang-format on
-    }
-}
-
-static void panel_render_boundaries(const Panel* root, const Rect root_rect, const Theme* theme)
-{
-    for (const Panel* p = root; p; p = panel_iter_next(p))
-    {
-        if (!p->child_a)
-            continue;
-        Rect panel_rect = panel_calc_rect(p, root_rect);
-        panel_render_boundary(p, panel_rect, theme);
-    }
-}
-
-//
-// Process frame
-//
+static void panel_container(WindowContext* ctx, const Rect root_rect);
 
 static void process_frame(WindowContext* ctx)
 {
     AppShared* shared = ctx->shared;
-    UIContext* ui_context = &ctx->ui;
+    UIContext* ui_ctx = &ctx->ui;
     const Theme* theme = &shared->theme;
-    Font* font_ui = &shared->fonts[FONT_INDEX_UI];
-    Font* font_zh = &shared->fonts[FONT_INDEX_ZH];
-    Font* font_mono = &shared->fonts[FONT_INDEX_MONO];
-    Font* font_symbol = &shared->fonts[FONT_INDEX_ICON];
 
     TracyCZone(ctx_frame, 1);
 
     /* --- Recording demo: log every command's human-readable text --- */
-#if 0 /* set to 1 to see command trace in debug output */
+#if 1 /* set to 1 to see command trace in debug output */
     for (CmdQueueNode* cn = shared->cmd_queue.first; cn; cn = cn->next)
     {
         char buf[512];
@@ -612,287 +491,190 @@ static void process_frame(WindowContext* ctx)
 #endif
 
     cmd_queue_execute_all(&shared->cmd_queue, &shared->cmd_registry);
-    isize arena_pos_backup = ui_frame_begin(ui_context);
+    isize arena_pos_backup = ui_frame_begin(ui_ctx);
     {
-        ctx->root_panel = panel_update_animations(ctx->root_panel, g_ui_context->current_time);
-        f32 client_w = (f32)ui_context->client_width;
-        f32 client_h = (f32)ui_context->client_height;
+        ctx->root_panel = panel_update_animations(ctx->root_panel, g_ui_ctx->current_time);
+        f32 client_w = (f32)ui_ctx->client_width;
+        f32 client_h = (f32)ui_ctx->client_height;
         Rect root_rect = { 0, 0, client_w, client_h };
-        ctx->hovered_panel = NULL;
 
         ui_box({
             .sizing = { fixed(client_w), fixed(client_h) },
+            .rect_style = { .border_color = theme->fg_disabled, .border_thickness = 1 },
             .color = theme->bg_base,
         })
         {
-            panel_render_boundaries(ctx->root_panel, root_rect, theme);
-
-            for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
-            {
-                if (p->child_a)
-                    continue;
-                Rect rect = panel_calc_rect(p, root_rect);
-                f32 pad = 2.0f;
-                Rect inner = { rect.xmin + pad, rect.ymin + pad, rect.xmax - pad, rect.ymax - pad };
-                f32 iw = max(0.0f, inner.xmax - inner.xmin);
-                f32 ih = max(0.0f, inner.ymax - inner.ymin);
-                if (iw < 1.0f || ih < 1.0f)
-                    continue;
-
-                b32 mouse_in = ui_context->mouse_pos.x >= rect.xmin && ui_context->mouse_pos.x < rect.xmax &&
-                               ui_context->mouse_pos.y >= rect.ymin && ui_context->mouse_pos.y < rect.ymax;
-                if (!ctx->hovered_panel && mouse_in)
-                    ctx->hovered_panel = p;
-
-                /* Re-declare all existing tabs so they survive cleanup */
-                for (PanelTab* tab = p->tab_first; tab; tab = tab->next)
-                {
-                    String tab_name = { tab->name, tab->name_len };
-                    panel_tab_declare(p, tab_name);
-                }
-
-                ui_box({
-                    .sizing = { fixed(iw), fixed(ih) },
-                    .flags = BoxFlag_Float,
-                    .float_offset = { inner.xmin, inner.ymin },
-                    .color = theme->bg_surface,
-                    .child_gap = s_child_gap_small,
-                    .direction = LAYOUT_TOP_TO_BOTTOM,
-                })
-                {
-                    u8 key_buf[HASH_STR_MAX_LENGTH];
-                    i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_%p", (void*)p);
-                    String key = { key_buf, key_len };
-
-                    ui_box_interact(box, key);
-
-                    /* Tab bar */
-                    ui_box({
-                        .sizing = { fit_grow({}), fit({}) },
-                        .direction = LAYOUT_LEFT_TO_RIGHT,
-                        .child_gap = 2,
-                    })
-                    {
-                        PanelTab* active = panel_tab_get_active(p);
-
-                        isize tab_index = 0;
-                        for (PanelTab* tab = p->tab_first; tab; tab = tab->next, tab_index++)
-                        {
-                            b32 is_active = (tab == active);
-
-                            u8 tab_key[HASH_STR_MAX_LENGTH];
-                            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key), "###tab_%p_%.*s", (void*)p,
-                                                       (int)tab->name_len, tab->name);
-                            String tab_key_str = { tab_key, tab_key_len };
-
-                            Color bg_normal = is_active ? theme->bg_base : (Color){ 0, 0, 0, 0 };
-                            Color bg_hover = is_active ? theme->bg_base : theme->bg_overlay;
-                            Color fg = is_active ? theme->accent : theme->fg_secondary;
-                            f32 font_sz = 12;
-
-                            ui_box({
-                                .sizing = { fit({}), fit({}) },
-                                .padding = { 4, 10, 4, 10 },
-                                .direction = LAYOUT_LEFT_TO_RIGHT,
-                                .child_gap = 4,
-                                .alignment = { ALIGN_START, ALIGN_CENTER },
-                                .rect_style = { .corner_radius = 4 },
-                            })
-                            {
-                                UIBoxInteractResult r = ui_box_interact(box, tab_key_str);
-
-                                /* Drag source: start dragging this tab */
-                                b32 is_dragging = ui_dragging(r.flags);
-                                if (is_dragging)
-                                    ui_set_drag_payload(&tab, sizeof(PanelTab*));
-
-                                /* Drag target highlight */
-                                b32 is_drop_target = ui_drag_over(r.flags);
-
-                                if (r.last_box)
-                                    update_transition(&r.last_box->hot_t, 20.f,
-                                                      (ui_hovered(r.flags) || is_drop_target) ? 1.f : 0.f);
-                                f32 hot = r.last_box ? r.last_box->hot_t : 0.f;
-
-                                if (is_drop_target)
-                                    box->config.color = theme->accent;
-                                else if (is_dragging)
-                                    box->config.color =
-                                        (Color){ bg_normal.r, bg_normal.g, bg_normal.b, (u8)(bg_normal.a / 3) };
-                                else
-                                    box->config.color = lerp_color(bg_normal, bg_hover, hot);
-
-                                if (ui_lclicked(r.flags))
-                                    panel_tab_activate(p, tab);
-
-                                ui_text((String){ tab->name, tab->name_len },
-                                        &(TextConfig){ .font = font_ui,
-                                                       .font_size = font_sz,
-                                                       .color = is_drop_target ? theme->accent_fg : fg,
-                                                       .line_height = font_sz });
-
-                                /* Close button (hidden while dragging this tab) */
-                                if (!is_dragging)
-                                {
-                                    u8 ck[HASH_STR_MAX_LENGTH];
-                                    i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%p_%.*s", (void*)p,
-                                                      (int)tab->name_len, tab->name);
-                                    Color cb_normal = is_active ? theme->fg_secondary : (Color){ 0, 0, 0, 0 };
-                                    Color cb_hover = theme->fg_secondary;
-                                    UISignalFlags cf =
-                                        ui_button((String){ ck, cl }, font_ui, 10, (Sizing){ fixed(14), fixed(14) },
-                                                  (Padding){ 0 }, cb_normal, cb_normal, cb_hover, cb_hover);
-                                    if (ui_lclicked(cf))
-                                    {
-                                        cmd_queue_push(&shared->cmd_queue, str("tab.close"),
-                                                       &(CmdPayload){ .ctx = ctx, .panel = p, .tab = tab },
-                                                       sizeof(CmdPayload));
-                                    }
-                                }
-
-                                /* Drop: reorder tab within the same panel */
-                                if (ui_dropped(r.flags))
-                                {
-                                    PanelTab** payload = (PanelTab**)ui_accept_drag_payload(sizeof(PanelTab*));
-                                    if (payload && *payload && *payload != tab)
-                                    {
-                                        isize dragged_idx = 0;
-                                        for (PanelTab* t = p->tab_first; t && t != *payload; t = t->next)
-                                            dragged_idx++;
-                                        i32 delta = (i32)(tab_index - dragged_idx);
-
-                                        char num_buf[16];
-                                        i32 num_len = snprintf(num_buf, sizeof(num_buf), "%+d", (int)delta);
-                                        isize prefix_len = (isize)strlen("tab.move delta=");
-                                        isize total_len = prefix_len + (isize)num_len;
-                                        byte* text_data = (byte*)arena_push(&shared->cmd_arena, total_len + 1, 1, 1);
-                                        memcpy(text_data, "tab.move delta=", (size_t)prefix_len);
-                                        memcpy(text_data + prefix_len, num_buf, (size_t)num_len);
-                                        String text = { text_data, total_len };
-
-                                        cmd_queue_push(&shared->cmd_queue, text,
-                                                       &(CmdPayload){ .ctx = ctx, .panel = p, .tab = *payload },
-                                                       sizeof(CmdPayload));
-                                    }
-                                }
-                            }
-                        }
-
-                        /* Spacer */
-                        ui_box({ .sizing = { grow({}), fit({}) } })
-                        {
-                        }
-
-                        /* New tab button */
-                        u8 plus_key[HASH_STR_MAX_LENGTH];
-                        i32 plus_len = snprintf((char*)plus_key, sizeof(plus_key), "+##tab_add_%p", (void*)p);
-                        UISignalFlags plus_flags =
-                            ui_button((String){ plus_key, plus_len }, font_ui, 12, (Sizing){ fixed(22), fixed(22) },
-                                      (Padding){ 0 }, (Color){ 0, 0, 0, 0 }, theme->fg_secondary, theme->bg_overlay,
-                                      theme->bg_base);
-                        if (ui_lclicked(plus_flags))
-                        {
-                            cmd_queue_push(&shared->cmd_queue, str("tab.new"), &(CmdPayload){ .ctx = ctx, .panel = p },
-                                           sizeof(CmdPayload));
-                        }
-
-                        /* Close panel button */
-                        u8 close_key[HASH_STR_MAX_LENGTH];
-                        i32 close_len = snprintf((char*)close_key, sizeof(close_key), "X##panel_close_%p", (void*)p);
-                        String close_str = { close_key, close_len };
-                        UISignalFlags close_flags =
-                            ui_button(close_str, font_ui, 12, (Sizing){ fixed(22), fixed(22) }, (Padding){ 0 },
-                                      (Color){ 0, 0, 0, 0 }, theme->fg_secondary, theme->danger, theme->danger);
-                        if (p->parent && ui_lclicked(close_flags))
-                        {
-                            cmd_queue_push(&shared->cmd_queue, str("panel.close"),
-                                           &(CmdPayload){ .ctx = ctx, .panel = p }, sizeof(CmdPayload));
-                        }
-                    }
-
-                    /* Panel content — rendered only if an active tab exists */
-                    PanelTab* active_tab = panel_tab_get_active(p);
-                    if (active_tab)
-                    {
-                        u8 sa_key[HASH_STR_MAX_LENGTH];
-                        i32 sa_len = snprintf((char*)sa_key, sizeof(sa_key), "panel_scroll_%p", (void*)p);
-                        ui_scrollable_area({
-                            (String){ sa_key, sa_len },
-                            (Sizing){ grow({}), grow({}) },
-                            theme->bg_base,
-                            s_padding_small,
-                            theme->scrollbar_thumb,
-                        })
-                        {
-                            ui_box({
-                                .sizing = { fixed(400), fit_grow({}) },
-                                .color = theme->bg_surface,
-                                .padding = s_padding_small,
-                                .child_gap = s_child_gap_medium,
-                                .direction = LAYOUT_TOP_TO_BOTTOM,
-                            })
-                            {
-                                String tab_label = { active_tab->name, active_tab->name_len };
-                                ui_text(tab_label, &(TextConfig){ .font = font_ui,
-                                                                  .font_size = 14,
-                                                                  .color = theme->accent,
-                                                                  .line_height = 20 });
-
-                                ui_text(str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
-                                        &(TextConfig){ .font = font_ui,
-                                                       .font_size = 12,
-                                                       .color = theme->fg_primary,
-                                                       .line_height = 24 });
-                                ui_text(str("Ctrl+T new tab. Ctrl+W close tab. F11 toggle theme."),
-                                        &(TextConfig){ .font = font_ui,
-                                                       .font_size = 12,
-                                                       .color = theme->fg_secondary,
-                                                       .line_height = 24 });
-                                ui_text(str("Ctrl+Shift+Left/Right to reorder tabs."),
-                                        &(TextConfig){ .font = font_ui,
-                                                       .font_size = 12,
-                                                       .color = theme->fg_secondary,
-                                                       .line_height = 24 });
-                                ui_text(str("Ctrl+Shift+N moves tab to next panel."),
-                                        &(TextConfig){ .font = font_ui,
-                                                       .font_size = 12,
-                                                       .color = theme->fg_secondary,
-                                                       .line_height = 24 });
-                                ui_text(str("Ctrl+Shift+F/G to detach tab as new panel (H/V)."),
-                                        &(TextConfig){ .font = font_ui,
-                                                       .font_size = 12,
-                                                       .color = theme->fg_secondary,
-                                                       .line_height = 24 });
-
-                                u8 button_key[HASH_STR_MAX_LENGTH];
-                                i32 button_len = snprintf((char*)button_key, sizeof(button_key),
-                                                          "New Window##panel_button_%p", (void*)p);
-                                String button_str = { button_key, button_len };
-
-                                UISignalFlags button_flags = ui_button(
-                                    button_str, font_mono, 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                    theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
-                                if (ui_lclicked(button_flags))
-                                {
-                                    cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"), NULL, 0);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            /* Clean up tabs not declared this frame */
-            for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
-            {
-                if (p->child_a)
-                    continue;
-                panel_tabs_cleanup(p);
-            }
+            panel_container(ctx, root_rect);
         }
     }
     ui_frame_end(arena_pos_backup);
     TracyCZoneEnd(ctx_frame);
+}
+
+static void panel_container(WindowContext* ctx, const Rect rect)
+{
+    AppShared* shared = ctx->shared;
+    const Theme* theme = &shared->theme;
+
+    // clang-format off
+    PanelTheme pt = {
+        .panel_bg            = theme->bg_surface,
+        .panel_border        = theme->fg_disabled,
+        .tab_splitter        = theme->fg_disabled,
+        .tab_bar             = theme->bg_surface,
+        .tab_bg              = theme->bg_surface,
+        .tab_fg              = theme->fg_secondary,
+        .tab_active_bg       = theme->bg_base,
+        .tab_active_fg       = theme->fg_primary,
+        .tab_dragging_bg     = theme->accent,
+        .tab_drag_target_bg  = theme->selection,
+        .hover_bg            = theme->bg_overlay,
+        .click_bg            = theme->bg_overlay,
+        .splitter_idle       = theme->fg_disabled,
+        .splitter_hover      = theme->border_focus,
+        .splitter_drag       = theme->border_press,
+        .scrollbar_thumb     = theme->scrollbar_thumb,
+    };
+    // clang-format on
+
+    ui_panel_draw_boundaries(ctx->root_panel, rect, &pt);
+
+    /* Find hovered panel for keyboard shortcuts */
+    ctx->hovered_panel = NULL;
+    for (Panel* hp = ctx->root_panel; hp; hp = panel_iter_next(hp))
+    {
+        if (hp->child_a)
+            continue;
+        Rect r = panel_calc_rect(hp, rect);
+        if (ctx->ui.mouse_pos.x >= r.xmin && ctx->ui.mouse_pos.x < r.xmax && ctx->ui.mouse_pos.y >= r.ymin &&
+            ctx->ui.mouse_pos.y < r.ymax)
+        {
+            ctx->hovered_panel = hp;
+            break;
+        }
+    }
+
+    for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
+    {
+        ui_panel({
+            .panel = p,
+            .root_rect = rect,
+            .theme = &pt,
+            .font_ui = &shared->fonts[FONT_INDEX_UI],
+            .font_size = 12,
+            .cmd_queue = &shared->cmd_queue,
+            .cmd_ctx = ctx,
+            .padding = s_padding_medium,
+            .child_gap = s_child_gap_medium,
+            .direction = LAYOUT_TOP_TO_BOTTOM,
+        })
+        {
+            PanelTab* active = panel_tab_get_active(p);
+            if (!active)
+                continue;
+
+            String tab_label = { active->name, active->name_len };
+            ui_text(tab_label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                              .font_size = 14,
+                                              .color = theme->accent,
+                                              .line_height = 20 });
+
+            // clang-format off
+            ui_text(str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = 11,
+                                   .color = theme->fg_primary,
+                                   .line_height = 16 });
+            ui_text(str("Ctrl+T new tab. Ctrl+W close tab. F11 toggle theme."),
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = 11,
+                                   .color = theme->fg_primary,
+                                   .line_height = 16 });
+            ui_text(str("Ctrl+Shift+Left/Right to reorder tabs."),
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = 11,
+                                   .color = theme->fg_primary,
+                                   .line_height = 16 });
+            ui_text(str("Ctrl+Shift+N moves tab to next panel."),
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = 11,
+                                   .color = theme->fg_primary,
+                                   .line_height = 16 });
+            ui_text(str("Ctrl+Shift+F/G to detach tab as new panel (H/V)."),
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = 11,
+                                   .color = theme->fg_primary,
+                                   .line_height = 16 });
+            // clang-format on
+
+            UIBox* box = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+                                                    .child_gap = s_child_gap_medium,
+                                                    .direction = LAYOUT_LEFT_TO_RIGHT });
+            {
+                /* Button: create window */
+                UISignalFlags cw_button_flags =
+                    ui_button(panel_str("New Window##panel_cw_button", p->id), &shared->fonts[FONT_INDEX_UI], 12,
+                              (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
+                              theme->accent_hover, theme->accent_press);
+                if (ui_lclicked(cw_button_flags))
+                    cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"), NULL, 0);
+
+                /* Button: split horizontally */
+                UISignalFlags sph_button_flags =
+                    ui_button(panel_str("Split Horizontally##panel_sph_button", p->id), &shared->fonts[FONT_INDEX_UI],
+                              12, (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
+                              theme->accent_hover, theme->accent_press);
+                if (ui_lclicked(sph_button_flags))
+                {
+                    char buf[64];
+                    i32 len = snprintf(buf, sizeof(buf), "panel.split_h panel=%u", p->id);
+                    cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len },
+                                   &(CmdPayload){ .ctx = ctx, .panel = p }, sizeof(CmdPayload));
+                }
+
+                /* Button: split vertically */
+                UISignalFlags spv_button_flags =
+                    ui_button(panel_str("Split Vertically##panel_spv_button", p->id), &shared->fonts[FONT_INDEX_UI], 12,
+                              (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
+                              theme->accent_hover, theme->accent_press);
+                if (ui_lclicked(spv_button_flags))
+                {
+                    char buf[64];
+                    i32 len = snprintf(buf, sizeof(buf), "panel.split_v panel=%u", p->id);
+                    cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len },
+                                   &(CmdPayload){ .ctx = ctx, .panel = p }, sizeof(CmdPayload));
+                }
+            }
+            ui_box_end(box);
+
+            UIBox* box2 = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+                                                     .child_gap = s_child_gap_big,
+                                                     .alignment = { ALIGN_START, ALIGN_CENTER } });
+            {
+                ui_button(panel_str("nothing##world", p->id), &shared->fonts[FONT_INDEX_MONO], 11,
+                          (Sizing){ fixed(80), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
+                          theme->accent_hover, theme->accent_press);
+                ui_text_field(&ctx->text_edit_1, panel_str("placeholder##text_field", p->id),
+                              &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_small,
+                              theme->bg_overlay, theme->border_focus, theme->fg_primary, theme->scrollbar_thumb,
+                              theme->cursor_trail, theme->cursor, theme->selection, theme->selection_flash);
+                UISignalFlags flags =
+                    ui_switchbox(panel_str("switch box", p->id), &shared->fonts[FONT_INDEX_ICON], &ctx->check,
+                                 theme->border_normal, theme->accent_fg, theme->shadow, theme->accent);
+                if (ui_lclicked(flags))
+                    ctx->check = !ctx->check;
+            }
+            ui_box_end(box2);
+        }
+    }
+
+    /* Clean up tabs not declared this frame */
+    for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
+    {
+        if (p->child_a)
+            continue;
+        panel_tabs_cleanup(p);
+    }
 }
 
 //
@@ -903,7 +685,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 {
     WindowContext* ctx = NULL;
     AppShared* shared = NULL;
-    UIContext* ui_context = NULL;
+    UIContext* ui_ctx = NULL;
     {
         if (message == WM_CREATE)
         {
@@ -920,7 +702,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         if (ctx)
         {
             shared = ctx->shared;
-            ui_context = &ctx->ui;
+            ui_ctx = &ctx->ui;
         }
     }
 
@@ -929,12 +711,12 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     {
         case WM_MOUSEMOVE:
         {
-            f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
-            Position mouse_pos_backup = ui_context->mouse_pos;
-            ui_context->mouse_pos.x = GET_X_LPARAM(lparam) / dpi_scale;
-            ui_context->mouse_pos.y = GET_Y_LPARAM(lparam) / dpi_scale;
-            ui_context->mouse_delta.x = ui_context->mouse_pos.x - mouse_pos_backup.x;
-            ui_context->mouse_delta.y = ui_context->mouse_pos.y - mouse_pos_backup.y;
+            f32 dpi_scale = (f32)ui_ctx->dpi / USER_DEFAULT_SCREEN_DPI;
+            Position mouse_pos_backup = ui_ctx->mouse_pos;
+            ui_ctx->mouse_pos.x = GET_X_LPARAM(lparam) / dpi_scale;
+            ui_ctx->mouse_pos.y = GET_Y_LPARAM(lparam) / dpi_scale;
+            ui_ctx->mouse_delta.x = ui_ctx->mouse_pos.x - mouse_pos_backup.x;
+            ui_ctx->mouse_delta.y = ui_ctx->mouse_pos.y - mouse_pos_backup.y;
             return 0;
         }
 
@@ -942,7 +724,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             if (LOWORD(lparam) == HTCLIENT)
             {
-                SetCursor(shared->cursors[ui_context->desired_cursor]);
+                SetCursor(shared->cursors[ui_ctx->desired_cursor]);
                 return True;
             }
             return DefWindowProcW(window, message, wparam, lparam);
@@ -950,61 +732,61 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_MOUSEHWHEEL:
         {
-            ui_context->mouse_scroll_delta.x += GET_WHEEL_DELTA_WPARAM(wparam) / 10;
+            ui_ctx->mouse_scroll_delta.x += GET_WHEEL_DELTA_WPARAM(wparam) / 10;
             return 0;
         }
 
         case WM_MOUSEWHEEL:
         {
-            ui_context->mouse_scroll_delta.y += GET_WHEEL_DELTA_WPARAM(wparam) / -10;
+            ui_ctx->mouse_scroll_delta.y += GET_WHEEL_DELTA_WPARAM(wparam) / -10;
             return 0;
         }
 
         case WM_LBUTTONDOWN:
         {
-            ui_context->mouse_lclick = True;
-            ui_context->mouse_press = True;
-            f64 now = ui_context->current_time;
+            ui_ctx->mouse_lclick = True;
+            ui_ctx->mouse_press = True;
+            f64 now = ui_ctx->current_time;
             i32 click_x = GET_X_LPARAM(lparam);
             i32 click_y = GET_Y_LPARAM(lparam);
             f64 double_click_sec = (f64)GetDoubleClickTime() / 1000.0;
-            f32 dx = (f32)(click_x - ui_context->last_lclick_pos.x);
-            f32 dy = (f32)(click_y - ui_context->last_lclick_pos.y);
+            f32 dx = (f32)(click_x - ui_ctx->last_lclick_pos.x);
+            f32 dy = (f32)(click_y - ui_ctx->last_lclick_pos.y);
             f32 dist = sqrtf(dx * dx + dy * dy);
-            if (now - ui_context->last_lclick_time <= double_click_sec &&
+            if (now - ui_ctx->last_lclick_time <= double_click_sec &&
                 dist <= (f32)GetSystemMetrics(SM_CXDOUBLECLK) * 2.f)
-                ui_context->mouse_double_click = True;
-            ui_context->last_lclick_time = now;
-            ui_context->last_lclick_pos.x = (f32)click_x;
-            ui_context->last_lclick_pos.y = (f32)click_y;
+                ui_ctx->mouse_double_click = True;
+            ui_ctx->last_lclick_time = now;
+            ui_ctx->last_lclick_pos.x = (f32)click_x;
+            ui_ctx->last_lclick_pos.y = (f32)click_y;
             SetCapture(window);
             return 0;
         }
 
         case WM_RBUTTONDOWN:
         {
-            ui_context->mouse_rclick = True;
+            ui_ctx->mouse_rclick = True;
             SetCapture(window);
             return 0;
         }
 
         case WM_LBUTTONUP:
         {
-            ui_context->mouse_press = False;
+            ui_ctx->mouse_press = False;
             ReleaseCapture();
             return 0;
         }
 
         case WM_RBUTTONUP:
         {
-            ui_context->mouse_press = False;
+            ui_ctx->mouse_press = False;
             ReleaseCapture();
             return 0;
         }
 
         case WM_CAPTURECHANGED:
         {
-            ui_context->mouse_press = False;
+            ui_ctx->mouse_press = False;
             ReleaseCapture();
         }
 
@@ -1021,7 +803,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_IME_STARTCOMPOSITION:
         {
-            ui_context->ime_composing = True;
+            ui_ctx->ime_composing = True;
             return 0;
         }
 
@@ -1029,25 +811,25 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             if (lparam & GCS_RESULTSTR)
             {
-                String result = win32_ime_get_result(window, &ui_context->arena);
+                String result = win32_ime_get_result(window, &ui_ctx->arena);
                 const byte* p = result.data;
                 while ((isize)(p - result.data) < result.len)
                 {
                     UnicodeDecode dec = utf8_decode(p);
-                    if (ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
-                        ui_context->char_input_queue[ui_context->char_input_queue_count++] = dec.codepoint;
+                    if (ui_ctx->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
+                        ui_ctx->char_input_queue[ui_ctx->char_input_queue_count++] = dec.codepoint;
                     p = dec.next_p;
                 }
             }
             if (lparam & GCS_COMPSTR)
-                ui_context->ime_composition = win32_ime_get_composition(window, &ui_context->arena);
+                ui_ctx->ime_composition = win32_ime_get_composition(window, &ui_ctx->arena);
             return 0;
         }
 
         case WM_IME_ENDCOMPOSITION:
         {
-            ui_context->ime_composing = False;
-            ui_context->ime_composition = (String){ 0 };
+            ui_ctx->ime_composing = False;
+            ui_ctx->ime_composition = (String){ 0 };
             return 0;
         }
 
@@ -1058,7 +840,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 CANDIDATEFORM* form = (CANDIDATEFORM*)lparam;
                 form->dwIndex = 0;
                 form->dwStyle = CFS_CANDIDATEPOS;
-                Position pos = ui_context->ime_cursor_screen_pos;
+                Position pos = ui_ctx->ime_cursor_screen_pos;
                 form->ptCurrentPos.x = (LONG)pos.x;
                 form->ptCurrentPos.y = (LONG)pos.y;
                 return 1;
@@ -1101,7 +883,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                             payload.tab = at;
                     }
 
-                    /* First-token matching for commands that need extra pointer context */
+                    /* First-token matching for commands that need extra pointer ctx */
                     {
                         isize end = 0;
                         while (end < cmd_text.len && cmd_text.data[end] != ' ')
@@ -1122,7 +904,17 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                             payload.to_panel = ctx ? ctx->hovered_panel : NULL;
                     }
 
-                    cmd_queue_push(&shared->cmd_queue, cmd_text, &payload, sizeof(payload));
+                    if (payload.panel)
+                    {
+                        char buf[128];
+                        i32 len = snprintf(buf, sizeof(buf), "%.*s panel=%u", (int)cmd_text.len, cmd_text.data,
+                                           (unsigned)payload.panel->id);
+                        cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len }, &payload, sizeof(payload));
+                    }
+                    else
+                    {
+                        cmd_queue_push(&shared->cmd_queue, cmd_text, &payload, sizeof(payload));
+                    }
                     return 0;
                 }
             }
@@ -1175,10 +967,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 default: 
                     return DefWindowProcW(window, message, wparam, lparam);
             }
-            ui_context->text_action_queue[ui_context->text_action_queue_count++] = action;
+            ui_ctx->text_action_queue[ui_ctx->text_action_queue_count++] = action;
             // clang-format on
 
-            Assert(ui_context->text_action_queue_count < TEXT_ACTION_QUEUE_CAPACITY);
+            Assert(ui_ctx->text_action_queue_count < TEXT_ACTION_QUEUE_CAPACITY);
 
             return 0;
         }
@@ -1201,31 +993,31 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 codepoint = utf16_decode(&c).codepoint;
             }
-            if (codepoint >= 0x20 && codepoint != 127 && ui_context->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
-                ui_context->char_input_queue[ui_context->char_input_queue_count++] = codepoint;
+            if (codepoint >= 0x20 && codepoint != 127 && ui_ctx->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
+                ui_ctx->char_input_queue[ui_ctx->char_input_queue_count++] = codepoint;
             return 0;
         }
 
         case WM_SIZE:
         {
-            f32 dpi_scale = (f32)ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+            f32 dpi_scale = (f32)ui_ctx->dpi / USER_DEFAULT_SCREEN_DPI;
             u32 physical_client_width = LOWORD(lparam);
             u32 physical_client_height = HIWORD(lparam);
 
-            ui_context->client_width = (u32)ceil(physical_client_width / dpi_scale);
-            ui_context->client_height = (u32)ceil(physical_client_height / dpi_scale);
-            if (ui_context->client_width > 0 && ui_context->client_height > 0)
-                ui_context->render_fn.on_resize(ui_context->renderer, physical_client_width, physical_client_height);
+            ui_ctx->client_width = (u32)ceil(physical_client_width / dpi_scale);
+            ui_ctx->client_height = (u32)ceil(physical_client_height / dpi_scale);
+            if (ui_ctx->client_width > 0 && ui_ctx->client_height > 0)
+                ui_ctx->render_fn.on_resize(ui_ctx->renderer, physical_client_width, physical_client_height);
             process_frame(ctx);
             return 0;
         }
 
         case WM_DPICHANGED:
         {
-            ui_context->dpi = GetDpiForWindow(window);
+            ui_ctx->dpi = GetDpiForWindow(window);
             // Per-window atlas recreated; shared raster cache NOT reset — glyphs at
             // old DPI remain available for other windows while new DPI entries accumulate.
-            renderer_recreate_glyph_atlas_texture(ui_context->renderer);
+            renderer_recreate_glyph_atlas_texture(ui_ctx->renderer);
 
             RECT* const suggested_rect = (RECT*)lparam;
             SetWindowPos(window, NULL, suggested_rect->left, suggested_rect->top,

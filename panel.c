@@ -1,12 +1,29 @@
 #include "panel.h"
 #include "utils.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 #define PANEL_ANIM_DURATION  0.1f
 #define PANEL_STACK_CAPACITY 16
+
+static u32 s_panel_next_id = 1; /* 0 reserved for none */
+
+Panel* panel_alloc(void)
+{
+    Panel* p = (Panel*)calloc(1, sizeof(Panel));
+    p->id = s_panel_next_id++;
+    return p;
+}
+
+Panel* panel_find_by_id(const Panel* root, u32 id)
+{
+    for (const Panel* p = root; p; p = panel_iter_next(p))
+        if (p->id == id)
+            return (Panel*)p;
+    return NULL;
+}
 
 Panel* panel_iter_next(const Panel* panel)
 {
@@ -362,8 +379,8 @@ Panel* panel_split(Panel* panel, const Axis2 axis)
     if (!panel || panel->child_a)
         return NULL;
 
-    Panel* child_a = (Panel*)calloc(1, sizeof(Panel));
-    Panel* child_b = (Panel*)calloc(1, sizeof(Panel));
+    Panel* child_a = panel_alloc();
+    Panel* child_b = panel_alloc();
     if (!child_a || !child_b)
     {
         free(child_a);

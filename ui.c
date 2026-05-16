@@ -4,6 +4,7 @@
 #include "win32_helper.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
@@ -13,29 +14,9 @@
 #define BOX_CACHE_ARENA_CAPACITY  MB(8)
 #define BOX_CACHE_CAPACITY        1024 // must be a power of two
 
-// Widgets
-
-#define CHECKBOX_HEIGHT 22
-#define CHECKBOX_PAD    3
-
-#define SCROLLBAR_THICKNESS_MIN          5
-#define SCROLLBAR_THICKNESS_MAX          8.5
-#define SCROLLBAR_PADDING_END_MIN        SCROLLBAR_THICKNESS_MIN * 0.5
-#define SCROLLBAR_PADDING_END_MAX        SCROLLBAR_THICKNESS_MIN
-#define SCROLLBAR_SPACER                 (SCROLLBAR_THICKNESS_MIN * 2.25)
-#define SCROLLBAR_THUMB_OPACITY_TRACK    0.4f
-#define SCROLLBAR_THUMB_OPACITY_INACTIVE 0.5f // range: [0, 1]
-#define SCROLLBAR_THUMB_OPACITY_HOVER    0.75f
-#define SCROLL_SENSITIVITY               4.f
-#define SCROLL_ANIM_DURATION             0.09f
-
-#define CURSORBAR_PADDING 7
-
-#define IME_OFFSET_TOP (-12)
-
 ///
 
-UIContext* g_ui_context = NULL;
+UIContext* g_ui_ctx = NULL;
 
 //
 // Box cache
@@ -86,18 +67,18 @@ static TextHash extract_hash_str(const String* text)
                 if (text->data[i + 1] == '#')
                 {
                     // Init display string
-                    text_hash.display_str = str_clone(&g_ui_context->arena, (String){ text->data, i });
+                    text_hash.display_str = str_clone(&g_ui_ctx->arena, (String){ text->data, i });
 
                     if (text->len > i + 2)
                         if (text->data[i + 2] == '#')
                         {
                             String temp = str_slice(*text, i + 3, text->len);
-                            text_hash.hash_str = str_clone(&g_ui_context->arena, temp);
+                            text_hash.hash_str = str_clone(&g_ui_ctx->arena, temp);
                             break;
                         }
                     String str_left = { text->data, i };
                     String str_right = { text->data + i + 2, text->len - (i + 2) };
-                    text_hash.hash_str = str_concat(&g_ui_context->arena, str_left, str_right);
+                    text_hash.hash_str = str_concat(&g_ui_ctx->arena, str_left, str_right);
                     break;
                 }
 
@@ -125,13 +106,13 @@ static BoxKey generate_box_key(String hash_str)
 
 static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
 {
-    UIBox* last_box = NULL;
-
-    UIBoxCache* box_cache = &g_ui_context->box_cache;
+    UIBoxCache* box_cache = &g_ui_ctx->box_cache;
     BoxKey key = { .len = hash_str.len };
     memcpy(key.str, hash_str.data, hash_str.len);
 
     LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&box_cache->lru_cache, &key);
+    UIBox* last_box =
+        (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
 
     // NOTE:
     //   Use LRUCache for its fixed-size hash table with linked-list chaining, and its
@@ -140,16 +121,12 @@ static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
     switch (lru_result.signal)
     {
         case LRU_SIGNAL_FOUND:
-            last_box =
-                (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
             // Detect duplicate box key
-            if (g_ui_context->frame_index != 0)
-                if (last_box->last_frame_index == g_ui_context->frame_index)
+            if (g_ui_ctx->frame_index != 0)
+                if (last_box->last_frame_index == g_ui_ctx->frame_index)
                     Assert(0);
             break;
         case LRU_SIGNAL_TOINSERT:
-            last_box =
-                (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
             memcpy(&last_box->key, &key, sizeof(key));
             break;
         case LRU_SIGNAL_TOEVICT:
@@ -162,10 +139,10 @@ static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
 
 static void box_cache_remove_unused()
 {
-    LRUCache* lru_cache = &g_ui_context->box_cache.lru_cache;
+    LRUCache* lru_cache = &g_ui_ctx->box_cache.lru_cache;
     u32 lru_entry_index = lru_cache->entries[0].lru_prev;
     UIBox* lru_box = (UIBox*)((byte*)lru_cache->values_buf + lru_entry_index * lru_cache->value_size);
-    while (lru_box->last_frame_index < g_ui_context->frame_index && lru_entry_index > 0)
+    while (lru_box->last_frame_index < g_ui_ctx->frame_index && lru_entry_index > 0)
     {
         lru_entry_index = lru_cache->entries[lru_entry_index].lru_prev;
         lru_cache_pop_lru_entry(lru_cache);
@@ -178,26 +155,26 @@ static void box_cache_remove_unused()
 // Context
 //
 
-void ui_init(const HWND window, UIContext* ui_context, struct Renderer* renderer, GlyphRasterCache* raster_cache,
-             u32 width, u32 height, u32 dpi, UIRenderFunc render_fn)
+void ui_init(const HWND window, UIContext* ui_ctx, struct Renderer* renderer, GlyphRasterCache* raster_cache, u32 width,
+             u32 height, u32 dpi, UIRenderFunc render_fn)
 {
-    ui_context->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
-    box_cache_init(&ui_context->box_cache);
-    ui_context->window = window;
-    ui_context->renderer = renderer;
-    ui_context->raster_cache = raster_cache;
-    ui_context->client_width = width;
-    ui_context->client_height = height;
-    ui_context->dpi = dpi;
-    ui_context->render_fn = render_fn;
-    ui_context->frame_index = 0;
+    ui_ctx->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
+    box_cache_init(&ui_ctx->box_cache);
+    ui_ctx->window = window;
+    ui_ctx->renderer = renderer;
+    ui_ctx->raster_cache = raster_cache;
+    ui_ctx->client_width = width;
+    ui_ctx->client_height = height;
+    ui_ctx->dpi = dpi;
+    ui_ctx->render_fn = render_fn;
+    ui_ctx->frame_index = 0;
 }
 
-void ui_deinit(UIContext* ui_context)
+void ui_deinit(UIContext* ui_ctx)
 {
-    box_cache_deinit(&ui_context->box_cache);
-    arena_release(&ui_context->arena);
-    memset(ui_context, 0, sizeof(*ui_context));
+    box_cache_deinit(&ui_ctx->box_cache);
+    arena_release(&ui_ctx->arena);
+    memset(ui_ctx, 0, sizeof(*ui_ctx));
 }
 
 //
@@ -206,20 +183,19 @@ void ui_deinit(UIContext* ui_context)
 
 static UIBox* ui_box_new()
 {
-    Assert(g_ui_context->box_queue.count < BOX_QUEUE_CAPACITY);
-    return &g_ui_context->box_queue.items[g_ui_context->box_queue.count++];
+    Assert(g_ui_ctx->box_queue.count < BOX_QUEUE_CAPACITY);
+    return &g_ui_ctx->box_queue.items[g_ui_ctx->box_queue.count++];
 }
 
 static UIBox* ui_box_get_parent()
 {
-    return (g_ui_context->box_stack.depth > 0) ? g_ui_context->box_stack.items[g_ui_context->box_stack.depth - 1]
-                                               : NULL;
+    return (g_ui_ctx->box_stack.depth > 0) ? g_ui_ctx->box_stack.items[g_ui_ctx->box_stack.depth - 1] : NULL;
 }
 
 static UIBox* ui_box_get_root()
 {
-    Assert(g_ui_context->box_queue.count > 0);
-    return &g_ui_context->box_queue.items[0];
+    Assert(g_ui_ctx->box_queue.count > 0);
+    return &g_ui_ctx->box_queue.items[0];
 }
 
 static b32 axis_has_fit_attribute(const SizingMode mode)
@@ -232,10 +208,10 @@ static b32 axis_has_grow_attribute(const SizingMode mode)
     return mode == SIZING_MODE_GROW || mode == SIZING_MODE_FIT_GROW;
 }
 
-UIBox* ui_box_start(const BoxConfig* config)
+UIBox* ui_box_start(const BoxConfig* cfg)
 {
-    Assert(g_ui_context->box_stack.depth <= BOX_STACK_CAPACITY);
-    Assert(g_ui_context->box_queue.count <= BOX_QUEUE_CAPACITY);
+    Assert(g_ui_ctx->box_stack.depth <= BOX_STACK_CAPACITY);
+    Assert(g_ui_ctx->box_queue.count <= BOX_QUEUE_CAPACITY);
 
     UIBox* box = ui_box_new();
     UIBox* parent = ui_box_get_parent();
@@ -257,58 +233,58 @@ UIBox* ui_box_start(const BoxConfig* config)
         parent->data.container.child_count++;
     }
 
-    g_ui_context->box_stack.items[g_ui_context->box_stack.depth++] = box;
-    memcpy(&box->config, config, sizeof(*config));
-    box->flags = config->flags;
-    box->size.width = config->sizing.width.mode == SIZING_MODE_FIXED ? config->sizing.width.min_max.min : 0;
-    box->size.height = config->sizing.height.mode == SIZING_MODE_FIXED ? config->sizing.height.min_max.min : 0;
+    g_ui_ctx->box_stack.items[g_ui_ctx->box_stack.depth++] = box;
+    memcpy(&box->cfg, cfg, sizeof(*cfg));
+    box->flags = cfg->flags;
+    box->size.width = cfg->sizing.width.mode == SIZING_MODE_FIXED ? cfg->sizing.width.min_max.min : 0;
+    box->size.height = cfg->sizing.height.mode == SIZING_MODE_FIXED ? cfg->sizing.height.min_max.min : 0;
     Assert(box->size.width >= 0.f && box->size.height >= 0.f);
-    if (axis_has_grow_attribute(config->sizing.width.mode) && config->sizing.width.min_max.max == 0)
-        box->config.sizing.width.min_max.max = INFINITY;
-    if (axis_has_grow_attribute(config->sizing.height.mode) && config->sizing.height.min_max.max == 0)
-        box->config.sizing.height.min_max.max = INFINITY;
+    if (axis_has_grow_attribute(cfg->sizing.width.mode) && cfg->sizing.width.min_max.max == 0)
+        box->cfg.sizing.width.min_max.max = INFINITY;
+    if (axis_has_grow_attribute(cfg->sizing.height.mode) && cfg->sizing.height.min_max.max == 0)
+        box->cfg.sizing.height.min_max.max = INFINITY;
 
     return box;
 }
 
+// TODO: Do not need `box` argument actually ...
 void ui_box_end(UIBox* box)
 {
-    g_ui_context->box_stack.items[g_ui_context->box_stack.depth--] = NULL;
+    g_ui_ctx->box_stack.items[g_ui_ctx->box_stack.depth--] = NULL;
 }
 
-UIBox* ui_text(const String text, const TextConfig* text_config)
+UIBox* ui_text(const String text, const TextConfig* text_cfg)
 {
-    GlyphRasterCache* raster_cache = g_ui_context->raster_cache;
-    u32 dpi = g_ui_context->dpi;
-    get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
-    get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
-    struct Renderer* renderer = g_ui_context->renderer;
+    GlyphRasterCache* raster_cache = g_ui_ctx->raster_cache;
+    u32 dpi = g_ui_ctx->dpi;
+    get_text_width_fn get_text_width = g_ui_ctx->render_fn.get_text_width;
+    get_text_height_fn get_text_height = g_ui_ctx->render_fn.get_text_height;
+    struct Renderer* renderer = g_ui_ctx->renderer;
 
-    f32 base_line_height =
-        get_text_height(renderer, raster_cache, text, text_config->font, text_config->font_size, dpi);
-    f32 line_height = text_config->line_height > 0 ? text_config->line_height : base_line_height;
-    f32 fixed_width = get_text_width(renderer, raster_cache, text, text_config->font, text_config->font_size, dpi);
-    BoxConfig box_config = { .sizing = { .width = { { fixed_width, fixed_width }, SIZING_MODE_FIXED },
-                                         .height = { { line_height, line_height }, SIZING_MODE_FIXED } } };
+    f32 base_line_height = get_text_height(renderer, raster_cache, text, text_cfg->font, text_cfg->font_size, dpi);
+    f32 line_height = text_cfg->line_height > 0 ? text_cfg->line_height : base_line_height;
+    f32 fixed_width = get_text_width(renderer, raster_cache, text, text_cfg->font, text_cfg->font_size, dpi);
+    BoxConfig box_cfg = { .sizing = { .width = { { fixed_width, fixed_width }, SIZING_MODE_FIXED },
+                                      .height = { { line_height, line_height }, SIZING_MODE_FIXED } } };
 
-    UIBox* text_box = ui_box_start(&box_config);
+    UIBox* text_box = ui_box_start(&box_cfg);
     {
         text_box->type = BOX_TYPE_TEXT;
 
-        Assert(text_config->font->face3);
-        Assert(text_config->font_size);
-        text_box->data.text.font = text_config->font;
-        text_box->data.text.font_size = text_config->font_size;
+        Assert(text_cfg->font->face3);
+        Assert(text_cfg->font_size);
+        text_box->data.text.font = text_cfg->font;
+        text_box->data.text.font_size = text_cfg->font_size;
 
         text_box->data.text.content = text;
-        text_box->data.text.color = text_config->color;
+        text_box->data.text.color = text_cfg->color;
         memset(&text_box->data.text.wrapped_lines, 0, sizeof(text_box->data.text.wrapped_lines));
         text_box->data.text.line_count = 1;
         text_box->data.text.line_height = line_height;
         text_box->data.text.half_leading = (line_height - base_line_height) / 2.0f;
     }
 
-    /* Calculate box->config.sizing.width.value.min by finding the width of the longest word in the text. */
+    /* Calculate box->cfg.sizing.width.value.min by finding the width of the longest word in the text. */
     f32 min_width = 0;
     f32 whole_text_width = 0;
     isize word_count = 0;
@@ -351,10 +327,10 @@ UIBox* ui_text(const String text, const TextConfig* text_config)
                                           text_box->data.text.font_size, dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
-    text_box->config.sizing.width.min_max.min = min_width;
-    text_box->config.sizing.width.min_max.max = whole_text_width;
-    text_box->config.sizing.height.min_max.min = (f32)text_box->data.text.line_height;
-    text_box->config.sizing.height.min_max.max = (f32)text_box->data.text.line_height * word_count;
+    text_box->cfg.sizing.width.min_max.min = min_width;
+    text_box->cfg.sizing.width.min_max.max = whole_text_width;
+    text_box->cfg.sizing.height.min_max.min = (f32)text_box->data.text.line_height;
+    text_box->cfg.sizing.height.min_max.max = (f32)text_box->data.text.line_height * word_count;
 
     ui_box_end(text_box);
     return text_box;
@@ -383,38 +359,38 @@ typedef struct
     LayoutDirection main_direction;
 } AxisContext;
 
-static AxisContext get_axis_context(UIBox* box, const Axis axis)
+static AxisContext get_axis_ctx(UIBox* box, const Axis axis)
 {
     AxisContext ctx = { 0 };
     if (axis == WIDTH)
     {
         ctx.size = &box->size.width;
-        ctx.min_size = &box->config.sizing.width.min_max.min;
-        ctx.max_size = &box->config.sizing.width.min_max.max;
+        ctx.min_size = &box->cfg.sizing.width.min_max.min;
+        ctx.max_size = &box->cfg.sizing.width.min_max.max;
         ctx.remaining = &box->data.container.remaining_space.width;
-        ctx.padding_start = box->config.padding.left;
-        ctx.padding_end = box->config.padding.right;
-        ctx.sizing_mode = box->config.sizing.width.mode;
+        ctx.padding_start = box->cfg.padding.left;
+        ctx.padding_end = box->cfg.padding.right;
+        ctx.sizing_mode = box->cfg.sizing.width.mode;
         ctx.main_direction = LAYOUT_LEFT_TO_RIGHT;
     }
     else
     {
         ctx.size = &box->size.height;
-        ctx.min_size = &box->config.sizing.height.min_max.min;
-        ctx.max_size = &box->config.sizing.height.min_max.max;
+        ctx.min_size = &box->cfg.sizing.height.min_max.min;
+        ctx.max_size = &box->cfg.sizing.height.min_max.max;
         ctx.remaining = &box->data.container.remaining_space.height;
-        ctx.padding_start = box->config.padding.top;
-        ctx.padding_end = box->config.padding.bottom;
-        ctx.sizing_mode = box->config.sizing.height.mode;
+        ctx.padding_start = box->cfg.padding.top;
+        ctx.padding_end = box->cfg.padding.bottom;
+        ctx.sizing_mode = box->cfg.sizing.height.mode;
         ctx.main_direction = LAYOUT_TOP_TO_BOTTOM;
     }
     return ctx;
 }
 
-// Recursively calculate sizes for boxes configured with 'fit' attribute
+// Recursively calculate sizes for boxes cfg with 'fit' attribute
 static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
 {
-    AxisContext box_ctx = get_axis_context(box, axis);
+    AxisContext box_ctx = get_axis_ctx(box, axis);
 
     f32 box_ctx_min_size_backup = *box_ctx.min_size;
     if (axis_has_fit_attribute(box_ctx.sizing_mode))
@@ -423,10 +399,10 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
         *box_ctx.size += box_ctx.padding_start + box_ctx.padding_end;
         *box_ctx.min_size = 0;
         *box_ctx.min_size += box_ctx.padding_start + box_ctx.padding_end;
-        if (box->config.direction == box_ctx.main_direction)
+        if (box->cfg.direction == box_ctx.main_direction)
         {
-            *box_ctx.size += box->config.child_gap * child_gap_count;
-            *box_ctx.min_size += box->config.child_gap * child_gap_count;
+            *box_ctx.size += box->cfg.child_gap * child_gap_count;
+            *box_ctx.min_size += box->cfg.child_gap * child_gap_count;
         }
     }
 
@@ -441,7 +417,7 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
         }
     }
 
-    /* Select a bigger min size if box axis has both fit attribute and min size config
+    /* Select a bigger min size if box axis has both fit attribute and min size cfg
     And clamp box axis size to less than box axis max size */
     if (axis_has_fit_attribute(box_ctx.sizing_mode))
     {
@@ -457,10 +433,10 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
     UIBox* parent = box->parent;
     if (parent && !(box->flags & BoxFlag_Float))
     {
-        AxisContext parent_ctx = get_axis_context(parent, axis);
+        AxisContext parent_ctx = get_axis_ctx(parent, axis);
         if (axis_has_fit_attribute(parent_ctx.sizing_mode))
         {
-            if (parent->config.direction == parent_ctx.main_direction)
+            if (parent->cfg.direction == parent_ctx.main_direction)
             {
                 *parent_ctx.size += *box_ctx.size;
                 *parent_ctx.min_size += *box_ctx.min_size;
@@ -561,32 +537,32 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
     if (box->type != BOX_TYPE_CONTAINER)
         return;
 
-    isize arena_pos_backup = g_ui_context->arena.pos;
+    isize arena_pos_backup = g_ui_ctx->arena.pos;
     {
         isize children_count = box->data.container.child_count;
-        AxisContext ctx = get_axis_context(box, axis);
+        AxisContext ctx = get_axis_ctx(box, axis);
         *ctx.remaining = *ctx.size;
 
         /* Subtract padding and child gap */
         // TODO: When the window is resized to very small, the root box's remaining will be less
         // than padding, then `Assert` broken.
         *ctx.remaining -= ctx.padding_start + ctx.padding_end;
-        Assert(*ctx.remaining >= 0);
+        // Assert(*ctx.remaining >= 0); // TODO: important?
         isize child_gap_count = children_count - 1;
-        if (box->config.direction == ctx.main_direction)
-            *ctx.remaining -= box->config.child_gap * child_gap_count;
+        if (box->cfg.direction == ctx.main_direction)
+            *ctx.remaining -= box->cfg.child_gap * child_gap_count;
 
         /* Subtract the childrens' determined size from the parent's remaining space. */
         UIBox* child = box->child_first;
         while (child)
         {
             if (child->flags & BoxFlag_Float)
-                *ctx.remaining += box->config.child_gap;
+                *ctx.remaining += box->cfg.child_gap;
 
-            AxisContext child_ctx = get_axis_context(child, axis);
+            AxisContext child_ctx = get_axis_ctx(child, axis);
 
             /* Subtract the child's determined size from the parent's remaining space. */
-            if (box->config.direction == ctx.main_direction)
+            if (box->cfg.direction == ctx.main_direction)
                 if (!(child->flags & BoxFlag_Float))
                     *ctx.remaining -= *child_ctx.size;
 
@@ -599,21 +575,21 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
         child = box->child_first;
         while (child)
         {
-            AxisContext child_ctx = get_axis_context(child, axis);
+            AxisContext child_ctx = get_axis_ctx(child, axis);
             if (axis_has_grow_attribute(child_ctx.sizing_mode))
             {
                 DistributeAble growable = { child_ctx.size, child_ctx.max_size };
-                *slice_push(&g_ui_context->arena, &growables) = growable;
+                *slice_push(&g_ui_ctx->arena, &growables) = growable;
             }
 
             if (*child_ctx.size > *child_ctx.min_size)
             {
                 DistributeAble shrinkable = { child_ctx.size, child_ctx.min_size };
-                *slice_push(&g_ui_context->arena, &shrinkables) = shrinkable;
+                *slice_push(&g_ui_ctx->arena, &shrinkables) = shrinkable;
             }
             child = child->next;
         }
-        if (box->config.direction == ctx.main_direction)
+        if (box->cfg.direction == ctx.main_direction)
         {
             if (*ctx.remaining > 1) // NOTE: Use 1 instead of 0 to avoid distributing meaningless slivers
                 distribute_axis(ctx.remaining, growables, GROW);
@@ -631,7 +607,7 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
                     *shrinkables.data[i].value = max(*shrinkables.data[i].limit, *ctx.remaining);
         }
     }
-    g_ui_context->arena.pos = arena_pos_backup;
+    g_ui_ctx->arena.pos = arena_pos_backup;
 
     /* Recursively resolve size (breadth first) */
     if (box->type == BOX_TYPE_CONTAINER)
@@ -651,46 +627,44 @@ static void ui_box_resolve_position(UIBox* box)
     {
         UIBox* parent = box->parent;
         ContainerData* parent_data = &parent->data.container;
-        box->position.x += parent->position.x + parent->config.padding.left;
-        box->position.y += parent->position.y + parent->config.padding.top;
-        if (parent->config.direction == LAYOUT_LEFT_TO_RIGHT)
+        box->position.x += parent->position.x + parent->cfg.padding.left;
+        box->position.y += parent->position.y + parent->cfg.padding.top;
+        if (parent->cfg.direction == LAYOUT_LEFT_TO_RIGHT)
         {
             box->position.x += parent_data->next_child_offset_x;
             if (!(box->flags & BoxFlag_Float))
-                parent_data->next_child_offset_x += box->size.width + parent->config.child_gap;
+                parent_data->next_child_offset_x += box->size.width + parent->cfg.child_gap;
 
-            if (parent->config.alignment.x == ALIGN_CENTER)
+            if (parent->cfg.alignment.x == ALIGN_CENTER)
                 box->position.x += parent->data.container.remaining_space.width / 2;
-            else if (parent->config.alignment.x == ALIGN_END)
+            else if (parent->cfg.alignment.x == ALIGN_END)
                 box->position.x += parent->data.container.remaining_space.width;
 
-            if (parent->config.alignment.y == ALIGN_CENTER)
+            if (parent->cfg.alignment.y == ALIGN_CENTER)
                 box->position.y += (parent->data.container.remaining_space.height - box->size.height) / 2;
-            else if (parent->config.alignment.y == ALIGN_END)
+            else if (parent->cfg.alignment.y == ALIGN_END)
                 box->position.y += parent->data.container.remaining_space.height - box->size.height;
         }
         else
         {
             box->position.y += parent_data->next_child_offset_y;
             if (!(box->flags & BoxFlag_Float))
-                parent_data->next_child_offset_y += box->size.height + parent->config.child_gap;
+                parent_data->next_child_offset_y += box->size.height + parent->cfg.child_gap;
 
-            if (parent->config.alignment.y == ALIGN_CENTER)
+            if (parent->cfg.alignment.y == ALIGN_CENTER)
                 box->position.y += parent->data.container.remaining_space.height / 2;
-            else if (parent->config.alignment.y == ALIGN_END)
+            else if (parent->cfg.alignment.y == ALIGN_END)
                 box->position.y += parent->data.container.remaining_space.height;
 
-            if (parent->config.alignment.x == ALIGN_CENTER)
+            if (parent->cfg.alignment.x == ALIGN_CENTER)
                 box->position.x += (parent->data.container.remaining_space.width - box->size.width) / 2;
-            else if (parent->config.alignment.x == ALIGN_END)
+            else if (parent->cfg.alignment.x == ALIGN_END)
                 box->position.x += parent->data.container.remaining_space.width - box->size.width;
         }
 
         /* Handle scroll & float offset */
-        box->position.x +=
-            parent->config.child_offset.x + ((box->flags & BoxFlag_Float) ? box->config.float_offset.x : 0.f);
-        box->position.y +=
-            parent->config.child_offset.y + ((box->flags & BoxFlag_Float) ? box->config.float_offset.y : 0.f);
+        box->position.x += parent->cfg.child_offset.x + ((box->flags & BoxFlag_Float) ? box->cfg.float_offset.x : 0.f);
+        box->position.y += parent->cfg.child_offset.y + ((box->flags & BoxFlag_Float) ? box->cfg.float_offset.y : 0.f);
     }
 
     if (box->type == BOX_TYPE_CONTAINER)
@@ -716,16 +690,16 @@ static void ui_box_resolve_position(UIBox* box)
         //   Update `last_frame_index` here because this is the final box that will be used for the current frame.
         //   This enables duplicate detection: during lookup, if a box is already marked with the current frame index,
         //   it indicates a duplicate key (panic condition).
-        last_box->last_frame_index = g_ui_context->frame_index;
+        last_box->last_frame_index = g_ui_ctx->frame_index;
     }
 }
 
 static void perform_text_wrapping(UIBox* text_box)
 {
-    u32 dpi = g_ui_context->dpi;
-    GlyphRasterCache* raster_cache = g_ui_context->raster_cache;
-    get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
-    struct Renderer* renderer = g_ui_context->renderer;
+    u32 dpi = g_ui_ctx->dpi;
+    GlyphRasterCache* raster_cache = g_ui_ctx->raster_cache;
+    get_text_width_fn get_text_width = g_ui_ctx->render_fn.get_text_width;
+    struct Renderer* renderer = g_ui_ctx->renderer;
 
     const Font* font = text_box->data.text.font;
     f32 font_size = text_box->data.text.font_size;
@@ -749,8 +723,7 @@ static void perform_text_wrapping(UIBox* text_box)
         f32 width = get_text_width(renderer, raster_cache, str_slice(text, line_start, distance), font, font_size, dpi);
         if (width > max_width && last_break > line_start)
         {
-            *slice_push(&g_ui_context->arena, &text_box->data.text.wrapped_lines) =
-                str_slice(text, line_start, last_break);
+            *slice_push(&g_ui_ctx->arena, &text_box->data.text.wrapped_lines) = str_slice(text, line_start, last_break);
 
             /* Skip space if needed */
             line_start = (text.data[last_break] == ' ') ? last_break + 1 : last_break;
@@ -766,10 +739,10 @@ static void perform_text_wrapping(UIBox* text_box)
     }
 
     /* Handle last line */
-    *slice_push(&g_ui_context->arena, &text_box->data.text.wrapped_lines) = str_slice(text, line_start, text.len);
+    *slice_push(&g_ui_ctx->arena, &text_box->data.text.wrapped_lines) = str_slice(text, line_start, text.len);
 
     text_box->size.height = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
-    text_box->config.sizing.height.min_max.min = text_box->size.height;
+    text_box->cfg.sizing.height.min_max.min = text_box->size.height;
 }
 
 static void ui_box_apply_text_wrapping(UIBox* box)
@@ -816,18 +789,18 @@ static f64 get_current_time(u64 frame_index)
     return (f64)current_time.QuadPart / freq.QuadPart;
 }
 
-isize ui_frame_begin(UIContext* ui_context)
+isize ui_frame_begin(UIContext* ui_ctx)
 {
-    ui_context->prev_context = g_ui_context;
-    g_ui_context = ui_context;
-    if (g_ui_context->frame_index > 0)
-        g_ui_context->render_fn.wait_for_last_submitted_frame(g_ui_context->renderer);
-    f64 last_time = g_ui_context->current_time;
-    g_ui_context->current_time = get_current_time(g_ui_context->frame_index);
-    g_ui_context->frame_delta_time = (f32)(g_ui_context->current_time - last_time);
-    g_ui_context->desired_cursor = UI_CURSOR_ARROW;
+    ui_ctx->prev_ctx = g_ui_ctx;
+    g_ui_ctx = ui_ctx;
+    if (g_ui_ctx->frame_index > 0)
+        g_ui_ctx->render_fn.wait_for_last_submitted_frame(g_ui_ctx->renderer);
+    f64 last_time = g_ui_ctx->current_time;
+    g_ui_ctx->current_time = get_current_time(g_ui_ctx->frame_index);
+    g_ui_ctx->frame_delta_time = (f32)(g_ui_ctx->current_time - last_time);
+    g_ui_ctx->desired_cursor = UI_CURSOR_ARROW;
 
-    return g_ui_context->arena.pos;
+    return g_ui_ctx->arena.pos;
 }
 
 static Rect intersect_rects(Rect r1, Rect r2)
@@ -848,33 +821,33 @@ static Rect intersect_rects(Rect r1, Rect r2)
 
 static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 {
-    f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+    f32 dpi_scale = (f32)g_ui_ctx->dpi / USER_DEFAULT_SCREEN_DPI;
     Rect rect = {
         box->position.x * dpi_scale,
         box->position.y * dpi_scale,
         (box->position.x + box->size.width) * dpi_scale,
         (box->position.y + box->size.height) * dpi_scale,
     };
-    RectStyle rect_style = { .border_color = box->config.rect_style.border_color,
-                             .border_thickness = box->config.rect_style.border_thickness * dpi_scale,
-                             .shadow_color = box->config.rect_style.shadow_color,
+    RectStyle rect_style = { .border_color = box->cfg.rect_style.border_color,
+                             .border_thickness = box->cfg.rect_style.border_thickness * dpi_scale,
+                             .shadow_color = box->cfg.rect_style.shadow_color,
                              .shadow_offset = {
-                                 box->config.rect_style.shadow_offset.x * dpi_scale,
-                                 box->config.rect_style.shadow_offset.y * dpi_scale,
+                                 box->cfg.rect_style.shadow_offset.x * dpi_scale,
+                                 box->cfg.rect_style.shadow_offset.y * dpi_scale,
                              },
-                             .shadow_sigma = box->config.rect_style.shadow_sigma * dpi_scale,
-                             .corner_radius = box->config.rect_style.corner_radius * dpi_scale,
+                             .shadow_sigma = box->cfg.rect_style.shadow_sigma * dpi_scale,
+                             .corner_radius = box->cfg.rect_style.corner_radius * dpi_scale,
                              .corner_colors = {
-                                 box->config.rect_style.corner_colors[0],
-                                 box->config.rect_style.corner_colors[1],
-                                 box->config.rect_style.corner_colors[2],
-                                 box->config.rect_style.corner_colors[3],
+                                 box->cfg.rect_style.corner_colors[0],
+                                 box->cfg.rect_style.corner_colors[1],
+                                 box->cfg.rect_style.corner_colors[2],
+                                 box->cfg.rect_style.corner_colors[3],
                              },
-                             .shear = box->config.rect_style.shear * dpi_scale };
+                             .shear = box->cfg.rect_style.shear * dpi_scale };
 
     /* If clip is enabled, push a clip */
     Rect new_clip = clip;
-    if (box->config.flags & BoxFlag_Clip)
+    if (box->cfg.flags & BoxFlag_Clip)
         new_clip = intersect_rects(clip, rect);
 
     // clang-format off
@@ -883,12 +856,12 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
     {
         case BOX_TYPE_CONTAINER:
         {
-            UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
+            UICommand* cmd = g_ui_ctx->command_queue.items + g_ui_ctx->command_queue.count++;
 
             cmd->rect.base.type = UI_COMMAND_RECT;
             cmd->rect.base.size = sizeof(UICommandRect);
             cmd->rect.rect      = rect;
-            cmd->rect.color     = box->config.color;
+            cmd->rect.color     = box->cfg.color;
             cmd->rect.style     = rect_style;
             cmd->rect.clip      = clip;
         }
@@ -898,7 +871,7 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
             isize i = 0;
             do
             {
-                UICommand* cmd = g_ui_context->command_queue.items + g_ui_context->command_queue.count++;
+                UICommand* cmd = g_ui_ctx->command_queue.items + g_ui_ctx->command_queue.count++;
                 const TextData* text = &box->data.text;
 
                 cmd->text.base.type  = UI_COMMAND_TEXT;
@@ -930,31 +903,31 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 
 void ui_frame_end(isize arena_pos_backup)
 {
-    GlyphRasterCache* raster_cache = g_ui_context->raster_cache;
-    u32 dpi = g_ui_context->dpi;
+    GlyphRasterCache* raster_cache = g_ui_ctx->raster_cache;
+    u32 dpi = g_ui_ctx->dpi;
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
-    Rect no_clip = { 0, 0, g_ui_context->client_width * dpi_scale, g_ui_context->client_height * dpi_scale };
-    UIRenderFunc* render_fn = &g_ui_context->render_fn;
+    Rect no_clip = { 0, 0, g_ui_ctx->client_width * dpi_scale, g_ui_ctx->client_height * dpi_scale };
+    UIRenderFunc* render_fn = &g_ui_ctx->render_fn;
 
-    g_ui_context->root = ui_box_get_root();
-    ui_calculate_layout(g_ui_context->root);
-    ui_generate_render_commands(g_ui_context->root, no_clip);
+    g_ui_ctx->root = ui_box_get_root();
+    ui_calculate_layout(g_ui_ctx->root);
+    ui_generate_render_commands(g_ui_ctx->root, no_clip);
 
     /* Draw */
-    for (isize i = 0; i < g_ui_context->command_queue.count; i++)
+    for (isize i = 0; i < g_ui_ctx->command_queue.count; i++)
     {
         Rect* clip;
-        UICommand* cmd = &g_ui_context->command_queue.items[i];
+        UICommand* cmd = &g_ui_ctx->command_queue.items[i];
         switch (cmd->type)
         {
             case UI_COMMAND_RECT:
                 clip = memcmp(&cmd->rect.clip, &no_clip, sizeof(no_clip)) == 0 ? NULL : &cmd->rect.clip;
-                render_fn->draw_rect(g_ui_context->renderer, cmd->rect.rect, cmd->rect.color, cmd->rect.style, clip);
+                render_fn->draw_rect(g_ui_ctx->renderer, cmd->rect.rect, cmd->rect.color, cmd->rect.style, clip);
                 break;
             case UI_COMMAND_TEXT:
                 UICommandText* text = &cmd->text;
                 clip = memcmp(&cmd->text.clip, &no_clip, sizeof(no_clip)) == 0 ? NULL : &cmd->text.clip;
-                render_fn->draw_text(g_ui_context->renderer, raster_cache, text->content, text->position, text->color,
+                render_fn->draw_text(g_ui_ctx->renderer, raster_cache, text->content, text->position, text->color,
                                      text->font, text->font_size, dpi, clip);
                 break;
             default:
@@ -963,35 +936,35 @@ void ui_frame_end(isize arena_pos_backup)
     }
 
     /* Present */
-    u32 physical_client_width = (u32)(g_ui_context->client_width * dpi_scale);
-    u32 physical_client_height = (u32)(g_ui_context->client_height * dpi_scale);
-    g_ui_context->render_fn.flush_and_present(g_ui_context->renderer, physical_client_width, physical_client_height);
+    u32 physical_client_width = (u32)(g_ui_ctx->client_width * dpi_scale);
+    u32 physical_client_height = (u32)(g_ui_ctx->client_height * dpi_scale);
+    g_ui_ctx->render_fn.flush_and_present(g_ui_ctx->renderer, physical_client_width, physical_client_height);
 
     /* Reset state */
-    Assert(g_ui_context->box_stack.depth == 0);
-    memset(&g_ui_context->box_queue, 0, sizeof(g_ui_context->box_queue));
-    memset(&g_ui_context->command_queue, 0, sizeof(g_ui_context->command_queue));
+    Assert(g_ui_ctx->box_stack.depth == 0);
+    memset(&g_ui_ctx->box_queue, 0, sizeof(g_ui_ctx->box_queue));
+    memset(&g_ui_ctx->command_queue, 0, sizeof(g_ui_ctx->command_queue));
     box_cache_remove_unused();
 
-    g_ui_context->mouse_lclick = False;
-    g_ui_context->mouse_rclick = False;
-    g_ui_context->mouse_double_click = False;
-    g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
-    g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
-    g_ui_context->char_input_queue_count = 0;
-    g_ui_context->text_action_queue_count = 0;
+    g_ui_ctx->mouse_lclick = False;
+    g_ui_ctx->mouse_rclick = False;
+    g_ui_ctx->mouse_double_click = False;
+    g_ui_ctx->mouse_delta = (Position){ 0.f, 0.f };
+    g_ui_ctx->mouse_scroll_delta = (Position){ 0.f, 0.f };
+    g_ui_ctx->char_input_queue_count = 0;
+    g_ui_ctx->text_action_queue_count = 0;
 
     /* drag-drop */
-    if (!g_ui_context->mouse_press && g_ui_context->drag_active)
+    if (!g_ui_ctx->mouse_press && g_ui_ctx->drag_active)
     {
-        g_ui_context->drag_active = False;
-        g_ui_context->drag_payload_size = 0;
-        g_ui_context->drag_source_box = NULL;
+        g_ui_ctx->drag_active = False;
+        g_ui_ctx->drag_payload_size = 0;
+        g_ui_ctx->drag_source_box = NULL;
     }
 
-    g_ui_context->frame_index++;
-    arena_pop_to(&g_ui_context->arena, arena_pos_backup);
-    g_ui_context = g_ui_context->prev_context;
+    g_ui_ctx->frame_index++;
+    arena_pop_to(&g_ui_ctx->arena, arena_pos_backup);
+    g_ui_ctx = g_ui_ctx->prev_ctx;
 }
 
 //
@@ -1000,7 +973,7 @@ void ui_frame_end(isize arena_pos_backup)
 
 void ui_set_desired_cursor(Cursor shape)
 {
-    g_ui_context->desired_cursor = shape;
+    g_ui_ctx->desired_cursor = shape;
 }
 
 //
@@ -1026,55 +999,54 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
     b32 has_mouse_anchor = box->drag_mouse_anchor.x != 0.f || box->drag_mouse_anchor.y != 0.f;
 
     /* Release must be detected even when not hovering */
-    if (!g_ui_context->mouse_press && has_mouse_anchor)
+    if (!g_ui_ctx->mouse_press && has_mouse_anchor)
     {
         *flags |= UI_Signal_Flag_Released;
         box->drag_mouse_anchor = (Position){ 0 };
     }
 
-    if (rect_contains_point(box_rect, g_ui_context->mouse_pos))
+    if (rect_contains_point(box_rect, g_ui_ctx->mouse_pos))
     {
         *flags |= UI_Signal_Flag_Hovered;
-        if (g_ui_context->mouse_lclick)
+        if (g_ui_ctx->mouse_lclick)
             *flags |= UI_Signal_Flag_LClicked;
-        if (g_ui_context->mouse_rclick)
+        if (g_ui_ctx->mouse_rclick)
             *flags |= UI_Signal_Flag_RClicked;
-        if (g_ui_context->mouse_press)
+        if (g_ui_ctx->mouse_press)
             *flags |= UI_Signal_Flag_Pressed;
-        if (g_ui_context->mouse_double_click)
+        if (g_ui_ctx->mouse_double_click)
             *flags |= UI_Signal_Flag_DoubleClicked;
 
         /* Drag: record mouse anchor on press (must be over the box to start drag) */
-        if (g_ui_context->mouse_lclick)
-            box->drag_mouse_anchor = g_ui_context->mouse_pos;
+        if (g_ui_ctx->mouse_lclick)
+            box->drag_mouse_anchor = g_ui_ctx->mouse_pos;
 
         /* DragOver: a drag payload is active and the mouse is over this (non-source) box */
-        if (g_ui_context->drag_active && box != g_ui_context->drag_source_box)
+        if (g_ui_ctx->drag_active && box != g_ui_ctx->drag_source_box)
             *flags |= UI_Signal_Flag_DragOver;
     }
 
     /* Drag: signal Dragging when mouse moves while held, even outside the box. */
-    if (g_ui_context->mouse_press && has_mouse_anchor)
+    if (g_ui_ctx->mouse_press && has_mouse_anchor)
     {
         Position delta = {
-            g_ui_context->mouse_pos.x - box->drag_mouse_anchor.x,
-            g_ui_context->mouse_pos.y - box->drag_mouse_anchor.y,
+            g_ui_ctx->mouse_pos.x - box->drag_mouse_anchor.x,
+            g_ui_ctx->mouse_pos.y - box->drag_mouse_anchor.y,
         };
         if (delta.x != 0.f || delta.y != 0.f)
         {
             *flags |= UI_Signal_Flag_Dragging;
             /* First box to report dragging becomes the drag source */
-            if (!g_ui_context->drag_active)
+            if (!g_ui_ctx->drag_active)
             {
-                g_ui_context->drag_active = True;
-                g_ui_context->drag_source_box = box;
+                g_ui_ctx->drag_active = True;
+                g_ui_ctx->drag_source_box = box;
             }
         }
     }
 
     /* Dropped: release while a drag was active, over this box */
-    if (!g_ui_context->mouse_press && g_ui_context->drag_active &&
-        rect_contains_point(box_rect, g_ui_context->mouse_pos))
+    if (!g_ui_ctx->mouse_press && g_ui_ctx->drag_active && rect_contains_point(box_rect, g_ui_ctx->mouse_pos))
         *flags |= UI_Signal_Flag_Dropped;
 }
 
@@ -1082,8 +1054,7 @@ UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str)
 {
     UIBoxInteractResult result = { .flags = UI_Signal_Flag_None, .last_box = NULL };
     result.last_box = find_or_insert_box_with_same_hash_str(hash_str);
-    if (result.last_box)
-        update_interaction_flags(result.last_box, &result.flags);
+    update_interaction_flags(result.last_box, &result.flags);
     update_box_key(box, hash_str);
     return result;
 }
@@ -1091,10 +1062,10 @@ UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str)
 Position ui_box_drag_delta(const UIBox* box)
 {
     Position delta = { 0 };
-    if (g_ui_context->mouse_press && (box->drag_mouse_anchor.x != 0.f || box->drag_mouse_anchor.y != 0.f))
+    if (g_ui_ctx->mouse_press && (box->drag_mouse_anchor.x != 0.f || box->drag_mouse_anchor.y != 0.f))
     {
-        delta.x = g_ui_context->mouse_pos.x - box->drag_mouse_anchor.x;
-        delta.y = g_ui_context->mouse_pos.y - box->drag_mouse_anchor.y;
+        delta.x = g_ui_ctx->mouse_pos.x - box->drag_mouse_anchor.x;
+        delta.y = g_ui_ctx->mouse_pos.y - box->drag_mouse_anchor.y;
     }
     return delta;
 }
@@ -1102,26 +1073,26 @@ Position ui_box_drag_delta(const UIBox* box)
 void ui_set_drag_payload(void* payload, isize size)
 {
     Assert(size <= DRAG_PAYLOAD_MAX);
-    memcpy(g_ui_context->drag_payload_buf, payload, (size_t)size);
-    g_ui_context->drag_payload_size = size;
+    memcpy(g_ui_ctx->drag_payload_buf, payload, (size_t)size);
+    g_ui_ctx->drag_payload_size = size;
 }
 
 void* ui_accept_drag_payload(isize expected_size)
 {
-    if (!g_ui_context->drag_active)
+    if (!g_ui_ctx->drag_active)
         return NULL;
-    if (expected_size != g_ui_context->drag_payload_size)
+    if (expected_size != g_ui_ctx->drag_payload_size)
         return NULL;
-    return g_ui_context->drag_payload_buf;
+    return g_ui_ctx->drag_payload_buf;
 }
 
 b32 ui_is_drag_over(const UIBox* box)
 {
-    if (!g_ui_context->drag_active)
+    if (!g_ui_ctx->drag_active)
         return False;
     Rect r = { box->position.x, box->position.y, box->position.x + box->size.width,
                box->position.y + box->size.height };
-    return rect_contains_point(r, g_ui_context->mouse_pos) && box != g_ui_context->drag_source_box;
+    return rect_contains_point(r, g_ui_ctx->mouse_pos) && box != g_ui_ctx->drag_source_box;
 }
 
 //
@@ -1149,7 +1120,7 @@ Color lerp_color(const Color a, const Color b, const f32 t)
 
 static void approach_f32(f32* value, const f32 target, const f32 speed)
 {
-    *value += (target - *value) * min(speed * g_ui_context->frame_delta_time, 1.f);
+    *value += (target - *value) * min(speed * g_ui_ctx->frame_delta_time, 1.f);
 }
 
 b32 update_transition(f32* transition, const f32 speed, const f32 target)
@@ -1157,7 +1128,7 @@ b32 update_transition(f32* transition, const f32 speed, const f32 target)
     Assert(target >= 0.f && target <= 1.f);
 
     b32 is_done = False;
-    *transition += (target - *transition) * speed * g_ui_context->frame_delta_time;
+    *transition += (target - *transition) * speed * g_ui_ctx->frame_delta_time;
     *transition = clamp(*transition, 0.f, 1.f);
 
     if (fabs(*transition - target) < 0.001f)
@@ -1218,6 +1189,17 @@ static f32 evaluate_timed_lerp(const TimedLerpAnimation* anim, f64 now)
 //  ┃            ▓▓▓▓▓▓▓      | ┃    Scrollbar (horizontal) [float]
 //  ┗━━━━━━━━━━━━━━━━━━━━━━━━━┷━┛    Thumb (horizontal)
 //  <-------- Container -------->
+
+#define SCROLLBAR_THICKNESS_MIN          5
+#define SCROLLBAR_THICKNESS_MAX          8.5
+#define SCROLLBAR_PADDING_END_MIN        SCROLLBAR_THICKNESS_MIN * 0.5
+#define SCROLLBAR_PADDING_END_MAX        SCROLLBAR_THICKNESS_MIN
+#define SCROLLBAR_SPACER                 (SCROLLBAR_THICKNESS_MIN * 2.25)
+#define SCROLLBAR_THUMB_OPACITY_TRACK    0.4f
+#define SCROLLBAR_THUMB_OPACITY_INACTIVE 0.5f // range: [0, 1]
+#define SCROLLBAR_THUMB_OPACITY_HOVER    0.75f
+#define SCROLL_SENSITIVITY               4.f
+#define SCROLL_ANIM_DURATION             0.09f
 
 typedef enum
 {
@@ -1285,12 +1267,12 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     UIBox* last_area = scroll_ctx.last_area;
 
     // clang-format off
-    f32 mouse_pos                          = is_horizontal ? g_ui_context->mouse_pos.x                      : g_ui_context->mouse_pos.y;
-    f32 thumb_delta_scale                  = is_horizontal ? scroll_ctx.thumb_delta_scale.x                 : scroll_ctx.thumb_delta_scale.y;
-    f32 scroll_max_delta                   = is_horizontal ? scroll_ctx.max_delta.x                         : scroll_ctx.max_delta.y;
-    f32* scroll_delta                      = is_horizontal ? &last_area->scroll_delta.x                     : &last_area->scroll_delta.y;
-    TimedLerpAnimation* scroll_anim        = is_horizontal ? &last_area->scroll_anim_x                      : &last_area->scroll_anim_y;
-    f32* area_drag_scroll_anchor           = is_horizontal ? &last_area->drag_scroll_anchor.x               : &last_area->drag_scroll_anchor.y;
+    f32 mouse_pos                   = is_horizontal ? g_ui_ctx->mouse_pos.x        : g_ui_ctx->mouse_pos.y;
+    f32 thumb_delta_scale           = is_horizontal ? scroll_ctx.thumb_delta_scale.x   : scroll_ctx.thumb_delta_scale.y;
+    f32 scroll_max_delta            = is_horizontal ? scroll_ctx.max_delta.x           : scroll_ctx.max_delta.y;
+    f32* scroll_delta               = is_horizontal ? &last_area->scroll_delta.x       : &last_area->scroll_delta.y;
+    TimedLerpAnimation* scroll_anim = is_horizontal ? &last_area->scroll_anim_x        : &last_area->scroll_anim_y;
+    f32* area_drag_scroll_anchor    = is_horizontal ? &last_area->drag_scroll_anchor.x : &last_area->drag_scroll_anchor.y;
     // clang-format on
 
     /* Transition-related variables */
@@ -1304,12 +1286,12 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     /* Get last bar and thumb box from cache */
     UISignalFlags bar_flags = UI_Signal_Flag_None;
     String bar_hash_str =
-        str_concat(&g_ui_context->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hbar)") : str(" (vbar)"));
+        str_concat(&g_ui_ctx->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hbar)") : str(" (vbar)"));
     UIBox* last_bar = find_or_insert_box_with_same_hash_str(bar_hash_str);
 
     UISignalFlags thumb_flags = UI_Signal_Flag_None;
     String thumb_hash_str =
-        str_concat(&g_ui_context->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hthumb)") : str(" (vthumb)"));
+        str_concat(&g_ui_ctx->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hthumb)") : str(" (vthumb)"));
     UIBox* last_thumb = find_or_insert_box_with_same_hash_str(thumb_hash_str);
 
     /* [THUMB] Handle interaction and transition */
@@ -1335,7 +1317,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                     f32 mouse_drag_delta = mouse_pos - *drag_mouse_anchor;
                     f32 target = *area_drag_scroll_anchor + mouse_drag_delta * thumb_delta_scale;
                     *scroll_delta = clamp(target, 0.f, scroll_max_delta);
-                    start_timed_lerp(scroll_anim, *scroll_delta, *scroll_delta, g_ui_context->current_time, 0.f);
+                    start_timed_lerp(scroll_anim, *scroll_delta, *scroll_delta, g_ui_ctx->current_time, 0.f);
                 }
                 if (update_transition(&last_thumb->hot_t, 20.f, 1.f))
                     last_thumb->anim_state = TRANSITION_REVERSE;
@@ -1360,7 +1342,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
         {
             // Hide/show the thumb with a fade-out transition when moving/idle mouse or scrolling in the scroll area
             if (ui_hovered(scroll_ctx.area_flags))
-                if (g_ui_context->mouse_delta.x || g_ui_context->mouse_delta.y ||
+                if (g_ui_ctx->mouse_delta.x || g_ui_ctx->mouse_delta.y ||
                     last_area->scroll_anim_x.target - last_area->scroll_delta.x ||
                     last_area->scroll_anim_y.target - last_area->scroll_delta.y)
                 {
@@ -1368,7 +1350,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                     last_thumb->anim_state = TRANSITION_FORWARD;
                 }
 
-            last_area->idle_timer += g_ui_context->frame_delta_time;
+            last_area->idle_timer += g_ui_ctx->frame_delta_time;
             if (last_area->idle_timer > 1.5f || !ui_hovered(scroll_ctx.area_flags))
                 last_thumb->anim_state = TRANSITION_REVERSE;
 
@@ -1405,7 +1387,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                 f32 last_bar_position = is_horizontal ? last_bar->position.x : last_bar->position.y;
                 f32 last_thumb_size = is_horizontal ? last_thumb->size.width : last_thumb->size.height;
                 f32 target = (mouse_pos - last_bar_position - last_thumb_size / 2) * thumb_delta_scale;
-                start_timed_lerp(scroll_anim, *scroll_delta, target, g_ui_context->current_time, SCROLL_ANIM_DURATION);
+                start_timed_lerp(scroll_anim, *scroll_delta, target, g_ui_ctx->current_time, SCROLL_ANIM_DURATION);
             }
         }
         else
@@ -1431,8 +1413,8 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
         track_color.a = lerp_u8(0, track_color.a, last_bar->hot_t);
     }
 
-    // clang-format off
     /* Create scrollbar */
+    // clang-format off
     ScrollBarLayout L = make_scrollbar_layout(is_horizontal, thickness, padding_end, bar_thickness_max, thumb_size, scroll_ctx.thumb_delta);
     UIBox* bar_container = ui_box_start(&(BoxConfig){ .sizing = L.container_sizing, .flags = BoxFlag_Float, .float_offset = L.float_offset, .direction = L.padding_direction });
     {
@@ -1471,41 +1453,41 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     // clang-format on
 }
 
-ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config)
+ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* cfg)
 {
-    f64 now = g_ui_context->current_time;
+    f64 now = g_ui_ctx->current_time;
     ScrollContext scroll_ctx = { 0 };
-    scroll_ctx.hash_str = config->hash_str;
-    scroll_ctx.thumb_color = config->thumb_color;
-    scroll_ctx.fixed_track = config->fixed_track;
+    scroll_ctx.thumb_color = cfg->thumb_color;
+    scroll_ctx.fixed_track = cfg->fixed_track;
     scroll_ctx.cursor_content_x = -1.f;
 
     /* Create area box */
     scroll_ctx.area =
-        ui_box_start(&(BoxConfig){ .sizing = config->sizing, .color = config->bg_color, .flags = BoxFlag_Clip });
+        ui_box_start(&(BoxConfig){ .sizing = cfg->sizing, .color = cfg->bg_color, .flags = BoxFlag_Clip });
 
     /* Handle interaction and animation */
-    UIBoxInteractResult result = ui_box_interact(scroll_ctx.area, config->hash_str);
+    UIBoxInteractResult result = ui_box_interact(scroll_ctx.area, cfg->hash_str);
     scroll_ctx.area_flags = result.flags;
     scroll_ctx.last_area = result.last_box;
-    String content_hash_str = str_concat(&g_ui_context->arena, config->hash_str, str(" (content box)"));
-    if (scroll_ctx.last_area)
-    {
-        /* Update scroll delta */
-        scroll_ctx.last_area->scroll_delta.x = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_x, now);
-        scroll_ctx.last_area->scroll_delta.y = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_y, now);
-        scroll_ctx.delta = scroll_ctx.last_area->scroll_delta;
+    scroll_ctx.hash_str = (String){ result.last_box->key.str, result.last_box->key.len };
+    String content_hash_str = str_concat(&g_ui_ctx->arena, cfg->hash_str, str(" (content box)"));
 
-        /* Prepare content result for _end() */
-        scroll_ctx.last_content = find_or_insert_box_with_same_hash_str(content_hash_str);
-        Assert(scroll_ctx.last_content);
-    }
+    /* Update scroll delta */
+    scroll_ctx.last_area->scroll_delta.x = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_x, now);
+    scroll_ctx.last_area->scroll_delta.y = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_y, now);
+    scroll_ctx.delta = scroll_ctx.last_area->scroll_delta;
+
+    /* Prepare content result for _end() */
+    scroll_ctx.last_content = find_or_insert_box_with_same_hash_str(content_hash_str);
+    Assert(scroll_ctx.last_content);
 
     /* Create container & inner container & content box */
     ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
     ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } }); // Inner Container
     UIBox* content = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
-                                                .padding = config->padding,
+                                                .padding = cfg->padding,
+                                                .child_gap = cfg->child_gap,
+                                                .direction = cfg->direction,
                                                 .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
     update_box_key(content, content_hash_str);
 
@@ -1542,23 +1524,21 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
         /* Handle scroll wheel (deepest hovered area consumes scroll first) */
         if (ui_hovered(scroll_ctx.area_flags))
         {
-            if (g_ui_context->mouse_scroll_delta.x && scroll_ctx.max_delta.x > 0)
+            if (g_ui_ctx->mouse_scroll_delta.x && scroll_ctx.max_delta.x > 0)
             {
-                f32 new_target =
-                    last_area->scroll_anim_x.target + g_ui_context->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
+                f32 new_target = last_area->scroll_anim_x.target + g_ui_ctx->mouse_scroll_delta.x * SCROLL_SENSITIVITY;
                 new_target = clamp(new_target, 0, scroll_ctx.max_delta.x);
                 start_timed_lerp(&last_area->scroll_anim_x, last_area->scroll_delta.x, new_target,
-                                 g_ui_context->current_time, SCROLL_ANIM_DURATION);
-                g_ui_context->mouse_scroll_delta.x = 0;
+                                 g_ui_ctx->current_time, SCROLL_ANIM_DURATION);
+                g_ui_ctx->mouse_scroll_delta.x = 0;
             }
-            if (g_ui_context->mouse_scroll_delta.y && scroll_ctx.max_delta.y > 0)
+            if (g_ui_ctx->mouse_scroll_delta.y && scroll_ctx.max_delta.y > 0)
             {
-                f32 new_target =
-                    last_area->scroll_anim_y.target + g_ui_context->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
+                f32 new_target = last_area->scroll_anim_y.target + g_ui_ctx->mouse_scroll_delta.y * SCROLL_SENSITIVITY;
                 new_target = clamp(new_target, 0, scroll_ctx.max_delta.y);
                 start_timed_lerp(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target,
-                                 g_ui_context->current_time, SCROLL_ANIM_DURATION);
-                g_ui_context->mouse_scroll_delta.y = 0;
+                                 g_ui_ctx->current_time, SCROLL_ANIM_DURATION);
+                g_ui_ctx->mouse_scroll_delta.y = 0;
             }
         }
 
@@ -1576,7 +1556,7 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
                 target = min(scroll_ctx.max_delta.x, scroll_ctx.cursor_content_x - viewport_width + margin);
 
             if (target != current_scroll)
-                start_timed_lerp(&last_area->scroll_anim_x, current_scroll, target, g_ui_context->current_time,
+                start_timed_lerp(&last_area->scroll_anim_x, current_scroll, target, g_ui_ctx->current_time,
                                  SCROLL_ANIM_DURATION);
         }
 
@@ -1621,8 +1601,388 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
 }
 
 //
+// Panel
+//
+
+#define PANEL_BOUNDARY 6.0f
+#define PANEL_PCT_MIN  0.05f
+#define PANEL_PCT_MAX  0.95f
+
+String panel_str_impl(u8* buf, const char* text_with_hash_str, u32 panel_id)
+{
+    isize len = snprintf((char*)buf, HASH_STR_MAX_LENGTH, "%s_%u", text_with_hash_str, panel_id);
+    return (String){ buf, len };
+}
+
+void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme)
+{
+    for (const Panel* p = root; p; p = panel_iter_next(p))
+    {
+        if (!p->child_a)
+            continue;
+        Rect panel_rect = panel_calc_rect(p, root_rect);
+        Panel* child_a = p->child_a;
+        Panel* child_b = p->child_b;
+
+        Rect child_a_rect = panel_calc_rect_from_parent(child_a, panel_rect);
+        Position bound_pos;
+        f32 bound_w, bound_h;
+        if (p->split_axis == Axis2_X)
+        {
+            bound_pos.x = child_a_rect.xmax - (PANEL_BOUNDARY / 2);
+            bound_pos.y = child_a_rect.ymin;
+            bound_w = PANEL_BOUNDARY;
+            bound_h = child_a_rect.ymax - child_a_rect.ymin;
+        }
+        else
+        {
+            bound_pos.x = child_a_rect.xmin;
+            bound_pos.y = child_a_rect.ymax - (PANEL_BOUNDARY / 2);
+            bound_w = child_a_rect.xmax - child_a_rect.xmin;
+            bound_h = PANEL_BOUNDARY;
+        }
+
+        UIBox* box = ui_box_start(&(BoxConfig){
+            .sizing = { fixed(bound_w), fixed(bound_h) },
+            .flags = BoxFlag_Float,
+            .float_offset = bound_pos,
+            .direction = (p->split_axis == Axis2_X) ? LAYOUT_LEFT_TO_RIGHT : LAYOUT_TOP_TO_BOTTOM,
+        });
+        {
+            u8 key_buf[HASH_STR_MAX_LENGTH];
+            i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_bound_%u", (unsigned)p->id);
+            String key = { key_buf, key_len };
+
+            UIBoxInteractResult result = ui_box_interact(box, key);
+            UISignalFlags flags = result.flags;
+            if (ui_hovered(flags))
+            {
+                Cursor cur = (p->split_axis == Axis2_X) ? UI_CURSOR_HORIZONTAL : UI_CURSOR_VERTICAL;
+                ui_set_desired_cursor(cur);
+            }
+            if (ui_lclicked(flags))
+            {
+                child_a->drag_saved_pct = child_a->pct_of_parent;
+                child_a->drag_saved_partner_pct = child_b->pct_of_parent;
+            }
+            if (ui_dragging(flags))
+            {
+                Position delta = ui_box_drag_delta(result.last_box);
+                f32 parent_dim = (p->split_axis == Axis2_X) ? (panel_rect.xmax - panel_rect.xmin)
+                                                            : (panel_rect.ymax - panel_rect.ymin);
+                f32 dp = (p->split_axis == Axis2_X ? delta.x : delta.y) / parent_dim;
+                child_a->pct_of_parent = clamp(child_a->drag_saved_pct + dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
+                child_b->pct_of_parent = clamp(child_a->drag_saved_partner_pct - dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
+
+                /* Recompute boundary position from updated ratio to eliminate one-frame visual lag */
+                Rect updated_child_a_rect = panel_calc_rect_from_parent(child_a, panel_rect);
+                if (p->split_axis == Axis2_X)
+                {
+                    box->cfg.float_offset.x = updated_child_a_rect.xmax - (PANEL_BOUNDARY / 2);
+                    box->cfg.float_offset.y = updated_child_a_rect.ymin;
+                }
+                else
+                {
+                    box->cfg.float_offset.x = updated_child_a_rect.xmin;
+                    box->cfg.float_offset.y = updated_child_a_rect.ymax - (PANEL_BOUNDARY / 2);
+                }
+            }
+
+            if (result.last_box)
+            {
+                update_transition(&result.last_box->hot_t, 20.f,
+                                  ui_hovered(flags) || ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f);
+                update_transition(&result.last_box->active_t, 20.f,
+                                  ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f);
+            }
+            f32 hot_t = result.last_box ? result.last_box->hot_t : 0.f;
+            f32 active_t = result.last_box ? result.last_box->active_t : 0.f;
+            Color virtual_line_color = lerp_color((Color){ 0 }, theme->splitter_hover, hot_t);
+            Color line_color = lerp_color(theme->splitter_idle, theme->splitter_hover, hot_t);
+            virtual_line_color = lerp_color(virtual_line_color, theme->splitter_drag, active_t);
+            line_color = lerp_color(line_color, theme->splitter_drag, active_t);
+
+            /* Draw splitter line */
+            // clang-format off
+            if (p->split_axis == Axis2_X)
+            {
+
+                UIBox* line_container = ui_box_start(
+                    &(BoxConfig){ .sizing = { grow({}), grow({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+                {
+                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = virtual_line_color }));
+                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = line_color }));
+                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = virtual_line_color }));
+                }
+                ui_box_end(line_container);
+            }
+            else
+            {
+                UIBox* line_container = ui_box_start(
+                    &(BoxConfig){ .sizing = { grow({}), grow({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER }, .direction = LAYOUT_TOP_TO_BOTTOM });
+                {
+                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = virtual_line_color }));
+                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = line_color }));
+                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = virtual_line_color }));
+                }
+                ui_box_end(line_container);
+            }
+            // clang-format on
+        }
+        ui_box_end(box);
+    }
+}
+
+PanelContext ui_panel_begin(const PanelConfig* cfg)
+{
+    if (cfg->panel->child_a)
+        return (PanelContext){ 0 };
+
+    /* Re-declare all existing tabs so they survive cleanup */
+    for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next)
+    {
+        String tab_name = { tab->name, tab->name_len };
+        panel_tab_declare(cfg->panel, tab_name);
+    }
+
+    Rect rect = panel_calc_rect(cfg->panel, cfg->root_rect);
+    f32 pad = 1.f;
+    Rect inner = { rect.xmin + pad, rect.ymin + pad, rect.xmax - pad, rect.ymax - pad };
+    f32 iw = max(0.f, inner.xmax - inner.xmin);
+    f32 ih = max(0.f, inner.ymax - inner.ymin);
+
+    UIBox* outer_box = ui_box_start(&(BoxConfig){
+        .sizing = { fixed(iw), fixed(ih) },
+        .direction = LAYOUT_TOP_TO_BOTTOM,
+        .flags = BoxFlag_Float,
+        .float_offset = { inner.xmin, inner.ymin },
+    });
+    {
+        u8 key_buf[HASH_STR_MAX_LENGTH];
+        i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_%u", (unsigned)cfg->panel->id);
+        String key = { key_buf, key_len };
+        ui_box_interact(outer_box, key);
+    }
+
+    /* tab bar */
+    UIBox* tab_bar = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+                                                .color = cfg->theme->tab_bar,
+                                                .alignment = { ALIGN_START, ALIGN_CENTER } });
+    {
+        PanelTab* active = panel_tab_get_active(cfg->panel);
+        isize tab_index = 0;
+
+        for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next, tab_index++)
+        {
+            b32 is_active = (tab == active);
+            f32 font_sz = cfg->font_size;
+
+            u8 tab_key[HASH_STR_MAX_LENGTH];
+            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key), "###tab_%u_%.*s", (unsigned)cfg->panel->id,
+                                       (int)tab->name_len, tab->name);
+            String tab_key_str = { tab_key, tab_key_len };
+
+            UIBox* tab_container =
+                ui_box_start(&(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+            {
+                UIBox* box = ui_box_start(&(BoxConfig){
+                    .sizing = { fit({}), fit({}) },
+                    .padding = { 5, 10, 5, 10 },
+                    .direction = LAYOUT_LEFT_TO_RIGHT,
+                    .child_gap = 4,
+                    .alignment = { ALIGN_START, ALIGN_CENTER },
+                });
+                {
+                    /* tab interaction */
+                    UIBoxInteractResult r = ui_box_interact(box, tab_key_str);
+
+                    if (ui_dragging(r.flags))
+                        ui_set_drag_payload(&tab, sizeof(PanelTab*));
+
+                    if (ui_drag_over(r.flags))
+                        box->cfg.color = cfg->theme->tab_drag_target_bg;
+                    else if (ui_dragging(r.flags))
+                        box->cfg.color = cfg->theme->tab_dragging_bg;
+                    else if (is_active)
+                        box->cfg.color = cfg->theme->tab_active_bg;
+                    else
+                        box->cfg.color = cfg->theme->tab_bg;
+
+                    if (ui_lclicked(r.flags))
+                        panel_tab_activate(cfg->panel, tab);
+
+                    /* tab title */
+                    ui_text((String){ tab->name, tab->name_len }, &(TextConfig){ .font = cfg->font_ui,
+                                                                                 .font_size = font_sz,
+                                                                                 .color = cfg->theme->tab_active_fg,
+                                                                                 .line_height = font_sz });
+
+                    /* close button (hidden while dragging) */
+                    u8 ck[HASH_STR_MAX_LENGTH];
+                    i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%u_%.*s", (unsigned)cfg->panel->id,
+                                      (int)tab->name_len, tab->name);
+                    Color cb_text =
+
+                        (ui_hovered(r.flags) && !ui_drag_over(r.flags)) ? cfg->theme->tab_active_fg : (Color){ 0 };
+                    Color cb_hover = ui_drag_over(r.flags) ? (Color){ 0 } : cfg->theme->hover_bg;
+                    UISignalFlags cf =
+                        ui_button((String){ ck, cl }, cfg->font_ui, 11, (Sizing){ fit({}), fit({}) },
+                                  (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, cb_text, cb_hover, cfg->theme->hover_bg);
+                    if (ui_hovered(cf) && !is_active && !ui_drag_over(r.flags))
+                        box->cfg.color = cfg->theme->tab_bg;
+                    if (ui_lclicked(cf))
+                    {
+                        char buf[64];
+                        i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u", (unsigned)cfg->panel->id);
+                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
+                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = tab },
+                                       sizeof(CmdPayload));
+                    }
+
+                    /* drop: reorder */
+                    if (ui_dropped(r.flags))
+                    {
+                        PanelTab** payload = (PanelTab**)ui_accept_drag_payload(sizeof(PanelTab*));
+                        if (payload && *payload && *payload != tab)
+                        {
+                            isize dragged_idx = 0;
+                            for (PanelTab* t = cfg->panel->tab_first; t && t != *payload; t = t->next)
+                                dragged_idx++;
+                            i32 delta = (i32)(tab_index - dragged_idx);
+
+                            char buf[64];
+                            i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u delta=%+d",
+                                               (unsigned)cfg->panel->id, (int)delta);
+
+                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
+                                           &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = *payload },
+                                           sizeof(CmdPayload));
+                        }
+                    }
+                }
+                ui_box_end(box);
+
+                // underline
+                ui_box_end(
+                    ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+            }
+            ui_box_end(tab_container);
+
+            /* tab splitter */
+            ui_box_end(
+                ui_box_start(&(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_splitter }));
+        }
+
+        /* new tab button */
+        UIBox* new_button_container =
+            ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+        {
+
+            UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) },
+                                                                .padding = { 0, 3, 0, 3 },
+                                                                .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            {
+                u8 plus_key[HASH_STR_MAX_LENGTH];
+                i32 plus_len = snprintf((char*)plus_key, sizeof(plus_key), "+##tab_add_%u", (unsigned)cfg->panel->id);
+                UISignalFlags plus_flags =
+                    ui_button((String){ plus_key, plus_len }, cfg->font_ui, 12, (Sizing){ fit({}), fit({}) },
+                              (Padding){ 3, 4, 4, 4 }, (Color){ 0 }, cfg->theme->tab_fg, cfg->theme->hover_bg,
+                              cfg->theme->click_bg);
+                if (ui_lclicked(plus_flags))
+                {
+                    char buf[64];
+                    i32 len = snprintf(buf, sizeof(buf), "tab.new panel=%u", (unsigned)cfg->panel->id);
+                    cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
+                                   &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel }, sizeof(CmdPayload));
+                }
+            }
+            ui_box_end(inner_container);
+
+            // underline
+            ui_box_end(
+                ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+        }
+        ui_box_end(new_button_container);
+
+        /* spacer */
+        UIBox* spacer_container =
+            ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+        {
+            ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } }));
+            /* underline */
+            ui_box_end(
+                ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+        }
+        ui_box_end(spacer_container);
+
+        /* close panel button */
+
+        UIBox* close_panel_button_container =
+            ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+        {
+            UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) },
+                                                                .padding = { 0, 3, 0, 3 },
+                                                                .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            {
+                if (cfg->panel->parent)
+                {
+                    u8 close_key[HASH_STR_MAX_LENGTH];
+                    i32 close_len =
+                        snprintf((char*)close_key, sizeof(close_key), "×##panel_close_%u", (unsigned)cfg->panel->id);
+                    String close_str = { close_key, close_len };
+                    UISignalFlags close_flags =
+                        ui_button(close_str, cfg->font_ui, 18, (Sizing){ fit({}), fit({}) }, (Padding){ 0, 2, 3, 2 },
+                                  (Color){ 0 }, cfg->theme->tab_fg, cfg->theme->hover_bg, cfg->theme->click_bg);
+                    if (ui_lclicked(close_flags))
+                    {
+                        char buf[64];
+                        i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u", (unsigned)cfg->panel->id);
+                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
+                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel }, sizeof(CmdPayload));
+                    }
+                }
+            }
+            ui_box_end(inner_container);
+
+            // underline
+            ui_box_end(
+                ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+        }
+        ui_box_end(close_panel_button_container);
+    }
+    ui_box_end(tab_bar);
+
+    /* scrollable content area */
+    u8 sa_key[HASH_STR_MAX_LENGTH];
+    i32 sa_len = snprintf((char*)sa_key, sizeof(sa_key), "panel_scroll_%u", (unsigned)cfg->panel->id);
+    ScrollContext scroll_ctx =
+        ui_scrollable_area_start(&(ScrollableAreaConfig){ .hash_str = { sa_key, sa_len },
+                                                          .sizing = { grow({}), grow({}) },
+                                                          .bg_color = cfg->theme->tab_active_bg,
+                                                          .padding = cfg->padding,
+                                                          .child_gap = cfg->child_gap,
+                                                          .direction = cfg->direction,
+                                                          .thumb_color = cfg->theme->scrollbar_thumb });
+
+    PanelContext pf = { .panel = cfg->panel, .scroll_ctx = scroll_ctx, .outer_box = outer_box };
+    return pf;
+}
+
+void ui_panel_end(PanelContext* pf)
+{
+    ui_scrollable_area_end(pf->scroll_ctx);
+    ui_box_end(pf->outer_box);
+    pf->panel = NULL;
+}
+
+//
 // Widgets
 //
+
+#define CHECKBOX_HEIGHT   22
+#define CHECKBOX_PAD      3
+#define CURSORBAR_PADDING 7
+#define IME_OFFSET_TOP    (-12)
 
 UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
                         const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
@@ -1640,34 +2000,32 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
 
     /* Handle interaction and transition */
     UIBoxInteractResult result = ui_box_interact(box, text_hash.hash_str);
-    if (result.last_box)
+
+    /* Transition */
+    if (ui_hovered(result.flags))
+        bg_color_transition = bg_color_hover;
+    if (ui_clicked(result.flags) || (result.last_box->active_t > 0))
     {
-        /* Transition */
-        if (ui_hovered(result.flags))
-            bg_color_transition = bg_color_hover;
-        if (ui_clicked(result.flags) || (result.last_box->active_t > 0))
+        if (ui_clicked(result.flags))
         {
-            if (ui_clicked(result.flags))
-            {
-                result.last_box->anim_state = TRANSITION_FORWARD;
-                result.last_box->active_t = 0.f;
-            }
-            if (result.last_box->anim_state == TRANSITION_IDLE || result.last_box->anim_state == TRANSITION_FORWARD)
-            {
-                if (update_transition(&result.last_box->active_t, 30.f, 1.f))
-                    result.last_box->anim_state = TRANSITION_REVERSE;
-            }
-            else
-            {
-                if (update_transition(&result.last_box->active_t, 24.f, 0.f))
-                    result.last_box->anim_state = TRANSITION_IDLE;
-            }
-            bg_color_transition = lerp_color(ui_hovered(result.flags) ? bg_color_hover : bg_color, bg_color_press,
-                                             result.last_box->active_t);
+            result.last_box->anim_state = TRANSITION_FORWARD;
+            result.last_box->active_t = 0.f;
         }
+        if (result.last_box->anim_state == TRANSITION_IDLE || result.last_box->anim_state == TRANSITION_FORWARD)
+        {
+            if (update_transition(&result.last_box->active_t, 30.f, 1.f))
+                result.last_box->anim_state = TRANSITION_REVERSE;
+        }
+        else
+        {
+            if (update_transition(&result.last_box->active_t, 24.f, 0.f))
+                result.last_box->anim_state = TRANSITION_IDLE;
+        }
+        bg_color_transition =
+            lerp_color(ui_hovered(result.flags) ? bg_color_hover : bg_color, bg_color_press, result.last_box->active_t);
     }
 
-    box->config.color = bg_color_transition;
+    box->cfg.color = bg_color_transition;
     ui_text(text_hash.display_str,
             &(TextConfig){ .font = font, .font_size = font_size, .color = text_color, .line_height = font_size });
     ui_box_end(box);
@@ -1693,26 +2051,24 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
 
     /* Handle interaction and transition */
     UIBoxInteractResult result = ui_box_interact(container, hash_str);
-    if (result.last_box)
-    {
-        /* Transition */
-        if (ui_lclicked(result.flags) || (result.last_box->active_t > 0))
-        {
-            if (ui_lclicked(result.flags))
-                result.last_box->anim_state = *check ? TRANSITION_REVERSE : TRANSITION_FORWARD;
-            if (result.last_box->anim_state != TRANSITION_IDLE)
-                if (update_transition(&result.last_box->active_t, 18.f,
-                                      result.last_box->anim_state == TRANSITION_REVERSE ? 0.f : 1.f))
-                    result.last_box->anim_state = TRANSITION_IDLE;
-        }
-        bg_color_transition = lerp_color(bg_color_transition, bg_color_active, result.last_box->active_t);
-        status_color_ok.a = lerp_u8(0, 255, result.last_box->active_t);
-        status_color_cancel.a = lerp_u8(255, 0, result.last_box->active_t);
-        pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, result.last_box->active_t);
-        shadow_offset_x = lerp_f32(1.f, -1.f, result.last_box->active_t);
-    }
 
-    container->config.color = bg_color_transition;
+    /* Transition */
+    if (ui_lclicked(result.flags) || (result.last_box->active_t > 0))
+    {
+        if (ui_lclicked(result.flags))
+            result.last_box->anim_state = *check ? TRANSITION_REVERSE : TRANSITION_FORWARD;
+        if (result.last_box->anim_state != TRANSITION_IDLE)
+            if (update_transition(&result.last_box->active_t, 18.f,
+                                  result.last_box->anim_state == TRANSITION_REVERSE ? 0.f : 1.f))
+                result.last_box->anim_state = TRANSITION_IDLE;
+    }
+    bg_color_transition = lerp_color(bg_color_transition, bg_color_active, result.last_box->active_t);
+    status_color_ok.a = lerp_u8(0, 255, result.last_box->active_t);
+    status_color_cancel.a = lerp_u8(255, 0, result.last_box->active_t);
+    pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, result.last_box->active_t);
+    shadow_offset_x = lerp_f32(1.f, -1.f, result.last_box->active_t);
+
+    container->cfg.color = bg_color_transition;
     {
         /* left padding */
         UIBox* pad_left = ui_box_start(
@@ -1853,13 +2209,13 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             const Color selection_flash_color)
 {
     // clang-format off
-    get_text_height_fn get_text_height = g_ui_context->render_fn.get_text_height;
-    get_text_width_fn get_text_width = g_ui_context->render_fn.get_text_width;
-    struct Renderer* renderer = g_ui_context->renderer;
-    f32 text_height = get_text_height(renderer, g_ui_context->raster_cache, text_with_hash_str, font, font_size, g_ui_context->dpi);
+    get_text_height_fn get_text_height = g_ui_ctx->render_fn.get_text_height;
+    get_text_width_fn get_text_width = g_ui_ctx->render_fn.get_text_width;
+    struct Renderer* renderer = g_ui_ctx->renderer;
+    f32 text_height = get_text_height(renderer, g_ui_ctx->raster_cache, text_with_hash_str, font, font_size, g_ui_ctx->dpi);
     SizingAxis text_container_height = fixed(text_height + padding.top + padding.bottom);
     Color placeholder_color = { text_color.r, text_color.g, text_color.b, text_color.a / 2 };
-    TextConfig text_config = { .font = font, .font_size = font_size, .line_height = font_size };
+    TextConfig text_cfg = { .font = font, .font_size = font_size, .line_height = font_size };
     // clang-format on
 
     /* Transition-related variables */
@@ -1867,9 +2223,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 
     /* Handle input */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
-    String content_key = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (content box)"));
+    String content_key = str_concat(&g_ui_ctx->arena, text_hash.hash_str, str(" (content box)"));
     isize cursor_before = state->cursor;
-    b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_context->focused_box_key);
+    b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_ctx->focused_box_key);
     if (is_focused)
     {
         /* IME composition: delete previous range, then insert new composition */
@@ -1886,9 +2242,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             state->composition_len = 0;
         }
 
-        if (g_ui_context->ime_composing && g_ui_context->ime_composition.len > 0)
+        if (g_ui_ctx->ime_composing && g_ui_ctx->ime_composition.len > 0)
         {
-            String comp = g_ui_context->ime_composition;
+            String comp = g_ui_ctx->ime_composition;
             Assert(state->text_len + comp.len <= state->size);
             memmove(state->base + state->cursor + comp.len, state->base + state->cursor,
                     state->text_len - state->cursor);
@@ -1901,16 +2257,16 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
 
         /* Unified action processing (navigation + deletion) */
-        for (isize i = 0; i < g_ui_context->text_action_queue_count; i++)
+        for (isize i = 0; i < g_ui_ctx->text_action_queue_count; i++)
         {
-            TextAction* action = &g_ui_context->text_action_queue[i];
+            TextAction* action = &g_ui_ctx->text_action_queue[i];
 
             /* Copy: grab selection to clipboard (before any mutation) */
-            if ((action->flags & TextActionFlag_Copy) && g_ui_context->clipboard_copy && state->cursor != state->mark)
+            if ((action->flags & TextActionFlag_Copy) && g_ui_ctx->clipboard_copy && state->cursor != state->mark)
             {
                 isize start = state->cursor < state->mark ? state->cursor : state->mark;
                 isize end = state->cursor > state->mark ? state->cursor : state->mark;
-                g_ui_context->clipboard_copy(g_ui_context->window, (String){ state->base + start, end - start });
+                g_ui_ctx->clipboard_copy(g_ui_ctx->window, (String){ state->base + start, end - start });
                 state->copy_t = 1.f;
             }
 
@@ -1974,9 +2330,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             else
             {
                 /* Paste: insert clipboard text at cursor */
-                if ((action->flags & TextActionFlag_Paste) && g_ui_context->clipboard_paste)
+                if ((action->flags & TextActionFlag_Paste) && g_ui_ctx->clipboard_paste)
                 {
-                    String pasted = g_ui_context->clipboard_paste(g_ui_context->window, &g_ui_context->arena);
+                    String pasted = g_ui_ctx->clipboard_paste(g_ui_ctx->window, &g_ui_ctx->arena);
                     if (pasted.len > 0)
                     {
                         delete_selection(state);
@@ -2028,9 +2384,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
 
         /* Text input (printable characters only) */
-        for (isize i = 0; i < g_ui_context->char_input_queue_count; i++)
+        for (isize i = 0; i < g_ui_ctx->char_input_queue_count; i++)
         {
-            u32 codepoint = g_ui_context->char_input_queue[i];
+            u32 codepoint = g_ui_ctx->char_input_queue[i];
             if (codepoint == 0)
                 continue;
             delete_selection(state);
@@ -2041,21 +2397,21 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
 
         /* Mouse drag to extend selection (only continue existing press, not new click) */
-        if (is_focused && g_ui_context->mouse_press && !g_ui_context->mouse_lclick && state->text_len > 0 &&
-            (g_ui_context->mouse_delta.x != 0.f || g_ui_context->mouse_delta.y != 0.f))
+        if (is_focused && g_ui_ctx->mouse_press && !g_ui_ctx->mouse_lclick && state->text_len > 0 &&
+            (g_ui_ctx->mouse_delta.x != 0.f || g_ui_ctx->mouse_delta.y != 0.f))
         {
             UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
             if (last_inner_box)
             {
-                f32 click_x = g_ui_context->mouse_pos.x - last_inner_box->position.x - padding.left;
-                b32 inside_y = g_ui_context->mouse_pos.y >= last_inner_box->position.y &&
-                               g_ui_context->mouse_pos.y <=
+                f32 click_x = g_ui_ctx->mouse_pos.x - last_inner_box->position.x - padding.left;
+                b32 inside_y = g_ui_ctx->mouse_pos.y >= last_inner_box->position.y &&
+                               g_ui_ctx->mouse_pos.y <=
                                    last_inner_box->position.y + last_inner_box->size.height - SCROLLBAR_THICKNESS_MAX;
                 if (click_x >= 0.f && inside_y)
                 {
                     state->cursor =
-                        find_cursor_at_x(state->base, state->text_len, click_x, g_ui_context->raster_cache, font,
-                                         font_size, g_ui_context->dpi, get_text_width, g_ui_context->renderer);
+                        find_cursor_at_x(state->base, state->text_len, click_x, g_ui_ctx->raster_cache, font, font_size,
+                                         g_ui_ctx->dpi, get_text_width, g_ui_ctx->renderer);
                 }
             }
         }
@@ -2069,11 +2425,10 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         if (state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
-            cursor_x = get_text_width(renderer, g_ui_context->raster_cache, text_to_cursor, font, font_size,
-                                      g_ui_context->dpi);
+            cursor_x = get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size, g_ui_ctx->dpi);
         }
-        approach_f32(&state->cursor_glide_x, cursor_x, 22.f);
-        approach_f32(&state->cursor_trail_x, cursor_x, 10.f);
+        approach_f32(&state->cursor_glide_x, cursor_x, 32.f);
+        approach_f32(&state->cursor_trail_x, cursor_x, 12.f);
     }
 
     /* Create text field box */
@@ -2086,66 +2441,63 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 
     /* Handle interaction and transition */
     UIBoxInteractResult result = ui_box_interact(box, text_hash.hash_str);
-    if (result.last_box)
+
+    if (ui_hovered(result.flags))
+        ui_set_desired_cursor(UI_CURSOR_IBEAM);
+
+    /* Transition */
+    if (ui_lclicked(result.flags) || is_focused)
     {
-        if (ui_hovered(result.flags))
-            ui_set_desired_cursor(UI_CURSOR_IBEAM);
-
-        /* Transition */
-        if (ui_lclicked(result.flags) || is_focused)
+        if (ui_lclicked(result.flags))
         {
-            if (ui_lclicked(result.flags))
+            g_ui_ctx->focused_box_key = generate_box_key(text_hash.hash_str);
+
+            /* Position cursor at click point */
+            if (state->text_len > 0)
             {
-                g_ui_context->focused_box_key = generate_box_key(text_hash.hash_str);
-
-                /* Position cursor at click point */
-                if (state->text_len > 0)
+                UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
+                if (last_inner_box)
                 {
-                    UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
-                    if (last_inner_box)
+                    f32 click_x = g_ui_ctx->mouse_pos.x - last_inner_box->position.x - padding.left;
+                    b32 inside_y = g_ui_ctx->mouse_pos.y >= last_inner_box->position.y &&
+                                   g_ui_ctx->mouse_pos.y <= last_inner_box->position.y + last_inner_box->size.height -
+                                                                SCROLLBAR_THICKNESS_MAX;
+                    if (click_x >= 0.f && inside_y)
                     {
-                        f32 click_x = g_ui_context->mouse_pos.x - last_inner_box->position.x - padding.left;
-                        b32 inside_y = g_ui_context->mouse_pos.y >= last_inner_box->position.y &&
-                                       g_ui_context->mouse_pos.y <= last_inner_box->position.y +
-                                                                        last_inner_box->size.height -
-                                                                        SCROLLBAR_THICKNESS_MAX;
-                        if (click_x >= 0.f && inside_y)
-                        {
-                            state->cursor = find_cursor_at_x(state->base, state->text_len, click_x,
-                                                             g_ui_context->raster_cache, font, font_size,
-                                                             g_ui_context->dpi, get_text_width, g_ui_context->renderer);
-                            state->mark = state->cursor;
+                        state->cursor =
+                            find_cursor_at_x(state->base, state->text_len, click_x, g_ui_ctx->raster_cache, font,
+                                             font_size, g_ui_ctx->dpi, get_text_width, g_ui_ctx->renderer);
+                        state->mark = state->cursor;
 
-                            if (ui_double_clicked(result.flags))
-                            {
-                                isize word_start = scan_word_backward(state->base, state->cursor);
-                                isize word_end = scan_word_forward(state->base, state->text_len, state->cursor);
-                                while (word_start < word_end && !is_word_char(state->base[word_start]))
-                                    word_start++;
-                                while (word_end > word_start && !is_word_char(state->base[word_end - 1]))
-                                    word_end--;
-                                state->mark = word_start;
-                                state->cursor = word_end;
-                            }
+                        if (ui_double_clicked(result.flags))
+                        {
+                            isize word_start = scan_word_backward(state->base, state->cursor);
+                            isize word_end = scan_word_forward(state->base, state->text_len, state->cursor);
+                            while (word_start < word_end && !is_word_char(state->base[word_start]))
+                                word_start++;
+                            while (word_end > word_start && !is_word_char(state->base[word_end - 1]))
+                                word_end--;
+                            state->mark = word_start;
+                            state->cursor = word_end;
                         }
                     }
                 }
             }
-            update_transition(&result.last_box->active_t, 20.f, 1.f);
         }
-        else
-        {
-            update_transition(&result.last_box->active_t, 18.f, 0.f);
-        }
-        border_color_transition.a = lerp_u8(0, border_color.a, result.last_box->active_t);
+        update_transition(&result.last_box->active_t, 20.f, 1.f);
     }
+    else
+    {
+        update_transition(&result.last_box->active_t, 18.f, 0.f);
+    }
+    border_color_transition.a = lerp_u8(0, border_color.a, result.last_box->active_t);
 
-    box->config.rect_style.border_color = border_color_transition;
+    box->cfg.rect_style.border_color = border_color_transition;
     {
         b32 cursor_moved = state->cursor != cursor_before;
 
         ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig){
-            .hash_str = str_concat(&g_ui_context->arena, text_hash.hash_str, str(" (scroll area)")),
+            .hash_str = str_concat(&g_ui_ctx->arena, text_hash.hash_str, str(" (scroll area)")),
             .sizing = { grow({}), grow({}) },
             .thumb_color = thumb_color,
             .fixed_track = True });
@@ -2153,15 +2505,15 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         if (cursor_moved && state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
-            scroll_ctx.cursor_content_x = get_text_width(renderer, g_ui_context->raster_cache, text_to_cursor, font,
-                                                         font_size, g_ui_context->dpi) +
-                                          padding.left;
+            scroll_ctx.cursor_content_x =
+                get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size, g_ui_ctx->dpi) +
+                padding.left;
         }
         {
             b32 has_text = state->text_len > 0;
             String full_text = has_text ? (String){ state->base, state->text_len } : text_hash.display_str;
             f32 text_width =
-                get_text_width(renderer, g_ui_context->raster_cache, full_text, font, font_size, g_ui_context->dpi);
+                get_text_width(renderer, g_ui_ctx->raster_cache, full_text, font, font_size, g_ui_ctx->dpi);
             f32 inner_width = text_width + padding.left + padding.right;
 
             UIBox* inner =
@@ -2176,8 +2528,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 if (is_focused && has_text)
                 {
                     String text_to_cursor = { state->base, state->cursor };
-                    cursor_x = get_text_width(renderer, g_ui_context->raster_cache, text_to_cursor, font, font_size,
-                                              g_ui_context->dpi);
+                    cursor_x = get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size,
+                                              g_ui_ctx->dpi);
                 }
                 if (is_focused)
                 {
@@ -2207,14 +2559,10 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             corners[1] = fade;
                             corners[3] = fade;
                         }
-                        RectStyle trail_style = {
-                            .corner_radius = font_size * 0.2f,
-                            .corner_colors = { corners[0], corners[1], corners[2], corners[3] },
-                        };
                         ui_box_end(ui_box_start(&(BoxConfig){
                             .sizing = { fixed(t_width), fixed(trail_h) },
                             .color = base,
-                            .rect_style = trail_style,
+                            .rect_style = { .corner_colors = { corners[0], corners[1], corners[2], corners[3] } },
                             .flags = BoxFlag_Float,
                             .float_offset = { t_start, -padding.top + CURSORBAR_PADDING },
                         }));
@@ -2225,11 +2573,11 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 if (is_focused && state->composition_len > 0)
                 {
                     String text_before = { state->base, state->composition_start };
-                    f32 comp_x = get_text_width(renderer, g_ui_context->raster_cache, text_before, font, font_size,
-                                                g_ui_context->dpi);
+                    f32 comp_x =
+                        get_text_width(renderer, g_ui_ctx->raster_cache, text_before, font, font_size, g_ui_ctx->dpi);
                     String comp_text = { state->base + state->composition_start, state->composition_len };
-                    f32 comp_w = get_text_width(renderer, g_ui_context->raster_cache, comp_text, font, font_size,
-                                                g_ui_context->dpi);
+                    f32 comp_w =
+                        get_text_width(renderer, g_ui_ctx->raster_cache, comp_text, font, font_size, g_ui_ctx->dpi);
                     if (comp_w > 0.f)
                     {
                         f32 underline_y = font_size;
@@ -2248,16 +2596,16 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     if (sel_start > 0)
                     {
                         String pre_text = { state->base, sel_start };
-                        text_config.color = text_color;
-                        ui_text(pre_text, &text_config);
+                        text_cfg.color = text_color;
+                        ui_text(pre_text, &text_cfg);
                     }
 
                     /* Selection highlight (only when focused and selection exists) */
                     if (has_selection)
                     {
                         String sel_text = { state->base + sel_start, sel_end - sel_start };
-                        f32 sel_width = get_text_width(renderer, g_ui_context->raster_cache, sel_text, font, font_size,
-                                                       g_ui_context->dpi);
+                        f32 sel_width =
+                            get_text_width(renderer, g_ui_ctx->raster_cache, sel_text, font, font_size, g_ui_ctx->dpi);
                         f32 sel_height = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
                         Color sel_color = selection_color;
                         Color copy_flash = selection_flash_color;
@@ -2278,8 +2626,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     if (sel_start < sel_end)
                     {
                         String sel_text = { state->base + sel_start, sel_end - sel_start };
-                        text_config.color = text_color;
-                        ui_text(sel_text, &text_config);
+                        text_cfg.color = text_color;
+                        ui_text(sel_text, &text_cfg);
                     }
 
                     /* Cursorbar at cursor position */
@@ -2290,8 +2638,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     if (sel_end < state->text_len)
                     {
                         String post_text = { state->base + sel_end, state->text_len - sel_end };
-                        text_config.color = text_color;
-                        ui_text(post_text, &text_config);
+                        text_cfg.color = text_color;
+                        ui_text(post_text, &text_cfg);
                     }
                 }
                 else
@@ -2299,8 +2647,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     if (is_focused)
                         cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
                     String placeholder = text_hash.display_str;
-                    text_config.color = placeholder_color;
-                    ui_text(placeholder, &text_config);
+                    text_cfg.color = placeholder_color;
+                    ui_text(placeholder, &text_cfg);
                 }
             }
             ui_box_end(inner);
@@ -2318,20 +2666,20 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             String text_before = { state->base, state->composition_start };
             ime_cursor_x =
-                get_text_width(renderer, g_ui_context->raster_cache, text_before, font, font_size, g_ui_context->dpi);
+                get_text_width(renderer, g_ui_ctx->raster_cache, text_before, font, font_size, g_ui_ctx->dpi);
         }
         else if (state->text_len > 0)
         {
             String text_to_cursor = { state->base, state->cursor };
-            ime_cursor_x = get_text_width(renderer, g_ui_context->raster_cache, text_to_cursor, font, font_size,
-                                          g_ui_context->dpi);
+            ime_cursor_x =
+                get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size, g_ui_ctx->dpi);
         }
-        f32 dpi_scale = (f32)g_ui_context->dpi / USER_DEFAULT_SCREEN_DPI;
+        f32 dpi_scale = (f32)g_ui_ctx->dpi / USER_DEFAULT_SCREEN_DPI;
 
         LONG cx = (LONG)((result.last_box->position.x + padding.left + ime_cursor_x) * dpi_scale);
         LONG cy = (LONG)((result.last_box->position.y + result.last_box->size.height + IME_OFFSET_TOP) * dpi_scale);
 
-        win32_ime_update_candidate(g_ui_context->window, cx, cy, &g_ui_context->ime_cursor_screen_pos);
+        win32_ime_update_candidate(g_ui_ctx->window, cx, cy, &g_ui_ctx->ime_cursor_screen_pos);
     }
 
     return result.flags;

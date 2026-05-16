@@ -2,6 +2,7 @@
 
 #include "utils.h"
 #include "glyph_cache.h"
+#include "panel.h"
 
 // clang-format off
 #define ui_box(...)                                                                                                    \
@@ -279,7 +280,7 @@ struct UIBox
     } data;
 
     BoxType type;
-    BoxConfig config;
+    BoxConfig cfg;
     u32 flags;
 
     /* layout tree */
@@ -300,7 +301,7 @@ struct UIBox
 
     // NOTE:
     //   `_t` stands for transition value, ranging from [0, 1].
-    //   The terms "hot" and "active" are context-dependent. For example:
+    //   The terms "hot" and "active" are ctx-dependent. For example:
     //     - Button: "hot" means hover, "active" means click.
     //     - Scroll Area: "hot" means nothing, whereas "active" means
     //       the mouse is moving continuously across frames.
@@ -472,11 +473,11 @@ struct UIContext
     Position ime_cursor_screen_pos;
 
     /* nesting */
-    UIContext* prev_context;
+    UIContext* prev_ctx;
 };
 
 //
-// Widget
+// Scroll Area
 //
 
 typedef struct
@@ -500,49 +501,110 @@ typedef struct
 {
     String hash_str;
     Sizing sizing;
-    Color bg_color;
     Padding padding;
+    f32 child_gap;
+    LayoutDirection direction;
+    Color bg_color;
     Color thumb_color;
     b32 fixed_track;
 } ScrollableAreaConfig;
 
-///
+//
+// Panel
+//
 
-extern UIContext* g_ui_context;
+typedef struct
+{
+    Color panel_bg;
+    Color panel_border;
 
-Color lerp_color(const Color a, const Color b, const f32 t);
-b32 update_transition(f32* transition, const f32 speed, const f32 target);
+    Color tab_splitter;
+    Color tab_bar;
+    Color tab_bg;
+    Color tab_fg;
+    Color tab_active_bg;
+    Color tab_active_fg;
+    Color tab_dragging_bg;
+    Color tab_drag_target_bg;
 
-///
+    Color hover_bg;
+    Color click_bg;
 
-void ui_init(const HWND window, UIContext* ui_context, struct Renderer* renderer, GlyphRasterCache* raster_cache,
-             u32 width, u32 height, u32 dpi, UIRenderFunc render_fn);
-void ui_deinit(UIContext* ui_context);
+    Color splitter_idle;
+    Color splitter_hover;
+    Color splitter_drag;
 
-UIBox* ui_box_start(const BoxConfig* config);
+    Color scrollbar_thumb;
+} PanelTheme;
+
+typedef struct
+{
+    Panel* panel;
+    Rect root_rect;
+    const PanelTheme* theme;
+    const Font* font_ui;
+    f32 font_size;
+    CmdQueue* cmd_queue;
+    void* cmd_ctx;
+    Padding padding;
+    f32 child_gap;
+    LayoutDirection direction;
+} PanelConfig;
+
+typedef struct
+{
+    Panel* panel;
+    ScrollContext scroll_ctx;
+    UIBox* outer_box;
+} PanelContext;
+
+//
+// Functions
+//
+
+// basic
+void ui_init(const HWND window, UIContext* ui_ctx, struct Renderer* renderer, GlyphRasterCache* raster_cache, u32 width,
+             u32 height, u32 dpi, UIRenderFunc render_fn);
+void ui_deinit(UIContext* ui_ctx);
+
+isize ui_frame_begin(UIContext* ui_ctx);
+void ui_frame_end(isize arena_pos_backup);
+
+UIBox* ui_box_start(const BoxConfig* cfg);
 void ui_box_end(UIBox* box);
-UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str);
-Position ui_box_drag_delta(const UIBox* box);
+UIBox* ui_text(const String text, const TextConfig* text_cfg);
 
-/* Drag-drop payload API:
-   - Source calls ui_set_drag_payload() when it detects Dragging signal.
-   - Target checks ui_is_drag_over() for visual feedback.
-   - On release, target gets Dropped signal and retrieves payload via
-     ui_accept_drag_payload(). */
+// interaction
+UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str);
+
+Position ui_box_drag_delta(const UIBox* box);
 void ui_set_drag_payload(void* payload, isize size);
 void* ui_accept_drag_payload(isize expected_size);
 b32 ui_is_drag_over(const UIBox* box);
 
-UIBox* ui_text(const String text, const TextConfig* text_config);
-
-isize ui_frame_begin(UIContext* ui_context);
-void ui_frame_end(isize arena_pos_backup);
-
 void ui_set_desired_cursor(Cursor shape);
 
-ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* config);
+// transition
+Color lerp_color(const Color a, const Color b, const f32 t);
+b32 update_transition(f32* transition, const f32 speed, const f32 target);
+
+// scroll area
+ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* cfg);
 void ui_scrollable_area_end(ScrollContext scroll_ctx);
 
+// panel
+#define ui_panel(...)                                                                                                  \
+    for (PanelContext __pf = ui_panel_begin(&(PanelConfig)__VA_ARGS__); __pf.panel != NULL;                            \
+         ui_panel_end(&__pf), __pf.panel = NULL)
+
+String panel_str_impl(u8* buf, const char* text_with_hash_str, u32 panel_id);
+#define panel_str(fmt, id) panel_str_impl((u8[HASH_STR_MAX_LENGTH]){ 0 }, fmt, id)
+
+void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme);
+PanelContext ui_panel_begin(const PanelConfig* cfg);
+void ui_panel_end(PanelContext* pf);
+
+// widget
 UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
                         const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
                         const Color bg_color_press);
@@ -553,3 +615,9 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             const Color border_color, const Color text_color, const Color thumb_color,
                             const Color cursor_trail_color, const Color cursor_bar_color, const Color selection_color,
                             const Color selection_flash_color);
+
+//
+// Global Variables
+//
+
+extern UIContext* g_ui_ctx;

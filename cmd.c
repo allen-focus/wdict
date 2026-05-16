@@ -5,7 +5,11 @@
  *   "window.create w=600 h=600"  → { "window.create",  "w=600 h=600" }
  *   "tab.new"                    → { "tab.new",        {0}           }
  */
-typedef struct { String token; String rest; } ParseFirstTokenResult;
+typedef struct
+{
+    String token;
+    String rest;
+} ParseFirstTokenResult;
 static ParseFirstTokenResult parse_first_token(String text)
 {
     ParseFirstTokenResult r;
@@ -28,8 +32,7 @@ static String find_value(String text, String key)
 {
     for (isize i = 0; i + key.len + 1 <= text.len; i++)
     {
-        if ((i == 0 || text.data[i - 1] == ' ') &&
-            memcmp(text.data + i, key.data, (size_t)key.len) == 0 &&
+        if ((i == 0 || text.data[i - 1] == ' ') && memcmp(text.data + i, key.data, (size_t)key.len) == 0 &&
             text.data[i + key.len] == '=')
         {
             isize val_start = i + key.len + 1;
@@ -130,12 +133,11 @@ void cmd_queue_init(CmdQueue* q, Arena* arena)
     q->arena = arena;
 }
 
-CmdQueueNode* cmd_queue_push(CmdQueue* q, String text,
-                             const void* payload, isize payload_size)
+    CmdQueueNode* cmd_queue_push(CmdQueue* q, String text, const void* payload, isize payload_size)
 {
     isize node_size = sizeof(CmdQueueNode) + payload_size;
     CmdQueueNode* n = (CmdQueueNode*)arena_push(q->arena, node_size, _Alignof(CmdQueueNode), 1);
-    n->cmd_text = text;
+    n->cmd_text = str_clone(q->arena, text);
     n->payload_size = payload_size;
     if (payload && payload_size > 0)
         memcpy(n->payload, payload, (size_t)payload_size);
