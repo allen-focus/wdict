@@ -38,6 +38,7 @@
 #define HASH_STR_MAX_LENGTH        128
 #define CHAR_INPUT_QUEUE_CAPACITY  64
 #define TEXT_ACTION_QUEUE_CAPACITY 64
+#define DRAG_PAYLOAD_MAX           64
 
 #define ICON_FONT_UTF8_OK     "\xEE\xA0\x80"
 #define ICON_FONT_UTF8_CANCEL "\xEE\xA0\x81"
@@ -55,6 +56,8 @@ typedef enum
     UI_Signal_Flag_DoubleClicked = (1 << 4),
     UI_Signal_Flag_Released      = (1 << 5),
     UI_Signal_Flag_Dragging      = (1 << 6),
+    UI_Signal_Flag_DragOver      = (1 << 7),
+    UI_Signal_Flag_Dropped       = (1 << 8),
     // clang-format on
 } UISignalFlags;
 
@@ -66,6 +69,8 @@ typedef enum
 #define ui_double_clicked(signal_flags) (signal_flags & UI_Signal_Flag_DoubleClicked)
 #define ui_released(signal_flags)       (signal_flags & UI_Signal_Flag_Released)
 #define ui_dragging(signal_flags)       (signal_flags & UI_Signal_Flag_Dragging)
+#define ui_drag_over(signal_flags)      (signal_flags & UI_Signal_Flag_DragOver)
+#define ui_dropped(signal_flags)        (signal_flags & UI_Signal_Flag_Dropped)
 
 //
 // Cursor
@@ -431,7 +436,6 @@ struct UIContext
     b32 mouse_rclick;
     b32 mouse_press;
     b32 mouse_double_click;
-    b32 mouse_released;
     f64 last_lclick_time;
     Position last_lclick_pos;
     Cursor desired_cursor;
@@ -439,6 +443,12 @@ struct UIContext
     isize char_input_queue_count;
     TextAction text_action_queue[TEXT_ACTION_QUEUE_CAPACITY];
     isize text_action_queue_count;
+
+    /* drag-drop */
+    u8 drag_payload_buf[DRAG_PAYLOAD_MAX];
+    isize drag_payload_size;
+    b32 drag_active;
+    UIBox* drag_source_box;
 
     /* box cache */
     UIBox* root;
@@ -513,6 +523,16 @@ UIBox* ui_box_start(const BoxConfig* config);
 void ui_box_end(UIBox* box);
 UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str);
 Position ui_box_drag_delta(const UIBox* box);
+
+/* Drag-drop payload API:
+   - Source calls ui_set_drag_payload() when it detects Dragging signal.
+   - Target checks ui_is_drag_over() for visual feedback.
+   - On release, target gets Dropped signal and retrieves payload via
+     ui_accept_drag_payload(). */
+void ui_set_drag_payload(void* payload, isize size);
+void* ui_accept_drag_payload(isize expected_size);
+b32 ui_is_drag_over(const UIBox* box);
+
 UIBox* ui_text(const String text, const TextConfig* text_config);
 
 isize ui_frame_begin(UIContext* ui_context);

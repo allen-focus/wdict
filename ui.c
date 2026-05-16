@@ -976,11 +976,19 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_context->mouse_lclick = False;
     g_ui_context->mouse_rclick = False;
     g_ui_context->mouse_double_click = False;
-    g_ui_context->mouse_released = False;
     g_ui_context->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_context->mouse_scroll_delta = (Position){ 0.f, 0.f };
     g_ui_context->char_input_queue_count = 0;
     g_ui_context->text_action_queue_count = 0;
+
+    /* drag-drop */
+    if (!g_ui_context->mouse_press && g_ui_context->drag_active)
+    {
+        g_ui_context->drag_active = False;
+        g_ui_context->drag_payload_size = 0;
+        g_ui_context->drag_source_box = NULL;
+    }
+
     g_ui_context->frame_index++;
     arena_pop_to(&g_ui_context->arena, arena_pos_backup);
     g_ui_context = g_ui_context->prev_context;
@@ -1039,11 +1047,13 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
         /* Drag: record mouse anchor on press (must be over the box to start drag) */
         if (g_ui_context->mouse_lclick)
             box->drag_mouse_anchor = g_ui_context->mouse_pos;
+
+        /* DragOver: a drag payload is active and the mouse is over this (non-source) box */
+        if (g_ui_context->drag_active && box != g_ui_context->drag_source_box)
+            *flags |= UI_Signal_Flag_DragOver;
     }
 
-    /* Drag: signal Dragging when mouse moves while held, even outside the box.
-       The drag anchor was set on press (when the mouse was over the box),
-       so drag continues from that anchor until mouse release. */
+    /* Drag: signal Dragging when mouse moves while held, even outside the box. */
     if (g_ui_context->mouse_press && has_mouse_anchor)
     {
         Position delta = {
@@ -1051,8 +1061,21 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
             g_ui_context->mouse_pos.y - box->drag_mouse_anchor.y,
         };
         if (delta.x != 0.f || delta.y != 0.f)
+        {
             *flags |= UI_Signal_Flag_Dragging;
+            /* First box to report dragging becomes the drag source */
+            if (!g_ui_context->drag_active)
+            {
+                g_ui_context->drag_active = True;
+                g_ui_context->drag_source_box = box;
+            }
+        }
     }
+
+    /* Dropped: release while a drag was active, over this box */
+    if (!g_ui_context->mouse_press && g_ui_context->drag_active &&
+        rect_contains_point(box_rect, g_ui_context->mouse_pos))
+        *flags |= UI_Signal_Flag_Dropped;
 }
 
 UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str)
@@ -1074,6 +1097,31 @@ Position ui_box_drag_delta(const UIBox* box)
         delta.y = g_ui_context->mouse_pos.y - box->drag_mouse_anchor.y;
     }
     return delta;
+}
+
+void ui_set_drag_payload(void* payload, isize size)
+{
+    Assert(size <= DRAG_PAYLOAD_MAX);
+    memcpy(g_ui_context->drag_payload_buf, payload, (size_t)size);
+    g_ui_context->drag_payload_size = size;
+}
+
+void* ui_accept_drag_payload(isize expected_size)
+{
+    if (!g_ui_context->drag_active)
+        return NULL;
+    if (expected_size != g_ui_context->drag_payload_size)
+        return NULL;
+    return g_ui_context->drag_payload_buf;
+}
+
+b32 ui_is_drag_over(const UIBox* box)
+{
+    if (!g_ui_context->drag_active)
+        return False;
+    Rect r = { box->position.x, box->position.y, box->position.x + box->size.width,
+               box->position.y + box->size.height };
+    return rect_contains_point(r, g_ui_context->mouse_pos) && box != g_ui_context->drag_source_box;
 }
 
 //

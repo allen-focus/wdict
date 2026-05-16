@@ -702,6 +702,7 @@ static void process_frame(WindowContext* ctx)
                                 if (r.last_box)
                                     update_transition(&r.last_box->hot_t, 20.f, ui_hovered(r.flags) ? 1.f : 0.f);
                                 f32 hot = r.last_box ? r.last_box->hot_t : 0.f;
+
                                 box->config.color = lerp_color(bg_normal, bg_hover, hot);
 
                                 if (ui_lclicked(r.flags))
@@ -744,8 +745,8 @@ static void process_frame(WindowContext* ctx)
                                       theme->bg_base);
                         if (ui_lclicked(plus_flags))
                         {
-                            cmd_queue_push(&shared->cmd_queue, str("tab.new"),
-                                           &(CmdPayload){ .ctx = ctx, .panel = p }, sizeof(CmdPayload));
+                            cmd_queue_push(&shared->cmd_queue, str("tab.new"), &(CmdPayload){ .ctx = ctx, .panel = p },
+                                           sizeof(CmdPayload));
                         }
 
                         /* Close panel button */
@@ -826,8 +827,7 @@ static void process_frame(WindowContext* ctx)
                                     theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
                                 if (ui_lclicked(button_flags))
                                 {
-                                    cmd_queue_push(&shared->cmd_queue,
-                                                   str("window.create w=600 h=600"), NULL, 0);
+                                    cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"), NULL, 0);
                                 }
                             }
                         }
@@ -943,7 +943,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_LBUTTONUP:
         {
-            ui_context->mouse_released = True;
             ui_context->mouse_press = False;
             ReleaseCapture();
             return 0;
@@ -958,7 +957,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_CAPTURECHANGED:
         {
-            ui_context->mouse_released = True;
             ui_context->mouse_press = False;
             ReleaseCapture();
         }
