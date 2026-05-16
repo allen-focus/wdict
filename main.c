@@ -1,10 +1,12 @@
 #pragma comment(lib, "kernel32")
 #pragma comment(lib, "user32")
 
+#include "cmd.h"
 #include "glyph_cache.h"
 #include "palette.h"
 #include "panel.h"
 #include "renderer.h"
+#include "shortcut.h"
 #include "ui.h"
 #include "utils.h"
 #include "win32_helper.h"
@@ -31,54 +33,21 @@
 #define PANEL_PCT_MIN  0.05f
 #define PANEL_PCT_MAX  0.95f
 
-typedef enum
-{
-    CMD_NONE,
-    CMD_CREATE_WINDOW,
-    CMD_SET_WINDOW_TITLE,
-    CMD_TOGGLE_CHECK,
-    CMD_TOGGLE_THEME,
-    CMD_SPLIT_PANEL_H,
-    CMD_SPLIT_PANEL_V,
-    CMD_CLOSE_PANEL,
-    CMD_TAB_NEW,
-    CMD_TAB_CLOSE,
-    CMD_TAB_MOVE,
-    CMD_TAB_MOVE_TO_PANEL,
-    CMD_TAB_TO_NEW_PANEL,
-} CmdKind;
-
 typedef struct WindowContext WindowContext;
 
-typedef struct CmdNode CmdNode;
-struct CmdNode
+typedef struct
 {
-    CmdNode* next;
-    CmdKind kind;
-    union
-    {
-        struct
-        {
-            u32 width;
-            u32 height;
-        } create_win;
-        struct
-        {
-            WindowContext* target;
-            String title;
-        } set_title;
-        struct
-        {
-            WindowContext* target;
-            Panel* panel;
-            Panel* to_panel;
-            PanelTab* tab;
-            i32 delta;
-            Axis2 axis;
-        } panel_action;
-        b32* toggle_check;
-    };
-};
+    WindowContext* ctx;
+    Panel* panel;
+    Panel* to_panel;
+    PanelTab* tab;
+    i32 delta;
+    Axis2 axis;
+    u32 width;
+    u32 height;
+    String title;
+    b32* toggle;
+} CmdPayload;
 
 typedef enum
 {
@@ -135,10 +104,11 @@ typedef struct
     HCURSOR cursors[5];
     WindowContext* first_window;
     WindowContext* last_window;
+    Arena cfg_arena;
     Arena cmd_arena;
-    CmdNode* cmd_first;
-    CmdNode* cmd_last;
-    u64 cmd_count;
+    CmdRegistry cmd_registry;
+    ShortcutRegistry shortcuts;
+    CmdQueue cmd_queue;
 } AppShared;
 
 struct WindowContext
@@ -391,109 +361,123 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32
 }
 
 //
-// App Commands
+// Command Handlers
 //
 
-static CmdNode* cmd_push(AppShared* shared, const CmdKind kind)
+static void cmd_create_window(void* userdata, void* context, void* payload, isize payload_size)
 {
-    CmdNode* n = (CmdNode*)arena_push(&shared->cmd_arena, sizeof(CmdNode), _Alignof(CmdNode), 1);
-    n->kind = kind;
-    if (!shared->cmd_last)
-        shared->cmd_first = n;
-    else
-        shared->cmd_last->next = n;
-    shared->cmd_last = n;
-    shared->cmd_count++;
-    return n;
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    create_window((AppShared*)userdata, L"Window", p->width, p->height);
 }
 
-static void cmd_execute_all(AppShared* shared, WindowContext* ctx)
+static void cmd_set_window_title(void* userdata, void* context, void* payload, isize payload_size)
 {
-    CmdNode* list = shared->cmd_first;
-    shared->cmd_first = NULL;
-    shared->cmd_last = NULL;
-    shared->cmd_count = 0;
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    set_window_title(p->ctx, p->title);
+}
 
-    if (list == NULL)
-        return;
+static void cmd_toggle_check(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p->toggle)
+        *p->toggle = !*p->toggle;
+}
 
-    for (CmdNode* n = list; n; n = n->next)
+static void cmd_toggle_theme(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)context;
+    (void)payload;
+    (void)payload_size;
+    AppShared* shared = (AppShared*)userdata;
+    shared->theme = (shared->theme.bg_base.r == s_theme_dark.bg_base.r) ? s_theme_light : s_theme_dark;
+}
+
+static void cmd_split_panel_h(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p->panel)
+        panel_split(p->panel, Axis2_X);
+}
+
+static void cmd_split_panel_v(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p->panel)
+        panel_split(p->panel, Axis2_Y);
+}
+
+static void cmd_close_panel(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p->panel)
     {
-        switch (n->kind)
+        p->panel->anim_state = PANEL_ANIM_CLOSING;
+        p->panel->anim_to_pct = 0.0f;
+    }
+}
+
+static void cmd_tab_new(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p->panel)
+    {
+        u8 name_buf[PANEL_TAB_NAME_MAX];
+        isize name_len;
+        panel_tab_generate_default_name(p->panel, name_buf, sizeof(name_buf), &name_len);
+        panel_tab_declare(p->panel, (String){ name_buf, name_len });
+    }
+}
+
+static void cmd_tab_close(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (!p->panel || !p->tab)
+        return;
+    /* If this is the only tab left, close the panel instead */
+    if (p->panel->tab_first && !p->panel->tab_first->next && p->panel->tab_first == p->tab)
+    {
+        if (p->panel->parent)
         {
-            case CMD_CREATE_WINDOW:
-                create_window(shared, L"Window", n->create_win.width, n->create_win.height);
-                break;
-            case CMD_SET_WINDOW_TITLE:
-                set_window_title(n->set_title.target, n->set_title.title);
-                break;
-            case CMD_TOGGLE_CHECK:
-                *n->toggle_check = !*n->toggle_check;
-                break;
-            case CMD_TOGGLE_THEME:
-                shared->theme = (shared->theme.bg_base.r == s_theme_dark.bg_base.r) ? s_theme_light : s_theme_dark;
-                break;
-            case CMD_SPLIT_PANEL_H:
-                if (n->panel_action.target && n->panel_action.panel)
-                    panel_split(n->panel_action.panel, Axis2_X);
-                break;
-            case CMD_SPLIT_PANEL_V:
-                if (n->panel_action.target && n->panel_action.panel)
-                    panel_split(n->panel_action.panel, Axis2_Y);
-                break;
-            case CMD_CLOSE_PANEL:
-                if (n->panel_action.target && n->panel_action.panel)
-                {
-                    n->panel_action.panel->anim_state = PANEL_ANIM_CLOSING;
-                    n->panel_action.panel->anim_to_pct = 0.0f;
-                }
-                break;
-            case CMD_TAB_NEW:
-                if (n->panel_action.target && n->panel_action.panel)
-                {
-                    u8 name_buf[PANEL_TAB_NAME_MAX];
-                    isize name_len;
-                    panel_tab_generate_default_name(n->panel_action.panel, name_buf, sizeof(name_buf), &name_len);
-                    panel_tab_declare(n->panel_action.panel, (String){ name_buf, name_len });
-                }
-                break;
-            case CMD_TAB_CLOSE:
-                if (n->panel_action.target && n->panel_action.panel && n->panel_action.tab)
-                {
-                    Panel* p = n->panel_action.panel;
-                    /* If this is the only tab left, close the panel instead */
-                    if (p->tab_first && !p->tab_first->next && p->tab_first == n->panel_action.tab)
-                    {
-                        if (p->parent)
-                        {
-                            p->anim_state = PANEL_ANIM_CLOSING;
-                            p->anim_to_pct = 0.0f;
-                        }
-                    }
-                    else
-                    {
-                        panel_tab_close(p, n->panel_action.tab);
-                    }
-                }
-                break;
-            case CMD_TAB_MOVE:
-                if (n->panel_action.target && n->panel_action.panel && n->panel_action.tab)
-                    panel_tab_move(n->panel_action.panel, n->panel_action.tab, n->panel_action.delta);
-                break;
-            case CMD_TAB_MOVE_TO_PANEL:
-                if (n->panel_action.target && n->panel_action.panel && n->panel_action.to_panel && n->panel_action.tab)
-                    panel_tab_move_to_panel(n->panel_action.panel, n->panel_action.tab, n->panel_action.to_panel);
-                break;
-            case CMD_TAB_TO_NEW_PANEL:
-                if (n->panel_action.target && n->panel_action.panel && n->panel_action.to_panel && n->panel_action.tab)
-                    panel_tab_to_new_panel(n->panel_action.panel, n->panel_action.tab, n->panel_action.to_panel,
-                                           n->panel_action.axis);
-                break;
-            default:
-                break;
+            p->panel->anim_state = PANEL_ANIM_CLOSING;
+            p->panel->anim_to_pct = 0.0f;
         }
     }
-    arena_pop_to(&shared->cmd_arena, 0);
+    else
+    {
+        panel_tab_close(p->panel, p->tab);
+    }
+}
+
+static void cmd_tab_move(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p->panel && p->tab)
+        panel_tab_move(p->panel, p->tab, p->delta);
+}
+
+static void cmd_tab_move_to_panel(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p->panel && p->to_panel && p->tab)
+        panel_tab_move_to_panel(p->panel, p->tab, p->to_panel);
+}
+
+static void cmd_tab_to_new_panel(void* userdata, void* context, void* payload, isize payload_size)
+{
+    (void)payload_size;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p->panel && p->to_panel && p->tab)
+        panel_tab_to_new_panel(p->panel, p->tab, p->to_panel, p->axis);
 }
 
 //
@@ -561,8 +545,9 @@ static void panel_render_boundary(const Panel* panel, const Rect panel_rect, con
         /* Handle transition */
         if (result.last_box)
         {
-            update_transition(&result.last_box->hot_t, 20.f, ui_hovered(flags) ? 1.f : 0.f);
-            update_transition(&result.last_box->active_t, 20.f, ui_dragging(flags) || ui_pressed(flags) ? 1.f : 0.f);
+            update_transition(&result.last_box->hot_t, 20.f,
+                              ui_hovered(flags) || ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f);
+            update_transition(&result.last_box->active_t, 20.f, ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f);
         }
         f32 hot_t = result.last_box ? result.last_box->hot_t : 0.f;
         f32 active_t = result.last_box ? result.last_box->active_t : 0.f;
@@ -615,7 +600,7 @@ static void process_frame(WindowContext* ctx)
     Font* font_symbol = &shared->fonts[FONT_INDEX_ICON];
 
     TracyCZone(ctx_frame, 1);
-    cmd_execute_all(shared, ctx);
+    cmd_queue_execute_all(&shared->cmd_queue, &shared->cmd_registry, ctx);
     isize arena_pos_backup = ui_frame_begin(ui_context);
     {
         ctx->root_panel = panel_update_animations(ctx->root_panel, g_ui_context->current_time);
@@ -727,10 +712,9 @@ static void process_frame(WindowContext* ctx)
                                               (Padding){ 0 }, cb_normal, cb_normal, cb_hover, cb_hover);
                                 if (ui_lclicked(cf))
                                 {
-                                    CmdNode* n = cmd_push(shared, CMD_TAB_CLOSE);
-                                    n->panel_action.target = ctx;
-                                    n->panel_action.panel = p;
-                                    n->panel_action.tab = tab;
+                                    cmd_queue_push(&shared->cmd_queue, str("tab.close"),
+                                                   &(CmdPayload){ .ctx = ctx, .panel = p, .tab = tab },
+                                                   sizeof(CmdPayload));
                                 }
                             }
                         }
@@ -749,9 +733,8 @@ static void process_frame(WindowContext* ctx)
                                       theme->bg_base);
                         if (ui_lclicked(plus_flags))
                         {
-                            CmdNode* n = cmd_push(shared, CMD_TAB_NEW);
-                            n->panel_action.target = ctx;
-                            n->panel_action.panel = p;
+                            cmd_queue_push(&shared->cmd_queue, str("tab.new"), &(CmdPayload){ .ctx = ctx, .panel = p },
+                                           sizeof(CmdPayload));
                         }
 
                         /* Close panel button */
@@ -763,9 +746,8 @@ static void process_frame(WindowContext* ctx)
                                       (Color){ 0, 0, 0, 0 }, theme->fg_secondary, theme->danger, theme->danger);
                         if (p->parent && ui_lclicked(close_flags))
                         {
-                            CmdNode* n = cmd_push(shared, CMD_CLOSE_PANEL);
-                            n->panel_action.target = ctx;
-                            n->panel_action.panel = p;
+                            cmd_queue_push(&shared->cmd_queue, str("panel.close"),
+                                           &(CmdPayload){ .ctx = ctx, .panel = p }, sizeof(CmdPayload));
                         }
                     }
 
@@ -802,12 +784,22 @@ static void process_frame(WindowContext* ctx)
                                                        .font_size = 12,
                                                        .color = theme->fg_primary,
                                                        .line_height = 24 });
-                                ui_text(str("Ctrl+W closes the panel under the mouse cursor."),
+                                ui_text(str("Ctrl+T new tab. Ctrl+W close tab. F11 toggle theme."),
                                         &(TextConfig){ .font = font_ui,
                                                        .font_size = 12,
                                                        .color = theme->fg_secondary,
                                                        .line_height = 24 });
-                                ui_text(str("Ctrl+T adds a new tab to the hovered panel."),
+                                ui_text(str("Ctrl+Shift+Left/Right to reorder tabs."),
+                                        &(TextConfig){ .font = font_ui,
+                                                       .font_size = 12,
+                                                       .color = theme->fg_secondary,
+                                                       .line_height = 24 });
+                                ui_text(str("Ctrl+Shift+N moves tab to next panel."),
+                                        &(TextConfig){ .font = font_ui,
+                                                       .font_size = 12,
+                                                       .color = theme->fg_secondary,
+                                                       .line_height = 24 });
+                                ui_text(str("Ctrl+Shift+F/G to detach tab as new panel (H/V)."),
                                         &(TextConfig){ .font = font_ui,
                                                        .font_size = 12,
                                                        .color = theme->fg_secondary,
@@ -823,9 +815,9 @@ static void process_frame(WindowContext* ctx)
                                     theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press);
                                 if (ui_lclicked(button_flags))
                                 {
-                                    CmdNode* n = cmd_push(shared, CMD_CREATE_WINDOW);
-                                    n->create_win.width = CLIENT_WIDTH;
-                                    n->create_win.height = CLIENT_HEIGHT;
+                                    cmd_queue_push(&shared->cmd_queue, str("window.create"),
+                                                   &(CmdPayload){ .width = CLIENT_WIDTH, .height = CLIENT_HEIGHT },
+                                                   sizeof(CmdPayload));
                                 }
                             }
                         }
@@ -1021,119 +1013,61 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_KEYDOWN:
         {
+            b32 ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            b32 shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            b32 alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+
             if (wparam == VK_ESCAPE)
             {
                 DestroyWindow(window);
                 return 0;
             }
 
-            b32 ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-
-            if (wparam == 'T' && ctrl)
+            /* Check registered shortcuts */
             {
-                if (ctx && ctx->hovered_panel)
+                Modifiers mods = 0;
+                if (ctrl)
+                    mods |= SHORTCUT_MOD_CTRL;
+                if (shift)
+                    mods |= SHORTCUT_MOD_SHIFT;
+                if (alt)
+                    mods |= SHORTCUT_MOD_ALT;
+                Shortcut sc = { mods, (u32)wparam };
+                String cmd_id = shortcut_lookup(&shared->shortcuts, sc);
+                if (cmd_id.len)
                 {
-                    CmdNode* n = cmd_push(shared, CMD_TAB_NEW);
-                    n->panel_action.target = ctx;
-                    n->panel_action.panel = ctx->hovered_panel;
-                }
-                return 0;
-            }
-            if (wparam == VK_F11)
-            {
-                cmd_push(shared, CMD_TOGGLE_THEME);
-                return 0;
-            }
-
-            b32 shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-            if (wparam == 'H' && ctrl && shift)
-            {
-                if (ctx && ctx->hovered_panel)
-                {
-                    CmdNode* n = cmd_push(shared, CMD_SPLIT_PANEL_H);
-                    n->panel_action.target = ctx;
-                    n->panel_action.panel = ctx->hovered_panel;
-                }
-                return 0;
-            }
-            if (wparam == 'V' && ctrl && shift)
-            {
-                if (ctx && ctx->hovered_panel)
-                {
-                    CmdNode* n = cmd_push(shared, CMD_SPLIT_PANEL_V);
-                    n->panel_action.target = ctx;
-                    n->panel_action.panel = ctx->hovered_panel;
-                }
-                return 0;
-            }
-            if (wparam == 'W' && ctrl)
-            {
-                if (ctx && ctx->hovered_panel)
-                {
-                    PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
-                    if (at)
+                    /* Build payload — each handler only reads the fields it needs */
+                    CmdPayload payload = { .ctx = ctx };
+                    if (ctx && ctx->hovered_panel)
                     {
-                        CmdNode* n = cmd_push(shared, CMD_TAB_CLOSE);
-                        n->panel_action.target = ctx;
-                        n->panel_action.panel = ctx->hovered_panel;
-                        n->panel_action.tab = at;
+                        payload.panel = ctx->hovered_panel;
+                        PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
+                        if (at)
+                            payload.tab = at;
                     }
-                }
-                return 0;
-            }
+                    if (wparam == VK_LEFT)
+                        payload.delta = -1;
+                    if (wparam == VK_RIGHT)
+                        payload.delta = +1;
+                    payload.axis = (wparam == 'F') ? Axis2_X : Axis2_Y;
 
-            /* Tab move: Ctrl+Shift+Left/Right moves active tab in hovered panel */
-            if (ctrl && shift && ctx && ctx->hovered_panel)
-            {
-                if (wparam == VK_LEFT || wparam == VK_RIGHT)
-                {
-                    PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
-                    if (at)
+                    /* Resolve next leaf for move-to-panel */
+                    if (str_compare(cmd_id, str("tab.move_to_panel")) && ctx && ctx->hovered_panel)
                     {
-                        CmdNode* n = cmd_push(shared, CMD_TAB_MOVE);
-                        n->panel_action.target = ctx;
-                        n->panel_action.panel = ctx->hovered_panel;
-                        n->panel_action.tab = at;
-                        n->panel_action.delta = (wparam == VK_LEFT) ? -1 : +1;
-                    }
-                    return 0;
-                }
-                /* Tab move to next panel: Ctrl+Shift+N */
-                if (wparam == 'N')
-                {
-                    PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
-                    if (at)
-                    {
-                        /* Find the next leaf panel (skip non-leaves) */
-                        Panel* next_panel = ctx->hovered_panel;
+                        Panel* next = ctx->hovered_panel;
                         do
                         {
-                            next_panel = panel_iter_next(next_panel);
-                        } while (next_panel && next_panel->child_a);
-                        if (next_panel)
-                        {
-                            CmdNode* n = cmd_push(shared, CMD_TAB_MOVE_TO_PANEL);
-                            n->panel_action.target = ctx;
-                            n->panel_action.panel = ctx->hovered_panel;
-                            n->panel_action.to_panel = next_panel;
-                            n->panel_action.tab = at;
-                        }
+                            next = panel_iter_next(next);
+                        } while (next && next->child_a);
+                        if (next)
+                            payload.to_panel = next;
                     }
-                    return 0;
-                }
-                /* Turn tab into new panel: Ctrl+Shift+T (horizontal) / Ctrl+Shift+G (vertical) */
-                if (wparam == 'F' || wparam == 'G')
-                {
-                    PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
-                    if (at && ctx->hovered_panel)
-                    {
-                        CmdNode* n = cmd_push(shared, CMD_TAB_TO_NEW_PANEL);
-                        n->panel_action.target = ctx;
-                        n->panel_action.panel = ctx->hovered_panel;
-                        n->panel_action.to_panel = ctx->hovered_panel;
-                        n->panel_action.tab = at;
-                        n->panel_action.axis = (wparam == 'F') ? Axis2_X : Axis2_Y;
-                    }
+
+                    /* Use hovered panel as anchor for to-new-panel */
+                    if (str_compare(cmd_id, str("tab.to_new_panel")))
+                        payload.to_panel = ctx ? ctx->hovered_panel : NULL;
+
+                    cmd_queue_push(&shared->cmd_queue, cmd_id, &payload, sizeof(payload));
                     return 0;
                 }
             }
@@ -1288,7 +1222,40 @@ i32 WinMainCRTStartup()
 {
     AppShared shared = { 0 };
     shared.theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
+
+    /* Init command infrastructure */
+    shared.cfg_arena = arena_new(KB(8));
     shared.cmd_arena = arena_new(CMD_ARENA_SIZE);
+    cmd_registry_init(&shared.cmd_registry, &shared.cfg_arena, 32);
+    shortcut_registry_init(&shared.shortcuts, &shared.cfg_arena, 64);
+    cmd_queue_init(&shared.cmd_queue, &shared.cmd_arena);
+
+    /* Register commands */
+    // clang-format off
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),       str("New Window"),                    str(""), cmd_create_window,       &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),    str("Toggle Light/Dark Theme"),       str(""), cmd_toggle_theme,        &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),       str("Split Panel Horizontally"),      str(""), cmd_split_panel_h,       &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_v"),       str("Split Panel Vertically"),        str(""), cmd_split_panel_v,       &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.close"),         str("Close Panel"),                   str(""), cmd_close_panel,         &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.new"),             str("New Tab"),                       str(""), cmd_tab_new,             &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.close"),           str("Close Tab"),                     str(""), cmd_tab_close,           &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),            str("Move Tab"),                      str(""), cmd_tab_move,            &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),   str("Move Tab To Next Panel"),        str(""), cmd_tab_move_to_panel,   &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),    str("Move Tab To New Panel"),         str(""), cmd_tab_to_new_panel,    &shared });
+
+    /* Bind shortcuts */
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },      str("tab.new"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'W' },      str("tab.close"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'H' },      str("panel.split_h"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'V' },      str("panel.split_v"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_LEFT },  str("tab.move"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_RIGHT }, str("tab.move"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },      str("tab.move_to_panel"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },      str("tab.to_new_panel"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },      str("tab.to_new_panel"));
+    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                       VK_F11 },  str("app.toggle_theme"));
+    Assert(!shortcut_detect_conflicts(&shared.shortcuts));
+    // clang-format on
 
     /* Load cursors */
     shared.cursors[UI_CURSOR_ARROW] = LoadCursor(NULL, IDC_ARROW);
@@ -1366,6 +1333,7 @@ i32 WinMainCRTStartup()
     raster_cache_deinit(&shared.raster_cache);
     dwrite_deinit(&shared.dwrite);
     arena_release(&shared.cmd_arena);
+    arena_release(&shared.cfg_arena);
 
     return 0;
 }
