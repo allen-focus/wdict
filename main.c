@@ -675,7 +675,8 @@ static void process_frame(WindowContext* ctx)
                     {
                         PanelTab* active = panel_tab_get_active(p);
 
-                        for (PanelTab* tab = p->tab_first; tab; tab = tab->next)
+                        isize tab_index = 0;
+                        for (PanelTab* tab = p->tab_first; tab; tab = tab->next, tab_index++)
                         {
                             b32 is_active = (tab == active);
 
@@ -699,34 +700,80 @@ static void process_frame(WindowContext* ctx)
                             })
                             {
                                 UIBoxInteractResult r = ui_box_interact(box, tab_key_str);
+
+                                /* Drag source: start dragging this tab */
+                                b32 is_dragging = ui_dragging(r.flags);
+                                if (is_dragging)
+                                    ui_set_drag_payload(&tab, sizeof(PanelTab*));
+
+                                /* Drag target highlight */
+                                b32 is_drop_target = ui_drag_over(r.flags);
+
                                 if (r.last_box)
-                                    update_transition(&r.last_box->hot_t, 20.f, ui_hovered(r.flags) ? 1.f : 0.f);
+                                    update_transition(&r.last_box->hot_t, 20.f,
+                                                      (ui_hovered(r.flags) || is_drop_target) ? 1.f : 0.f);
                                 f32 hot = r.last_box ? r.last_box->hot_t : 0.f;
 
-                                box->config.color = lerp_color(bg_normal, bg_hover, hot);
+                                if (is_drop_target)
+                                    box->config.color = theme->accent;
+                                else if (is_dragging)
+                                    box->config.color =
+                                        (Color){ bg_normal.r, bg_normal.g, bg_normal.b, (u8)(bg_normal.a / 3) };
+                                else
+                                    box->config.color = lerp_color(bg_normal, bg_hover, hot);
 
                                 if (ui_lclicked(r.flags))
                                     panel_tab_activate(p, tab);
 
-                                ui_text((String){ tab->name, tab->name_len }, &(TextConfig){ .font = font_ui,
-                                                                                             .font_size = font_sz,
-                                                                                             .color = fg,
-                                                                                             .line_height = font_sz });
+                                ui_text((String){ tab->name, tab->name_len },
+                                        &(TextConfig){ .font = font_ui,
+                                                       .font_size = font_sz,
+                                                       .color = is_drop_target ? theme->accent_fg : fg,
+                                                       .line_height = font_sz });
 
-                                /* Close button */
-                                u8 ck[HASH_STR_MAX_LENGTH];
-                                i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%p_%.*s", (void*)p, (int)tab->name_len,
-                                                  tab->name);
-                                Color cb_normal = is_active ? theme->fg_secondary : (Color){ 0, 0, 0, 0 };
-                                Color cb_hover = theme->fg_secondary;
-                                UISignalFlags cf =
-                                    ui_button((String){ ck, cl }, font_ui, 10, (Sizing){ fixed(14), fixed(14) },
-                                              (Padding){ 0 }, cb_normal, cb_normal, cb_hover, cb_hover);
-                                if (ui_lclicked(cf))
+                                /* Close button (hidden while dragging this tab) */
+                                if (!is_dragging)
                                 {
-                                    cmd_queue_push(&shared->cmd_queue, str("tab.close"),
-                                                   &(CmdPayload){ .ctx = ctx, .panel = p, .tab = tab },
-                                                   sizeof(CmdPayload));
+                                    u8 ck[HASH_STR_MAX_LENGTH];
+                                    i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%p_%.*s", (void*)p,
+                                                      (int)tab->name_len, tab->name);
+                                    Color cb_normal = is_active ? theme->fg_secondary : (Color){ 0, 0, 0, 0 };
+                                    Color cb_hover = theme->fg_secondary;
+                                    UISignalFlags cf =
+                                        ui_button((String){ ck, cl }, font_ui, 10, (Sizing){ fixed(14), fixed(14) },
+                                                  (Padding){ 0 }, cb_normal, cb_normal, cb_hover, cb_hover);
+                                    if (ui_lclicked(cf))
+                                    {
+                                        cmd_queue_push(&shared->cmd_queue, str("tab.close"),
+                                                       &(CmdPayload){ .ctx = ctx, .panel = p, .tab = tab },
+                                                       sizeof(CmdPayload));
+                                    }
+                                }
+
+                                /* Drop: reorder tab within the same panel */
+                                if (ui_dropped(r.flags))
+                                {
+                                    PanelTab** payload = (PanelTab**)ui_accept_drag_payload(sizeof(PanelTab*));
+                                    if (payload && *payload && *payload != tab)
+                                    {
+                                        isize dragged_idx = 0;
+                                        for (PanelTab* t = p->tab_first; t && t != *payload; t = t->next)
+                                            dragged_idx++;
+                                        i32 delta = (i32)(tab_index - dragged_idx);
+
+                                        char num_buf[16];
+                                        i32 num_len = snprintf(num_buf, sizeof(num_buf), "%+d", (int)delta);
+                                        isize prefix_len = (isize)strlen("tab.move delta=");
+                                        isize total_len = prefix_len + (isize)num_len;
+                                        byte* text_data = (byte*)arena_push(&shared->cmd_arena, total_len + 1, 1, 1);
+                                        memcpy(text_data, "tab.move delta=", (size_t)prefix_len);
+                                        memcpy(text_data + prefix_len, num_buf, (size_t)num_len);
+                                        String text = { text_data, total_len };
+
+                                        cmd_queue_push(&shared->cmd_queue, text,
+                                                       &(CmdPayload){ .ctx = ctx, .panel = p, .tab = *payload },
+                                                       sizeof(CmdPayload));
+                                    }
                                 }
                             }
                         }
