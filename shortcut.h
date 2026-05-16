@@ -25,7 +25,7 @@ typedef struct
 typedef struct
 {
     Shortcut shortcut;
-    String cmd_id;
+    String cmd; // full command text, e.g. "window.create w=600 h=600"
 } ShortcutBinding;
 
 typedef struct
@@ -37,9 +37,21 @@ typedef struct
 } ShortcutRegistry;
 
 void shortcut_registry_init(ShortcutRegistry* reg, Arena* arena, isize capacity);
-b32 shortcut_bind(ShortcutRegistry* reg, Shortcut sc, String cmd_id);
+
+/* Bind a shortcut to a full command text string.  The string is cloned into the
+   registry's arena.  Replaces any existing binding for the same shortcut. */
+b32 shortcut_bind(ShortcutRegistry* reg, Shortcut sc, String cmd);
+
 void shortcut_unbind(ShortcutRegistry* reg, Shortcut sc);
+
+/* Unbind all shortcuts whose command text starts with `cmd_id`. */
 void shortcut_unbind_all_for_cmd(ShortcutRegistry* reg, String cmd_id);
+
+/* Returns the full command text bound to `sc`, or {0} if unbound. */
 String shortcut_lookup(const ShortcutRegistry* reg, Shortcut sc);
+
+/* List all Shortcut values bound to commands whose text starts with `cmd_id`.
+   Allocates into `scratch`. */
 ShortcutSlice shortcut_list_for_cmd(const ShortcutRegistry* reg, String cmd_id, Arena* scratch);
+
 b32 shortcut_detect_conflicts(const ShortcutRegistry* reg);

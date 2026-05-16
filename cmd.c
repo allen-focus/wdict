@@ -1,6 +1,46 @@
 #include "cmd.h"
 
-#include <string.h>
+/*
+ * Parse the first whitespace-delimited token from text.
+ *   "window.create w=600 h=600"  → { "window.create",  "w=600 h=600" }
+ *   "tab.new"                    → { "tab.new",        {0}           }
+ */
+typedef struct { String token; String rest; } ParseFirstTokenResult;
+static ParseFirstTokenResult parse_first_token(String text)
+{
+    ParseFirstTokenResult r;
+    isize end = 0;
+    while (end < text.len && text.data[end] != ' ')
+        end++;
+    r.token = (String){ text.data, end };
+    if (end < text.len)
+        r.rest = (String){ text.data + end + 1, text.len - end - 1 };
+    else
+        r.rest = (String){ 0 };
+    return r;
+}
+
+/*
+ * Find  key=value  in text.  Returns the value slice (after '=', up to next
+ * space or end).  Returns {0} if key not found.
+ */
+static String find_value(String text, String key)
+{
+    for (isize i = 0; i + key.len + 1 <= text.len; i++)
+    {
+        if ((i == 0 || text.data[i - 1] == ' ') &&
+            memcmp(text.data + i, key.data, (size_t)key.len) == 0 &&
+            text.data[i + key.len] == '=')
+        {
+            isize val_start = i + key.len + 1;
+            isize val_end = val_start;
+            while (val_end < text.len && text.data[val_end] != ' ')
+                val_end++;
+            return (String){ text.data + val_start, val_end - val_start };
+        }
+    }
+    return (String){ 0 };
+}
 
 void cmd_registry_init(CmdRegistry* reg, Arena* arena, isize capacity)
 {
@@ -23,12 +63,66 @@ CmdDef* cmd_find(const CmdRegistry* reg, String id)
     return NULL;
 }
 
-void cmd_execute(const CmdRegistry* reg, String id, void* context, void* payload, isize payload_size)
+//
+// Text argument parsing
+//
+
+i32 cmd_parse_i32(String text, String key, i32 def)
 {
-    CmdDef* def = cmd_find(reg, id);
-    if (def && def->execute)
-        def->execute(def->userdata, context, payload, payload_size);
+    String val = find_value(text, key);
+    if (val.len == 0)
+        return def;
+    i32 result = 0;
+    i32 sign = 1;
+    isize i = 0;
+    if (val.data[0] == '-')
+    {
+        sign = -1;
+        i = 1;
+    }
+    else if (val.data[0] == '+')
+    {
+        i = 1;
+    }
+    for (; i < val.len; i++)
+    {
+        if (val.data[i] < '0' || val.data[i] > '9')
+            return def;
+        result = result * 10 + (val.data[i] - '0');
+    }
+    return result * sign;
 }
+
+u32 cmd_parse_u32(String text, String key, u32 def)
+{
+    String val = find_value(text, key);
+    if (val.len == 0)
+        return def;
+    u32 result = 0;
+    for (isize i = 0; i < val.len; i++)
+    {
+        if (val.data[i] < '0' || val.data[i] > '9')
+            return def;
+        result = result * 10 + (u32)(val.data[i] - '0');
+    }
+    return result;
+}
+
+i32 cmd_parse_axis(String text, String key, i32 def)
+{
+    String val = find_value(text, key);
+    if (val.len != 1)
+        return def;
+    if (val.data[0] == 'X')
+        return 0;
+    if (val.data[0] == 'Y')
+        return 1;
+    return def;
+}
+
+//
+// Queue
+//
 
 void cmd_queue_init(CmdQueue* q, Arena* arena)
 {
@@ -36,11 +130,12 @@ void cmd_queue_init(CmdQueue* q, Arena* arena)
     q->arena = arena;
 }
 
-CmdQueueNode* cmd_queue_push(CmdQueue* q, String cmd_id, const void* payload, isize payload_size)
+CmdQueueNode* cmd_queue_push(CmdQueue* q, String text,
+                             const void* payload, isize payload_size)
 {
     isize node_size = sizeof(CmdQueueNode) + payload_size;
     CmdQueueNode* n = (CmdQueueNode*)arena_push(q->arena, node_size, _Alignof(CmdQueueNode), 1);
-    n->cmd_id = cmd_id;
+    n->cmd_text = text;
     n->payload_size = payload_size;
     if (payload && payload_size > 0)
         memcpy(n->payload, payload, (size_t)payload_size);
@@ -54,11 +149,9 @@ CmdQueueNode* cmd_queue_push(CmdQueue* q, String cmd_id, const void* payload, is
     return n;
 }
 
-void cmd_queue_execute_all(CmdQueue* q, const CmdRegistry* reg, void* context)
+void cmd_queue_execute_all(CmdQueue* q, const CmdRegistry* reg)
 {
-    /* Save and clear the list before iterating — some command handlers
-       may re-enter process_frame → cmd_queue_execute_all, and the inner
-       call must see an empty queue. */
+    /* Save & clear before iterating — handlers may re-enter. */
     CmdQueueNode* list = q->first;
     q->first = NULL;
     q->last = NULL;
@@ -68,7 +161,13 @@ void cmd_queue_execute_all(CmdQueue* q, const CmdRegistry* reg, void* context)
         return;
 
     for (CmdQueueNode* n = list; n; n = n->next)
-        cmd_execute(reg, n->cmd_id, context, n->payload, n->payload_size);
+    {
+        String cmd_id = parse_first_token(n->cmd_text).token;
+        CmdDef* def = cmd_find(reg, cmd_id);
+        if (!def || !def->execute)
+            continue;
+        def->execute(def->userdata, n->payload, n->payload_size, n->cmd_text);
+    }
 
     arena_pop_to(q->arena, 0);
 }
