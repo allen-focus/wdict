@@ -845,10 +845,24 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
                              },
                              .shear = box->cfg.rect_style.shear * dpi_scale };
 
-    /* If clip is enabled, push a clip */
-    Rect new_clip = clip;
-    if (box->cfg.flags & BoxFlag_Clip)
-        new_clip = intersect_rects(clip, rect);
+    /* Store clip rect (ancestor restrictions) for interaction culling */
+    if (box->key.len)
+    {
+        BoxKey key = { .len = box->key.len };
+        memcpy(key.str, box->key.str, box->key.len);
+        LRUCacheFindResult find_result = lru_cache_find(&g_ui_ctx->box_cache.lru_cache, &key);
+        if (find_result.found)
+        {
+            UIBox* last_box = (UIBox*)((byte*)g_ui_ctx->box_cache.lru_cache.values_buf +
+                                       find_result.index * g_ui_ctx->box_cache.lru_cache.value_size);
+            last_box->clip = (Rect){
+                .xmin = clip.xmin / dpi_scale,
+                .ymin = clip.ymin / dpi_scale,
+                .xmax = clip.xmax / dpi_scale,
+                .ymax = clip.ymax / dpi_scale,
+            };
+        }
+    }
 
     // clang-format off
     /* Draw box rect/text */
@@ -888,6 +902,11 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
         break;
     }
     // clang-format on
+
+    /* If clip is enabled, push a clip */
+    Rect new_clip = clip;
+    if (box->cfg.flags & BoxFlag_Clip)
+        new_clip = intersect_rects(clip, rect);
 
     /* Recursive child boxes */
     if (box->type == BOX_TYPE_CONTAINER)
@@ -1005,25 +1024,31 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
         box->drag_mouse_anchor = (Position){ 0 };
     }
 
-    if (rect_contains_point(box_rect, g_ui_ctx->mouse_pos))
+    b32 in_box = rect_contains_point(box_rect, g_ui_ctx->mouse_pos);
+    b32 in_clip = rect_contains_point(box->clip, g_ui_ctx->mouse_pos);
+    if (in_box)
     {
-        *flags |= UI_Signal_Flag_Hovered;
-        if (g_ui_ctx->mouse_lclick)
-            *flags |= UI_Signal_Flag_LClicked;
-        if (g_ui_ctx->mouse_rclick)
-            *flags |= UI_Signal_Flag_RClicked;
-        if (g_ui_ctx->mouse_press)
-            *flags |= UI_Signal_Flag_Pressed;
-        if (g_ui_ctx->mouse_double_click)
-            *flags |= UI_Signal_Flag_DoubleClicked;
+        /* Reject interactions outside the ancestor clip region (e.g. scrolled out of view) */
+        if (in_clip)
+        {
+            *flags |= UI_Signal_Flag_Hovered;
+            if (g_ui_ctx->mouse_lclick)
+                *flags |= UI_Signal_Flag_LClicked;
+            if (g_ui_ctx->mouse_rclick)
+                *flags |= UI_Signal_Flag_RClicked;
+            if (g_ui_ctx->mouse_press)
+                *flags |= UI_Signal_Flag_Pressed;
+            if (g_ui_ctx->mouse_double_click)
+                *flags |= UI_Signal_Flag_DoubleClicked;
 
-        /* Drag: record mouse anchor on press (must be over the box to start drag) */
-        if (g_ui_ctx->mouse_lclick)
-            box->drag_mouse_anchor = g_ui_ctx->mouse_pos;
+            /* Drag: record mouse anchor on press (must be over the box to start drag) */
+            if (g_ui_ctx->mouse_lclick)
+                box->drag_mouse_anchor = g_ui_ctx->mouse_pos;
 
-        /* DragOver: a drag payload is active and the mouse is over this (non-source) box */
-        if (g_ui_ctx->drag_active && box != g_ui_ctx->drag_source_box)
-            *flags |= UI_Signal_Flag_DragOver;
+            /* DragOver: a drag payload is active and the mouse is over this (non-source) box */
+            if (g_ui_ctx->drag_active && box != g_ui_ctx->drag_source_box)
+                *flags |= UI_Signal_Flag_DragOver;
+        }
     }
 
     /* Drag: signal Dragging when mouse moves while held, even outside the box. */
@@ -1046,7 +1071,7 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
     }
 
     /* Dropped: release while a drag was active, over this box */
-    if (!g_ui_ctx->mouse_press && g_ui_ctx->drag_active && rect_contains_point(box_rect, g_ui_ctx->mouse_pos))
+    if (!g_ui_ctx->mouse_press && g_ui_ctx->drag_active && in_box && in_clip)
         *flags |= UI_Signal_Flag_Dropped;
 }
 
@@ -1092,7 +1117,8 @@ b32 ui_is_drag_over(const UIBox* box)
         return False;
     Rect r = { box->position.x, box->position.y, box->position.x + box->size.width,
                box->position.y + box->size.height };
-    return rect_contains_point(r, g_ui_ctx->mouse_pos) && box != g_ui_ctx->drag_source_box;
+    return rect_contains_point(r, g_ui_ctx->mouse_pos) && box != g_ui_ctx->drag_source_box &&
+           rect_contains_point(box->clip, g_ui_ctx->mouse_pos);
 }
 
 //
@@ -1778,8 +1804,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             f32 font_sz = cfg->font_size;
 
             u8 tab_key[HASH_STR_MAX_LENGTH];
-            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key), "###tab_%u_%u", cfg->panel->id,
-                                       tab->id);
+            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key), "###tab_%u_%u", cfg->panel->id, tab->id);
             String tab_key_str = { tab_key, tab_key_len };
 
             UIBox* tab_container =
@@ -1811,8 +1836,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(r.flags))
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u tab=%u window=%u",
-                                           cfg->panel->id, tab->id, cfg->window_id);
+                        i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u tab=%u window=%u", cfg->panel->id,
+                                           tab->id, cfg->window_id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                     }
 
@@ -1825,8 +1850,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     /* close button (hidden while dragging) */
                     b32 is_first_panel_first_tab = !cfg->panel->parent && tab == cfg->panel->tab_first;
                     u8 ck[HASH_STR_MAX_LENGTH];
-                    i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%u_%u", cfg->panel->id,
-                                      tab->id);
+                    i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%u_%u", cfg->panel->id, tab->id);
                     Color cb_text = (ui_hovered(r.flags) && !ui_drag_over(r.flags))
                                         ? (!is_first_panel_first_tab ? cfg->theme->tab_active_fg : (Color){ 0 })
                                         : (Color){ 0 };
@@ -1840,8 +1864,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(cf) && !is_first_panel_first_tab)
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u tab=%u window=%u",
-                                           cfg->panel->id, tab->id, cfg->window_id);
+                        i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u tab=%u window=%u", cfg->panel->id,
+                                           tab->id, cfg->window_id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                     }
 
@@ -1929,8 +1953,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 if (cfg->panel->parent)
                 {
                     u8 close_key[HASH_STR_MAX_LENGTH];
-                    i32 close_len =
-                        snprintf((char*)close_key, sizeof(close_key), "×##panel_close_%u", cfg->panel->id);
+                    i32 close_len = snprintf((char*)close_key, sizeof(close_key), "×##panel_close_%u", cfg->panel->id);
                     String close_str = { close_key, close_len };
                     UISignalFlags close_flags =
                         ui_button(close_str, cfg->font_ui, 18, (Sizing){ fit({}), fit({}) }, (Padding){ 0, 2, 3, 2 },
@@ -1938,7 +1961,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(close_flags))
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u window=%u", cfg->panel->id, cfg->window_id);
+                        i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u window=%u", cfg->panel->id,
+                                           cfg->window_id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                     }
                 }

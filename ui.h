@@ -298,6 +298,7 @@ struct UIBox
 
     Position position;
     Size size;
+    Rect clip;
     Position scroll_delta;
 
     // NOTE:
