@@ -327,7 +327,7 @@ UIBox* ui_text(const String text, const TextConfig* text_cfg)
                                           text_box->data.text.font_size, dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
-    text_box->cfg.sizing.width.min_max.min = min_width;
+    text_box->cfg.sizing.width.min_max.min = text_cfg->wrap ? min_width : whole_text_width;
     text_box->cfg.sizing.width.min_max.max = whole_text_width;
     text_box->cfg.sizing.height.min_max.min = (f32)text_box->data.text.line_height;
     text_box->cfg.sizing.height.min_max.max = (f32)text_box->data.text.line_height * word_count;
@@ -2039,7 +2039,8 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
 
     box->cfg.color = bg_color_transition;
     ui_text(text_hash.display_str,
-            &(TextConfig){ .font = font, .font_size = font_size, .color = text_color, .line_height = font_size });
+            &(TextConfig){
+                .font = font, .font_size = font_size, .color = text_color, .line_height = font_size, .wrap = False });
     ui_box_end(box);
 
     return result.flags;
@@ -2227,7 +2228,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     f32 text_height = get_text_height(renderer, g_ui_ctx->raster_cache, text_with_hash_str, font, font_size, g_ui_ctx->dpi);
     SizingAxis text_container_height = fixed(text_height + padding.top + padding.bottom);
     Color placeholder_color = { text_color.r, text_color.g, text_color.b, text_color.a / 2 };
-    TextConfig text_cfg = { .font = font, .font_size = font_size, .line_height = font_size };
+    TextConfig text_cfg = { .font = font, .font_size = font_size, .line_height = font_size, .wrap = False };
     // clang-format on
 
     /* Transition-related variables */

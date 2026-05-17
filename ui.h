@@ -221,6 +221,7 @@ typedef struct
     f32 font_size;
     Color color;
     f32 line_height;
+    b32 wrap;
 } TextConfig;
 
 typedef enum
