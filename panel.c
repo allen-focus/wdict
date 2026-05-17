@@ -9,6 +9,7 @@
 #define PANEL_STACK_CAPACITY 16
 
 static u32 s_panel_next_id = 1; /* 0 reserved for none */
+static u32 s_tab_next_id = 1;   /* 0 reserved for none */
 
 Panel* panel_alloc(void)
 {
@@ -103,6 +104,7 @@ PanelTab* panel_tab_declare(Panel* panel, const String name)
     PanelTab* tab = (PanelTab*)calloc(1, sizeof(PanelTab));
     if (!tab)
         return NULL;
+    tab->id  = s_tab_next_id++;
     memcpy(tab->name, name.data, (size_t)name.len);
     tab->name_len = name.len;
     tab->frame_declared = True;
@@ -124,6 +126,19 @@ PanelTab* panel_tab_declare(Panel* panel, const String name)
         panel->active_tab = tab;
 
     return tab;
+}
+
+PanelTab* panel_find_tab_by_id(const Panel* root, u32 tab_id)
+{
+    for (const Panel* p = root; p; p = panel_iter_next(p))
+    {
+        if (p->child_a)
+            continue;
+        for (PanelTab* t = p->tab_first; t; t = t->next)
+            if (t->id == tab_id)
+                return t;
+    }
+    return NULL;
 }
 
 PanelTab* panel_tab_get_active(Panel* panel)

@@ -1650,7 +1650,7 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
         });
         {
             u8 key_buf[HASH_STR_MAX_LENGTH];
-            i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_bound_%u", (unsigned)p->id);
+            i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_bound_%u", p->id);
             String key = { key_buf, key_len };
 
             UIBoxInteractResult result = ui_box_interact(box, key);
@@ -1759,7 +1759,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
     });
     {
         u8 key_buf[HASH_STR_MAX_LENGTH];
-        i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_%u", (unsigned)cfg->panel->id);
+        i32 key_len = snprintf((char*)key_buf, sizeof(key_buf), "###panel_%u", cfg->panel->id);
         String key = { key_buf, key_len };
         ui_box_interact(outer_box, key);
     }
@@ -1778,8 +1778,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             f32 font_sz = cfg->font_size;
 
             u8 tab_key[HASH_STR_MAX_LENGTH];
-            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key), "###tab_%u_%.*s", (unsigned)cfg->panel->id,
-                                       (int)tab->name_len, tab->name);
+            i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key), "###tab_%u_%u", cfg->panel->id,
+                                       tab->id);
             String tab_key_str = { tab_key, tab_key_len };
 
             UIBox* tab_container =
@@ -1811,7 +1811,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(r.flags))
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u", (unsigned)cfg->panel->id);
+                        i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u tab=%u",
+                                           cfg->panel->id, tab->id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
                                        &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = tab },
                                        sizeof(CmdPayload));
@@ -1826,8 +1827,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     /* close button (hidden while dragging) */
                     b32 is_first_panel_first_tab = !cfg->panel->parent && tab == cfg->panel->tab_first;
                     u8 ck[HASH_STR_MAX_LENGTH];
-                    i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%u_%.*s", (unsigned)cfg->panel->id,
-                                      (int)tab->name_len, tab->name);
+                    i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%u_%u", cfg->panel->id,
+                                      tab->id);
                     Color cb_text = (ui_hovered(r.flags) && !ui_drag_over(r.flags))
                                         ? (!is_first_panel_first_tab ? cfg->theme->tab_active_fg : (Color){ 0 })
                                         : (Color){ 0 };
@@ -1841,7 +1842,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(cf) && !is_first_panel_first_tab)
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u", (unsigned)cfg->panel->id);
+                        i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u tab=%u",
+                                           cfg->panel->id, tab->id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
                                        &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = tab },
                                        sizeof(CmdPayload));
@@ -1859,8 +1861,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                             i32 delta = (i32)(tab_index - dragged_idx);
 
                             char buf[64];
-                            i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u delta=%+d",
-                                               (unsigned)cfg->panel->id, (int)delta);
+                            i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d",
+                                               cfg->panel->id, (*payload)->id, (i32)delta);
 
                             cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
                                            &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = *payload },
@@ -1891,7 +1893,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                                                 .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
             {
                 u8 plus_key[HASH_STR_MAX_LENGTH];
-                i32 plus_len = snprintf((char*)plus_key, sizeof(plus_key), "+##tab_add_%u", (unsigned)cfg->panel->id);
+                i32 plus_len = snprintf((char*)plus_key, sizeof(plus_key), "+##tab_add_%u", cfg->panel->id);
                 UISignalFlags plus_flags =
                     ui_button((String){ plus_key, plus_len }, cfg->font_ui, 12, (Sizing){ fit({}), fit({}) },
                               (Padding){ 3, 4, 4, 4 }, (Color){ 0 }, cfg->theme->tab_fg, cfg->theme->hover_bg,
@@ -1899,7 +1901,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 if (ui_lclicked(plus_flags))
                 {
                     char buf[64];
-                    i32 len = snprintf(buf, sizeof(buf), "tab.new panel=%u", (unsigned)cfg->panel->id);
+                    i32 len = snprintf(buf, sizeof(buf), "tab.new panel=%u", cfg->panel->id);
                     cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
                                    &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel }, sizeof(CmdPayload));
                 }
@@ -1935,7 +1937,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 {
                     u8 close_key[HASH_STR_MAX_LENGTH];
                     i32 close_len =
-                        snprintf((char*)close_key, sizeof(close_key), "×##panel_close_%u", (unsigned)cfg->panel->id);
+                        snprintf((char*)close_key, sizeof(close_key), "×##panel_close_%u", cfg->panel->id);
                     String close_str = { close_key, close_len };
                     UISignalFlags close_flags =
                         ui_button(close_str, cfg->font_ui, 18, (Sizing){ fit({}), fit({}) }, (Padding){ 0, 2, 3, 2 },
@@ -1943,7 +1945,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(close_flags))
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u", (unsigned)cfg->panel->id);
+                        i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u", cfg->panel->id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
                                        &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel }, sizeof(CmdPayload));
                     }
@@ -1961,7 +1963,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
     /* scrollable content area */
     u8 sa_key[HASH_STR_MAX_LENGTH];
-    i32 sa_len = snprintf((char*)sa_key, sizeof(sa_key), "panel_scroll_%u", (unsigned)cfg->panel->id);
+    i32 sa_len = snprintf((char*)sa_key, sizeof(sa_key), "panel_scroll_%u", cfg->panel->id);
     ScrollContext scroll_ctx =
         ui_scrollable_area_start(&(ScrollableAreaConfig){ .hash_str = { sa_key, sa_len },
                                                           .sizing = { grow({}), grow({}) },

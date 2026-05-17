@@ -24,6 +24,7 @@ struct PanelTab
     u8 name[PANEL_TAB_NAME_MAX];
     isize name_len;
     PanelTab* next;
+    u32 id;
     b32 frame_declared;
 };
 
@@ -61,6 +62,7 @@ Panel* panel_split(Panel* panel, const Axis2 axis);
 Panel* panel_remove(Panel* panel);
 void panel_free_tree(Panel* root);
 
+PanelTab* panel_find_tab_by_id(const Panel* root, u32 tab_id);
 PanelTab* panel_tab_declare(Panel* panel, const String name);
 PanelTab* panel_tab_get_active(Panel* panel);
 void panel_tab_activate(Panel* panel, PanelTab* tab);

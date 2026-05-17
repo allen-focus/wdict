@@ -10,6 +10,7 @@ typedef struct
     String token;
     String rest;
 } ParseFirstTokenResult;
+
 static ParseFirstTokenResult parse_first_token(String text)
 {
     ParseFirstTokenResult r;
@@ -133,7 +134,7 @@ void cmd_queue_init(CmdQueue* q, Arena* arena)
     q->arena = arena;
 }
 
-    CmdQueueNode* cmd_queue_push(CmdQueue* q, String text, const void* payload, isize payload_size)
+CmdQueueNode* cmd_queue_push(CmdQueue* q, String text, const void* payload, isize payload_size)
 {
     isize node_size = sizeof(CmdQueueNode) + payload_size;
     CmdQueueNode* n = (CmdQueueNode*)arena_push(q->arena, node_size, _Alignof(CmdQueueNode), 1);

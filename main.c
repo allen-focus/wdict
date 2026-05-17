@@ -221,7 +221,7 @@ static RECT get_screen_center_rect(u32 width, u32 height, u32 dpi)
 static void set_window_title(WindowContext* ctx, const String title)
 {
     i32 written =
-        MultiByteToWideChar(CP_UTF8, 0, (const char*)title.data, (int)title.len, ctx->title, MAX_TITLE_LENGTH - 1);
+        MultiByteToWideChar(CP_UTF8, 0, (const char*)title.data, (i32)title.len, ctx->title, MAX_TITLE_LENGTH - 1);
     ctx->title[written] = L'\0';
     SetWindowTextW(ctx->window, ctx->title);
 }
@@ -394,85 +394,154 @@ static void cmd_close_panel(void* userdata, void* payload, isize payload_size, S
     }
 }
 
+//
+// Global lookup helpers (for text-based command resolution across all windows)
+//
+
+static Panel* find_panel_globally(AppShared* shared, u32 panel_id)
+{
+    for (WindowContext* w = shared->first_window; w; w = w->next)
+    {
+        Panel* p = panel_find_by_id(w->root_panel, panel_id);
+        if (p)
+            return p;
+    }
+    return NULL;
+}
+
+static PanelTab* find_tab_globally(AppShared* shared, u32 tab_id)
+{
+    for (WindowContext* w = shared->first_window; w; w = w->next)
+    {
+        PanelTab* t = panel_find_tab_by_id(w->root_panel, tab_id);
+        if (t)
+            return t;
+    }
+    return NULL;
+}
+
+typedef struct
+{
+    Panel* panel;
+    PanelTab* tab;
+} ResolvePanelTabResult;
+
+static ResolvePanelTabResult resolve_panel_and_tab(AppShared* shared, CmdPayload* p, String cmd_text)
+{
+    ResolvePanelTabResult r = { 0 };
+    r.panel = (p && p->panel) ? p->panel : NULL;
+    r.tab = (p && p->tab) ? p->tab : NULL;
+
+    if (!r.panel)
+    {
+        u32 pid = cmd_parse_u32(cmd_text, str("panel"), 0);
+        if (pid)
+            r.panel = find_panel_globally(shared, pid);
+    }
+    if (!r.tab)
+    {
+        u32 tid = cmd_parse_u32(cmd_text, str("tab"), 0);
+        if (tid)
+            r.tab = find_tab_globally(shared, tid);
+    }
+    return r;
+}
+
+static Panel* resolve_panel_from_text(AppShared* shared, Panel* from_payload, String cmd_text, String key)
+{
+    if (from_payload)
+        return from_payload;
+    u32 pid = cmd_parse_u32(cmd_text, key, 0);
+    return pid ? find_panel_globally(shared, pid) : NULL;
+}
+
 static void cmd_tab_new(void* userdata, void* payload, isize payload_size, String cmd_text)
 {
-    (void)userdata;
     (void)payload_size;
-    (void)cmd_text;
-    CmdPayload* p = (CmdPayload*)payload;
-    if (p && p->panel)
+    AppShared* shared = (AppShared*)userdata;
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, (CmdPayload*)payload, cmd_text);
+
+    if (rt.panel)
     {
         u8 name_buf[PANEL_TAB_NAME_MAX];
         isize name_len;
-        panel_tab_generate_default_name(p->panel, name_buf, sizeof(name_buf), &name_len);
-        panel_tab_declare(p->panel, (String){ name_buf, name_len });
+        panel_tab_generate_default_name(rt.panel, name_buf, sizeof(name_buf), &name_len);
+        panel_tab_declare(rt.panel, (String){ name_buf, name_len });
     }
 }
 
 static void cmd_tab_close(void* userdata, void* payload, isize payload_size, String cmd_text)
 {
-    (void)userdata;
     (void)payload_size;
-    (void)cmd_text;
-    CmdPayload* p = (CmdPayload*)payload;
-    if (!p || !p->panel || !p->tab)
+    AppShared* shared = (AppShared*)userdata;
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, (CmdPayload*)payload, cmd_text);
+
+    if (!rt.panel || !rt.tab)
         return;
 
     /* If this is the only tab left, close the panel instead */
-    if (p->panel->tab_first && !p->panel->tab_first->next && p->panel->tab_first == p->tab)
+    if (rt.panel->tab_first && !rt.panel->tab_first->next && rt.panel->tab_first == rt.tab)
     {
-        if (p->panel->parent)
+        if (rt.panel->parent)
         {
-            p->panel->anim_state = PANEL_ANIM_CLOSING;
-            p->panel->anim_to_pct = 0.0f;
+            rt.panel->anim_state = PANEL_ANIM_CLOSING;
+            rt.panel->anim_to_pct = 0.0f;
         }
     }
     else
     {
-        panel_tab_close(p->panel, p->tab);
+        panel_tab_close(rt.panel, rt.tab);
     }
 }
 
 static void cmd_tab_activate(void* userdata, void* payload, isize payload_size, String cmd_text)
 {
-    (void)userdata;
     (void)payload_size;
-    (void)cmd_text;
-    CmdPayload* p = (CmdPayload*)payload;
-    if (p && p->panel && p->tab)
-        panel_tab_activate(p->panel, p->tab);
+    AppShared* shared = (AppShared*)userdata;
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, (CmdPayload*)payload, cmd_text);
+
+    if (rt.panel && rt.tab)
+        panel_tab_activate(rt.panel, rt.tab);
 }
 
 static void cmd_tab_move(void* userdata, void* payload, isize payload_size, String cmd_text)
 {
-    (void)userdata;
     (void)payload_size;
-    CmdPayload* p = (CmdPayload*)payload;
-    if (!p || !p->panel || !p->tab)
+    AppShared* shared = (AppShared*)userdata;
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, (CmdPayload*)payload, cmd_text);
+
+    if (!rt.panel || !rt.tab)
         return;
     i32 delta = cmd_parse_i32(cmd_text, str("delta"), 0);
-    panel_tab_move(p->panel, p->tab, delta);
+    panel_tab_move(rt.panel, rt.tab, delta);
 }
 
 static void cmd_tab_move_to_panel(void* userdata, void* payload, isize payload_size, String cmd_text)
 {
-    (void)userdata;
     (void)payload_size;
-    (void)cmd_text;
+    AppShared* shared = (AppShared*)userdata;
     CmdPayload* p = (CmdPayload*)payload;
-    if (p && p->panel && p->to_panel && p->tab)
-        panel_tab_move_to_panel(p->panel, p->tab, p->to_panel);
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, p, cmd_text);
+    Panel* to_panel =
+        resolve_panel_from_text(shared, (p && p->to_panel) ? p->to_panel : NULL, cmd_text, str("to_panel"));
+
+    if (rt.panel && to_panel && rt.tab)
+        panel_tab_move_to_panel(rt.panel, rt.tab, to_panel);
 }
 
 static void cmd_tab_to_new_panel(void* userdata, void* payload, isize payload_size, String cmd_text)
 {
-    (void)userdata;
     (void)payload_size;
+    AppShared* shared = (AppShared*)userdata;
     CmdPayload* p = (CmdPayload*)payload;
-    if (!p || !p->panel || !p->to_panel || !p->tab)
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, p, cmd_text);
+    Panel* to_panel =
+        resolve_panel_from_text(shared, (p && p->to_panel) ? p->to_panel : NULL, cmd_text, str("to_panel"));
+
+    if (!rt.panel || !to_panel || !rt.tab)
         return;
     Axis2 axis = (Axis2)cmd_parse_axis(cmd_text, str("axis"), Axis2_X);
-    panel_tab_to_new_panel(p->panel, p->tab, p->to_panel, axis);
+    panel_tab_to_new_panel(rt.panel, rt.tab, to_panel, axis);
 }
 
 //
@@ -489,18 +558,6 @@ static void process_frame(WindowContext* ctx)
 
     TracyCZone(ctx_frame, 1);
 
-    /* --- Recording demo: log every command's human-readable text --- */
-#if 1 /* set to 1 to see command trace in debug output */
-    for (CmdQueueNode* cn = shared->cmd_queue.first; cn; cn = cn->next)
-    {
-        char buf[512];
-        i32 len = snprintf(buf, sizeof(buf), "[cmd] %.*s\n", (int)cn->cmd_text.len, (const char*)cn->cmd_text.data);
-        if (len > 0)
-            OutputDebugStringA(buf);
-    }
-#endif
-
-    cmd_queue_execute_all(&shared->cmd_queue, &shared->cmd_registry);
     isize arena_pos_backup = ui_frame_begin(ui_ctx);
     {
         ctx->root_panel = panel_update_animations(ctx->root_panel, g_ui_ctx->current_time);
@@ -917,8 +974,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     if (payload.panel)
                     {
                         char buf[128];
-                        i32 len = snprintf(buf, sizeof(buf), "%.*s panel=%u", (int)cmd_text.len, cmd_text.data,
-                                           (unsigned)payload.panel->id);
+                        i32 len = snprintf(buf, sizeof(buf), "%.*s panel=%u tab=%u to_panel=%u", (i32)cmd_text.len,
+                                           cmd_text.data, payload.panel->id, (payload.tab ? payload.tab->id : 0),
+                                           (payload.to_panel ? payload.to_panel->id : 0));
                         cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len }, &payload, sizeof(payload));
                     }
                     else
@@ -1169,6 +1227,20 @@ i32 WinMainCRTStartup()
         }
 
         TracyCFrameMark;
+
+        /* log every command's human-readable text */
+#if !defined(NDEBUG) && !defined(TRACY_ENABLE)
+        for (CmdQueueNode* cn = shared.cmd_queue.first; cn; cn = cn->next)
+        {
+            char buf[512];
+            i32 len = snprintf(buf, sizeof(buf), "[cmd] %.*s\n", (i32)cn->cmd_text.len, (const char*)cn->cmd_text.data);
+            if (len > 0)
+                OutputDebugStringA(buf);
+        }
+#endif
+        cmd_queue_execute_all(&shared.cmd_queue, &shared.cmd_registry);
+
+        /* Process frame */
         for (WindowContext* w = shared.first_window; w; w = w->next)
             process_frame(w);
     }
