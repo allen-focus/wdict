@@ -547,6 +547,7 @@ typedef struct
     f32 font_size;
     CmdQueue* cmd_queue;
     void* cmd_ctx;
+    u32 window_id;
     Padding padding;
     f32 child_gap;
     LayoutDirection direction;

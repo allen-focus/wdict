@@ -14,6 +14,7 @@ typedef struct PanelTab PanelTab;
 typedef struct
 {
     void* ctx;
+    u32 window_id;
     Panel* panel;
     Panel* to_panel;
     PanelTab* tab;

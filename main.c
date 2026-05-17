@@ -99,6 +99,7 @@ struct WindowContext
     Renderer renderer;
     AppShared* shared;
     WindowContext* next;
+    u32 id;
 
     Panel* root_panel;
     Panel* hovered_panel;
@@ -112,6 +113,7 @@ struct WindowContext
     TextEditState text_edit_2;
 };
 
+static u32 s_window_next_id = 1; /* 0 reserved for none */
 static u16 s_utf16_pending_high = 0;
 
 //
@@ -275,6 +277,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32
         return NULL;
     memset(ctx, 0, sizeof(*ctx));
     ctx->shared = shared;
+    ctx->id = s_window_next_id++;
 
     /* Copy title */
     wcsncpy_s(ctx->title, MAX_TITLE_LENGTH, title, _TRUNCATE);
@@ -398,10 +401,12 @@ static void cmd_close_panel(void* userdata, void* payload, isize payload_size, S
 // Global lookup helpers (for text-based command resolution across all windows)
 //
 
-static Panel* find_panel_globally(AppShared* shared, u32 panel_id)
+static Panel* find_panel_globally(AppShared* shared, u32 window_id, u32 panel_id)
 {
     for (WindowContext* w = shared->first_window; w; w = w->next)
     {
+        if (window_id && w->id != window_id)
+            continue;
         Panel* p = panel_find_by_id(w->root_panel, panel_id);
         if (p)
             return p;
@@ -409,10 +414,12 @@ static Panel* find_panel_globally(AppShared* shared, u32 panel_id)
     return NULL;
 }
 
-static PanelTab* find_tab_globally(AppShared* shared, u32 tab_id)
+static PanelTab* find_tab_globally(AppShared* shared, u32 window_id, u32 tab_id)
 {
     for (WindowContext* w = shared->first_window; w; w = w->next)
     {
+        if (window_id && w->id != window_id)
+            continue;
         PanelTab* t = panel_find_tab_by_id(w->root_panel, tab_id);
         if (t)
             return t;
@@ -429,30 +436,39 @@ typedef struct
 static ResolvePanelTabResult resolve_panel_and_tab(AppShared* shared, CmdPayload* p, String cmd_text)
 {
     ResolvePanelTabResult r = { 0 };
-    r.panel = (p && p->panel) ? p->panel : NULL;
-    r.tab = (p && p->tab) ? p->tab : NULL;
+    u32 window_id = 0;
+
+    if (p)
+    {
+        r.panel = p->panel;
+        r.tab = p->tab;
+        window_id = p->window_id;
+    }
+
+    if (!window_id)
+        window_id = cmd_parse_u32(cmd_text, str("window"), 0);
 
     if (!r.panel)
     {
         u32 pid = cmd_parse_u32(cmd_text, str("panel"), 0);
         if (pid)
-            r.panel = find_panel_globally(shared, pid);
+            r.panel = find_panel_globally(shared, window_id, pid);
     }
     if (!r.tab)
     {
         u32 tid = cmd_parse_u32(cmd_text, str("tab"), 0);
         if (tid)
-            r.tab = find_tab_globally(shared, tid);
+            r.tab = find_tab_globally(shared, window_id, tid);
     }
     return r;
 }
 
-static Panel* resolve_panel_from_text(AppShared* shared, Panel* from_payload, String cmd_text, String key)
+static Panel* resolve_panel_from_text(AppShared* shared, u32 window_id, Panel* from_payload, String cmd_text, String key)
 {
     if (from_payload)
         return from_payload;
     u32 pid = cmd_parse_u32(cmd_text, key, 0);
-    return pid ? find_panel_globally(shared, pid) : NULL;
+    return pid ? find_panel_globally(shared, window_id, pid) : NULL;
 }
 
 static void cmd_tab_new(void* userdata, void* payload, isize payload_size, String cmd_text)
@@ -522,8 +538,9 @@ static void cmd_tab_move_to_panel(void* userdata, void* payload, isize payload_s
     AppShared* shared = (AppShared*)userdata;
     CmdPayload* p = (CmdPayload*)payload;
     ResolvePanelTabResult rt = resolve_panel_and_tab(shared, p, cmd_text);
-    Panel* to_panel =
-        resolve_panel_from_text(shared, (p && p->to_panel) ? p->to_panel : NULL, cmd_text, str("to_panel"));
+    u32 window_id = p ? p->window_id : cmd_parse_u32(cmd_text, str("window"), 0);
+    Panel* to_panel = resolve_panel_from_text(shared, window_id, (p && p->to_panel) ? p->to_panel : NULL, cmd_text,
+                                              str("to_panel"));
 
     if (rt.panel && to_panel && rt.tab)
         panel_tab_move_to_panel(rt.panel, rt.tab, to_panel);
@@ -535,8 +552,9 @@ static void cmd_tab_to_new_panel(void* userdata, void* payload, isize payload_si
     AppShared* shared = (AppShared*)userdata;
     CmdPayload* p = (CmdPayload*)payload;
     ResolvePanelTabResult rt = resolve_panel_and_tab(shared, p, cmd_text);
-    Panel* to_panel =
-        resolve_panel_from_text(shared, (p && p->to_panel) ? p->to_panel : NULL, cmd_text, str("to_panel"));
+    u32 window_id = p ? p->window_id : cmd_parse_u32(cmd_text, str("window"), 0);
+    Panel* to_panel = resolve_panel_from_text(shared, window_id, (p && p->to_panel) ? p->to_panel : NULL, cmd_text,
+                                              str("to_panel"));
 
     if (!rt.panel || !to_panel || !rt.tab)
         return;
@@ -631,6 +649,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             .font_size = 12,
             .cmd_queue = &shared->cmd_queue,
             .cmd_ctx = ctx,
+            .window_id = ctx->id,
             .padding = s_padding_medium,
             .child_gap = s_child_gap_medium,
             .direction = LAYOUT_TOP_TO_BOTTOM,
@@ -941,7 +960,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 if (cmd_text.len)
                 {
                     /* Build pointer cache */
-                    CmdPayload payload = { .ctx = ctx };
+                    CmdPayload payload = { .ctx = ctx, .window_id = ctx ? ctx->id : 0 };
                     if (ctx && ctx->hovered_panel)
                     {
                         payload.panel = ctx->hovered_panel;
@@ -974,9 +993,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     if (payload.panel)
                     {
                         char buf[128];
-                        i32 len = snprintf(buf, sizeof(buf), "%.*s panel=%u tab=%u to_panel=%u", (i32)cmd_text.len,
-                                           cmd_text.data, payload.panel->id, (payload.tab ? payload.tab->id : 0),
-                                           (payload.to_panel ? payload.to_panel->id : 0));
+                        i32 len = snprintf(buf, sizeof(buf), "%.*s panel=%u tab=%u to_panel=%u window=%u",
+                                           (i32)cmd_text.len, cmd_text.data, payload.panel->id,
+                                           (payload.tab ? payload.tab->id : 0),
+                                           (payload.to_panel ? payload.to_panel->id : 0), payload.window_id);
                         cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len }, &payload, sizeof(payload));
                     }
                     else

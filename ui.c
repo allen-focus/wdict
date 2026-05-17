@@ -1811,10 +1811,10 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(r.flags))
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u tab=%u",
-                                           cfg->panel->id, tab->id);
+                        i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u tab=%u window=%u",
+                                           cfg->panel->id, tab->id, cfg->window_id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = tab },
+                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel, .tab = tab },
                                        sizeof(CmdPayload));
                     }
 
@@ -1842,10 +1842,10 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(cf) && !is_first_panel_first_tab)
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u tab=%u",
-                                           cfg->panel->id, tab->id);
+                        i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u tab=%u window=%u",
+                                           cfg->panel->id, tab->id, cfg->window_id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = tab },
+                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel, .tab = tab },
                                        sizeof(CmdPayload));
                     }
 
@@ -1861,11 +1861,11 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                             i32 delta = (i32)(tab_index - dragged_idx);
 
                             char buf[64];
-                            i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d",
-                                               cfg->panel->id, (*payload)->id, (i32)delta);
+                            i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
+                                               cfg->panel->id, (*payload)->id, (i32)delta, cfg->window_id);
 
                             cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                           &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = *payload },
+                                           &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel, .tab = *payload },
                                            sizeof(CmdPayload));
                         }
                     }
@@ -1901,9 +1901,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 if (ui_lclicked(plus_flags))
                 {
                     char buf[64];
-                    i32 len = snprintf(buf, sizeof(buf), "tab.new panel=%u", cfg->panel->id);
+                    i32 len = snprintf(buf, sizeof(buf), "tab.new panel=%u window=%u", cfg->panel->id, cfg->window_id);
                     cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                   &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel }, sizeof(CmdPayload));
+                                   &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel }, sizeof(CmdPayload));
                 }
             }
             ui_box_end(inner_container);
@@ -1945,9 +1945,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     if (ui_lclicked(close_flags))
                     {
                         char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u", cfg->panel->id);
+                        i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u window=%u", cfg->panel->id, cfg->window_id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel }, sizeof(CmdPayload));
+                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel }, sizeof(CmdPayload));
                     }
                 }
             }
