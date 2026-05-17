@@ -1818,19 +1818,21 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                                                                  .line_height = font_sz });
 
                     /* close button (hidden while dragging) */
+                    b32 is_first_panel_first_tab = !cfg->panel->parent && tab == cfg->panel->tab_first;
                     u8 ck[HASH_STR_MAX_LENGTH];
                     i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%u_%.*s", (unsigned)cfg->panel->id,
                                       (int)tab->name_len, tab->name);
-                    Color cb_text =
-
-                        (ui_hovered(r.flags) && !ui_drag_over(r.flags)) ? cfg->theme->tab_active_fg : (Color){ 0 };
+                    Color cb_text = (ui_hovered(r.flags) && !ui_drag_over(r.flags))
+                                        ? (!is_first_panel_first_tab ? cfg->theme->tab_active_fg : (Color){ 0 })
+                                        : (Color){ 0 };
                     Color cb_hover = ui_drag_over(r.flags) ? (Color){ 0 } : cfg->theme->hover_bg;
                     UISignalFlags cf =
                         ui_button((String){ ck, cl }, cfg->font_ui, 11, (Sizing){ fit({}), fit({}) },
-                                  (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, cb_text, cb_hover, cfg->theme->hover_bg, True);
+                                  (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, cb_text,
+                                  !is_first_panel_first_tab ? cb_hover : (Color){ 0 }, cfg->theme->hover_bg, True);
                     if (ui_hovered(cf) && !is_active && !ui_drag_over(r.flags))
                         box->cfg.color = cfg->theme->tab_bg;
-                    if (ui_lclicked(cf))
+                    if (ui_lclicked(cf) && !is_first_panel_first_tab)
                     {
                         char buf[64];
                         i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u", (unsigned)cfg->panel->id);
@@ -1916,7 +1918,6 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         ui_box_end(spacer_container);
 
         /* close panel button */
-
         UIBox* close_panel_button_container =
             ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
         {
