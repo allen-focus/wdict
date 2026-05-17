@@ -433,6 +433,16 @@ static void cmd_tab_close(void* userdata, void* payload, isize payload_size, Str
     }
 }
 
+static void cmd_tab_activate(void* userdata, void* payload, isize payload_size, String cmd_text)
+{
+    (void)userdata;
+    (void)payload_size;
+    (void)cmd_text;
+    CmdPayload* p = (CmdPayload*)payload;
+    if (p && p->panel && p->tab)
+        panel_tab_activate(p->panel, p->tab);
+}
+
 static void cmd_tab_move(void* userdata, void* payload, isize payload_size, String cmd_text)
 {
     (void)userdata;
@@ -1086,6 +1096,7 @@ i32 WinMainCRTStartup()
     cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.close"),         str("Close Panel"),                   str(""), cmd_close_panel,         &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.new"),             str("New Tab"),                       str(""), cmd_tab_new,             &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.close"),           str("Close Tab"),                     str(""), cmd_tab_close,           &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate"),        str("Activate Tab"),                  str(""), cmd_tab_activate,        &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),            str("Move Tab"),                      str(""), cmd_tab_move,            &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),   str("Move Tab To Next Panel"),        str(""), cmd_tab_move_to_panel,   &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),    str("Move Tab To New Panel"),         str(""), cmd_tab_to_new_panel,    &shared });

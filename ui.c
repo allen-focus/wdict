@@ -1809,7 +1809,13 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         box->cfg.color = cfg->theme->tab_bg;
 
                     if (ui_lclicked(r.flags))
-                        panel_tab_activate(cfg->panel, tab);
+                    {
+                        char buf[64];
+                        i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u", (unsigned)cfg->panel->id);
+                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
+                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .panel = cfg->panel, .tab = tab },
+                                       sizeof(CmdPayload));
+                    }
 
                     /* tab title */
                     ui_text((String){ tab->name, tab->name_len }, &(TextConfig){ .font = cfg->font_ui,
