@@ -848,9 +848,7 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
     /* Store clip rect (ancestor restrictions) for interaction culling */
     if (box->key.len)
     {
-        BoxKey key = { .len = box->key.len };
-        memcpy(key.str, box->key.str, box->key.len);
-        LRUCacheFindResult find_result = lru_cache_find(&g_ui_ctx->box_cache.lru_cache, &key);
+        LRUCacheFindResult find_result = lru_cache_find(&g_ui_ctx->box_cache.lru_cache, &box->key);
         if (find_result.found)
         {
             UIBox* last_box = (UIBox*)((byte*)g_ui_ctx->box_cache.lru_cache.values_buf +
@@ -1764,12 +1762,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
     if (cfg->panel->child_a)
         return (PanelContext){ 0 };
 
-    /* Re-declare all existing tabs so they survive cleanup */
+    /* Mark all existing tabs as declared so they survive cleanup */
     for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next)
-    {
-        String tab_name = { tab->name, tab->name_len };
-        panel_tab_declare(cfg->panel, tab_name);
-    }
+        tab->frame_declared = True;
 
     Rect rect = panel_calc_rect(cfg->panel, cfg->root_rect);
     f32 pad = 1.f;
@@ -1822,7 +1817,10 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     UIBoxInteractResult r = ui_box_interact(box, tab_key_str);
 
                     if (ui_dragging(r.flags))
-                        ui_set_drag_payload(&tab, sizeof(PanelTab*));
+                    {
+                        TabDragPayload tdp = { cfg->panel->id, tab->id, cfg->window_id };
+                        ui_set_drag_payload(&tdp, sizeof(tdp));
+                    }
 
                     if (ui_drag_over(r.flags))
                         box->cfg.color = cfg->theme->tab_drag_target_bg;
@@ -1869,30 +1867,46 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                     }
 
-                    /* drop: reorder */
+                    /* drop: reorder (same panel) or move to panel (cross-panel) */
                     if (ui_dropped(r.flags))
                     {
-                        PanelTab** payload = (PanelTab**)ui_accept_drag_payload(sizeof(PanelTab*));
-                        if (payload && *payload && *payload != tab)
+                        TabDragPayload* payload = (TabDragPayload*)ui_accept_drag_payload(sizeof(TabDragPayload));
+                        if (payload && payload->from_tab_id != tab->id)
                         {
-                            isize dragged_idx = 0;
-                            for (PanelTab* t = cfg->panel->tab_first; t && t != *payload; t = t->next)
-                                dragged_idx++;
-                            i32 delta = (i32)(tab_index - dragged_idx);
+                            if (payload->from_panel_id == cfg->panel->id)
+                            {
+                                /* same panel: reorder */
+                                isize dragged_idx = 0;
+                                for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
+                                    if (t->id == payload->from_tab_id)
+                                        break;
+                                i32 delta = (i32)(tab_index - dragged_idx);
 
-                            char buf[64];
-                            i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
-                                               cfg->panel->id, (*payload)->id, (i32)delta, cfg->window_id);
+                                char buf[64];
+                                i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
+                                                   cfg->panel->id, payload->from_tab_id, delta, cfg->window_id);
 
-                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                                cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                            }
+                            else
+                            {
+                                /* cross-panel: insert before this tab */
+                                char buf[128];
+                                i32 len = snprintf(buf, sizeof(buf),
+                                                   "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d window=%u",
+                                                   payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
+                                                   (i32)tab_index, cfg->window_id);
+                                cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                            }
                         }
                     }
                 }
                 ui_box_end(box);
 
-                // underline
-                ui_box_end(
-                    ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+                /* underline */
+                ui_box_end(ui_box_start(
+                    &(BoxConfig){ .sizing = { grow({}), fixed(1) },
+                                  .color = is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_splitter }));
             }
             ui_box_end(tab_container);
 
@@ -1903,7 +1917,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
         /* new tab button */
         UIBox* new_button_container =
-            ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+            ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
         {
 
             UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) },
@@ -1925,17 +1939,61 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             }
             ui_box_end(inner_container);
 
-            // underline
+            /* underline */
             ui_box_end(
                 ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
         }
         ui_box_end(new_button_container);
 
-        /* spacer */
+        /* spacer (also serves as tab bar drop target for appending tabs) */
         UIBox* spacer_container =
             ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
         {
-            ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } }));
+            UIBox* spacer_inner = ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } });
+            {
+                u8 drop_key[HASH_STR_MAX_LENGTH];
+                i32 drop_len = snprintf((char*)drop_key, sizeof(drop_key), "###panel_drop_%u", cfg->panel->id);
+                UIBoxInteractResult dr = ui_box_interact(spacer_inner, (String){ drop_key, drop_len });
+
+                if (ui_drag_over(dr.flags))
+                    spacer_inner->cfg.color = cfg->theme->tab_drag_target_bg;
+
+                if (ui_dropped(dr.flags))
+                {
+                    TabDragPayload* payload = (TabDragPayload*)ui_accept_drag_payload(sizeof(TabDragPayload));
+                    if (!payload)
+                    {
+                    }
+                    else if (payload->from_panel_id == cfg->panel->id)
+                    {
+                        /* same panel: move to end */
+                        isize count = 0;
+                        isize dragged_idx = -1;
+                        for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, count++)
+                            if (t->id == payload->from_tab_id)
+                                dragged_idx = count;
+                        if (dragged_idx >= 0 && dragged_idx < count - 1)
+                        {
+                            i32 delta = (i32)(count - 1 - dragged_idx);
+                            char buf[64];
+                            i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
+                                               cfg->panel->id, payload->from_tab_id, delta, cfg->window_id);
+                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                        }
+                    }
+                    else
+                    {
+                        /* cross-panel: append to this panel */
+                        char buf[128];
+                        i32 len = snprintf(
+                            buf, sizeof(buf), "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=-1 window=%u",
+                            payload->from_panel_id, payload->from_tab_id, cfg->panel->id, cfg->window_id);
+                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                    }
+                }
+            }
+            ui_box_end(spacer_inner);
+
             /* underline */
             ui_box_end(
                 ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));

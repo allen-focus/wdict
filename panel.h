@@ -18,6 +18,12 @@ typedef enum
 
 #define PANEL_TAB_NAME_MAX 64
 
+typedef struct {
+    u32 from_panel_id;
+    u32 from_tab_id;
+    u32 from_window_id;
+} TabDragPayload;
+
 typedef struct PanelTab PanelTab;
 struct PanelTab
 {
@@ -68,7 +74,8 @@ PanelTab* panel_tab_get_active(Panel* panel);
 void panel_tab_activate(Panel* panel, PanelTab* tab);
 void panel_tab_close(Panel* panel, PanelTab* tab);
 void panel_tab_move(Panel* panel, PanelTab* tab, i32 delta);
-void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to);
+isize panel_tab_count(const Panel* panel);
+void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to, i32 to_idx);
 Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, Axis2 axis);
 void panel_tabs_cleanup(Panel* panel);
 void panel_tab_generate_default_name(const Panel* panel, u8* buf, isize buf_size, isize* out_len);

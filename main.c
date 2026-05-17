@@ -516,9 +516,10 @@ static void cmd_tab_move_to_panel(void* userdata, String cmd_text)
     AppShared* shared = (AppShared*)userdata;
     ResolvePanelTabResult rt = resolve_panel_and_tab(shared, cmd_text);
     Panel* to_panel = resolve_panel_by_key(shared, cmd_text, str("to_panel"));
+    i32 to_idx = cmd_parse_i32(cmd_text, str("to_idx"), -1);
 
     if (rt.panel && to_panel && rt.tab)
-        panel_tab_move_to_panel(rt.panel, rt.tab, to_panel);
+        panel_tab_move_to_panel(rt.panel, rt.tab, to_panel, to_idx);
 }
 
 static void cmd_tab_to_new_panel(void* userdata, String cmd_text)

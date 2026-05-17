@@ -260,7 +260,15 @@ void panel_tab_move(Panel* panel, PanelTab* tab, const i32 delta)
     }
 }
 
-void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to)
+isize panel_tab_count(const Panel* panel)
+{
+    isize n = 0;
+    for (PanelTab* t = panel->tab_first; t; t = t->next)
+        n++;
+    return n;
+}
+
+void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to, i32 to_idx)
 {
     if (!from || !tab || !to || from == to)
         return;
@@ -287,16 +295,46 @@ void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to)
     if (from->active_tab == tab)
         from->active_tab = tab->next ? tab->next : from->tab_first;
 
-    /* Append to destination panel's tab list */
-    if (!to->tab_last)
+    /* Close source panel if now empty */
+    if (!from->tab_first && from->parent)
     {
+        from->anim_state = PANEL_ANIM_CLOSING;
+        from->anim_to_pct = 0.0f;
+    }
+
+    /* Insert into destination panel at specified position */
+    if (to_idx < 0 || to_idx >= panel_tab_count(to))
+    {
+        /* Append to end */
+        if (!to->tab_last)
+        {
+            to->tab_first = tab;
+            to->tab_last = tab;
+        }
+        else
+        {
+            to->tab_last->next = tab;
+            to->tab_last = tab;
+        }
+    }
+    else if (to_idx == 0)
+    {
+        /* Prepend */
+        tab->next = to->tab_first;
         to->tab_first = tab;
-        to->tab_last = tab;
+        if (!to->tab_last)
+            to->tab_last = tab;
     }
     else
     {
-        to->tab_last->next = tab;
-        to->tab_last = tab;
+        /* Insert before position to_idx */
+        PanelTab* pos = to->tab_first;
+        for (i32 i = 1; i < to_idx; i++)
+            pos = pos->next;
+        tab->next = pos->next;
+        pos->next = tab;
+        if (!tab->next)
+            to->tab_last = tab;
     }
 
     /* Activate the moved tab in the destination */
