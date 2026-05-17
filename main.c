@@ -615,7 +615,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 UISignalFlags cw_button_flags =
                     ui_button(panel_str("New Window##panel_cw_button", p->id), &shared->fonts[FONT_INDEX_UI], 12,
                               (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
-                              theme->accent_hover, theme->accent_press);
+                              theme->accent_hover, theme->accent_press, True);
                 if (ui_lclicked(cw_button_flags))
                     cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"), NULL, 0);
 
@@ -623,7 +623,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 UISignalFlags sph_button_flags =
                     ui_button(panel_str("Split Horizontally##panel_sph_button", p->id), &shared->fonts[FONT_INDEX_UI],
                               12, (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
-                              theme->accent_hover, theme->accent_press);
+                              theme->accent_hover, theme->accent_press, True);
                 if (ui_lclicked(sph_button_flags))
                 {
                     char buf[64];
@@ -636,7 +636,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 UISignalFlags spv_button_flags =
                     ui_button(panel_str("Split Vertically##panel_spv_button", p->id), &shared->fonts[FONT_INDEX_UI], 12,
                               (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
-                              theme->accent_hover, theme->accent_press);
+                              theme->accent_hover, theme->accent_press, True);
                 if (ui_lclicked(spv_button_flags))
                 {
                     char buf[64];
@@ -653,7 +653,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             {
                 ui_button(panel_str("nothing##world", p->id), &shared->fonts[FONT_INDEX_MONO], 11,
                           (Sizing){ fixed(80), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
-                          theme->accent_hover, theme->accent_press);
+                          theme->accent_hover, theme->accent_press, True);
                 ui_text_field(&ctx->text_edit_1, panel_str("placeholder##text_field", p->id),
                               &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_small,
                               theme->bg_overlay, theme->border_focus, theme->fg_primary, theme->scrollbar_thumb,

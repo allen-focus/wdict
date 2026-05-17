@@ -607,7 +607,7 @@ void ui_panel_end(PanelContext* pf);
 // widget
 UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
                         const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
-                        const Color bg_color_press);
+                        const Color bg_color_press, const b32 use_animation);
 UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color shadow_color, const Color bg_color_active);
 UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_str, const Font* font,

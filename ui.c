@@ -1827,7 +1827,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     Color cb_hover = ui_drag_over(r.flags) ? (Color){ 0 } : cfg->theme->hover_bg;
                     UISignalFlags cf =
                         ui_button((String){ ck, cl }, cfg->font_ui, 11, (Sizing){ fit({}), fit({}) },
-                                  (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, cb_text, cb_hover, cfg->theme->hover_bg);
+                                  (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, cb_text, cb_hover, cfg->theme->hover_bg, True);
                     if (ui_hovered(cf) && !is_active && !ui_drag_over(r.flags))
                         box->cfg.color = cfg->theme->tab_bg;
                     if (ui_lclicked(cf))
@@ -1887,7 +1887,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 UISignalFlags plus_flags =
                     ui_button((String){ plus_key, plus_len }, cfg->font_ui, 12, (Sizing){ fit({}), fit({}) },
                               (Padding){ 3, 4, 4, 4 }, (Color){ 0 }, cfg->theme->tab_fg, cfg->theme->hover_bg,
-                              cfg->theme->click_bg);
+                              cfg->theme->click_bg, False);
                 if (ui_lclicked(plus_flags))
                 {
                     char buf[64];
@@ -1932,7 +1932,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     String close_str = { close_key, close_len };
                     UISignalFlags close_flags =
                         ui_button(close_str, cfg->font_ui, 18, (Sizing){ fit({}), fit({}) }, (Padding){ 0, 2, 3, 2 },
-                                  (Color){ 0 }, cfg->theme->tab_fg, cfg->theme->hover_bg, cfg->theme->click_bg);
+                                  (Color){ 0 }, cfg->theme->tab_fg, cfg->theme->hover_bg, cfg->theme->click_bg, False);
                     if (ui_lclicked(close_flags))
                     {
                         char buf[64];
@@ -1986,7 +1986,7 @@ void ui_panel_end(PanelContext* pf)
 
 UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
                         const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
-                        const Color bg_color_press)
+                        const Color bg_color_press, const b32 use_animation)
 {
     Color bg_color_transition = bg_color;
 
@@ -2006,23 +2006,28 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
         bg_color_transition = bg_color_hover;
     if (ui_clicked(result.flags) || (result.last_box->active_t > 0))
     {
-        if (ui_clicked(result.flags))
+        if (use_animation)
         {
-            result.last_box->anim_state = TRANSITION_FORWARD;
-            result.last_box->active_t = 0.f;
-        }
-        if (result.last_box->anim_state == TRANSITION_IDLE || result.last_box->anim_state == TRANSITION_FORWARD)
-        {
-            if (update_transition(&result.last_box->active_t, 30.f, 1.f))
-                result.last_box->anim_state = TRANSITION_REVERSE;
+            if (ui_clicked(result.flags))
+            {
+                result.last_box->anim_state = TRANSITION_FORWARD;
+                result.last_box->active_t = 0.f;
+            }
+            if (result.last_box->anim_state == TRANSITION_IDLE || result.last_box->anim_state == TRANSITION_FORWARD)
+            {
+                if (update_transition(&result.last_box->active_t, 30.f, 1.f))
+                    result.last_box->anim_state = TRANSITION_REVERSE;
+            }
+            else
+            {
+                if (update_transition(&result.last_box->active_t, 24.f, 0.f))
+                    result.last_box->anim_state = TRANSITION_IDLE;
+            }
+            bg_color_transition = lerp_color(ui_hovered(result.flags) ? bg_color_hover : bg_color, bg_color_press,
+                                             result.last_box->active_t);
         }
         else
-        {
-            if (update_transition(&result.last_box->active_t, 24.f, 0.f))
-                result.last_box->anim_state = TRANSITION_IDLE;
-        }
-        bg_color_transition =
-            lerp_color(ui_hovered(result.flags) ? bg_color_hover : bg_color, bg_color_press, result.last_box->active_t);
+            bg_color_transition = bg_color_press;
     }
 
     box->cfg.color = bg_color_transition;
@@ -2066,7 +2071,7 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     status_color_ok.a = lerp_u8(0, 255, result.last_box->active_t);
     status_color_cancel.a = lerp_u8(255, 0, result.last_box->active_t);
     pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, result.last_box->active_t);
-    shadow_offset_x = lerp_f32(1.f, -1.f, result.last_box->active_t);
+    shadow_offset_x = lerp_f32(0.5f, -0.5f, result.last_box->active_t);
 
     container->cfg.color = bg_color_transition;
     {
@@ -2083,8 +2088,8 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
                                               .color = switch_button_color,
                                               .rect_style = { .corner_radius = switch_button_width / 2,
                                                               .shadow_color = shadow_color,
-                                                              .shadow_offset = { shadow_offset_x, 0.6f },
-                                                              .shadow_sigma = 1.f } }));
+                                                              .shadow_offset = { shadow_offset_x, 0.5f },
+                                                              .shadow_sigma = 1.2f } }));
 
         /* right padding */
         UIBox* pad_right = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },
@@ -2221,7 +2226,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     /* Transition-related variables */
     Color border_color_transition = border_color;
 
-    /* Handle input */
+    /* Handle interaction */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
     String content_key = str_concat(&g_ui_ctx->arena, text_hash.hash_str, str(" (content box)"));
     isize cursor_before = state->cursor;
@@ -2427,234 +2432,231 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             String text_to_cursor = { state->base, state->cursor };
             cursor_x = get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size, g_ui_ctx->dpi);
         }
-        approach_f32(&state->cursor_glide_x, cursor_x, 32.f);
+        approach_f32(&state->cursor_glide_x, cursor_x, 34.f);
         approach_f32(&state->cursor_trail_x, cursor_x, 12.f);
     }
 
     /* Create text field box */
+    UIBoxInteractResult result = { 0 };
     UIBox* box = ui_box_start(&(BoxConfig){
         .sizing = { sizing_x, text_container_height },
         .rect_style = { .corner_radius = 4, .border_thickness = 2 },
         .color = bg_color,
         .flags = BoxFlag_Clip,
     });
-
-    /* Handle interaction and transition */
-    UIBoxInteractResult result = ui_box_interact(box, text_hash.hash_str);
-
-    if (ui_hovered(result.flags))
-        ui_set_desired_cursor(UI_CURSOR_IBEAM);
-
-    /* Transition */
-    if (ui_lclicked(result.flags) || is_focused)
     {
-        if (ui_lclicked(result.flags))
+        /* Handle interaction and transition */
+        result = ui_box_interact(box, text_hash.hash_str);
+        if (ui_hovered(result.flags))
+            ui_set_desired_cursor(UI_CURSOR_IBEAM);
+        if (ui_lclicked(result.flags) || is_focused)
         {
-            g_ui_ctx->focused_box_key = generate_box_key(text_hash.hash_str);
-
-            /* Position cursor at click point */
-            if (state->text_len > 0)
+            if (ui_lclicked(result.flags))
             {
-                UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
-                if (last_inner_box)
-                {
-                    f32 click_x = g_ui_ctx->mouse_pos.x - last_inner_box->position.x - padding.left;
-                    b32 inside_y = g_ui_ctx->mouse_pos.y >= last_inner_box->position.y &&
-                                   g_ui_ctx->mouse_pos.y <= last_inner_box->position.y + last_inner_box->size.height -
-                                                                SCROLLBAR_THICKNESS_MAX;
-                    if (click_x >= 0.f && inside_y)
-                    {
-                        state->cursor =
-                            find_cursor_at_x(state->base, state->text_len, click_x, g_ui_ctx->raster_cache, font,
-                                             font_size, g_ui_ctx->dpi, get_text_width, g_ui_ctx->renderer);
-                        state->mark = state->cursor;
+                g_ui_ctx->focused_box_key = generate_box_key(text_hash.hash_str);
 
-                        if (ui_double_clicked(result.flags))
+                /* Position cursor at click point */
+                if (state->text_len > 0)
+                {
+                    UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
+                    if (last_inner_box)
+                    {
+                        f32 click_x = g_ui_ctx->mouse_pos.x - last_inner_box->position.x - padding.left;
+                        b32 inside_y = g_ui_ctx->mouse_pos.y >= last_inner_box->position.y &&
+                                       g_ui_ctx->mouse_pos.y <= last_inner_box->position.y +
+                                                                    last_inner_box->size.height -
+                                                                    SCROLLBAR_THICKNESS_MAX;
+                        if (click_x >= 0.f && inside_y)
                         {
-                            isize word_start = scan_word_backward(state->base, state->cursor);
-                            isize word_end = scan_word_forward(state->base, state->text_len, state->cursor);
-                            while (word_start < word_end && !is_word_char(state->base[word_start]))
-                                word_start++;
-                            while (word_end > word_start && !is_word_char(state->base[word_end - 1]))
-                                word_end--;
-                            state->mark = word_start;
-                            state->cursor = word_end;
+                            state->cursor =
+                                find_cursor_at_x(state->base, state->text_len, click_x, g_ui_ctx->raster_cache, font,
+                                                 font_size, g_ui_ctx->dpi, get_text_width, g_ui_ctx->renderer);
+                            state->mark = state->cursor;
+
+                            if (ui_double_clicked(result.flags))
+                            {
+                                isize word_start = scan_word_backward(state->base, state->cursor);
+                                isize word_end = scan_word_forward(state->base, state->text_len, state->cursor);
+                                while (word_start < word_end && !is_word_char(state->base[word_start]))
+                                    word_start++;
+                                while (word_end > word_start && !is_word_char(state->base[word_end - 1]))
+                                    word_end--;
+                                state->mark = word_start;
+                                state->cursor = word_end;
+                            }
                         }
                     }
                 }
             }
+            update_transition(&result.last_box->active_t, 20.f, 1.f);
         }
-        update_transition(&result.last_box->active_t, 20.f, 1.f);
-    }
-    else
-    {
-        update_transition(&result.last_box->active_t, 18.f, 0.f);
-    }
-    border_color_transition.a = lerp_u8(0, border_color.a, result.last_box->active_t);
-
-    box->cfg.rect_style.border_color = border_color_transition;
-    {
-        b32 cursor_moved = state->cursor != cursor_before;
-
-        ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig){
-            .hash_str = str_concat(&g_ui_ctx->arena, text_hash.hash_str, str(" (scroll area)")),
-            .sizing = { grow({}), grow({}) },
-            .thumb_color = thumb_color,
-            .fixed_track = True });
-        scroll_ctx.scroll_margin = font_size * 2.f;
-        if (cursor_moved && state->text_len > 0)
+        else
+            update_transition(&result.last_box->active_t, 18.f, 0.f);
+        border_color_transition.a = lerp_u8(0, border_color.a, result.last_box->active_t);
+        box->cfg.rect_style.border_color = border_color_transition;
         {
-            String text_to_cursor = { state->base, state->cursor };
-            scroll_ctx.cursor_content_x =
-                get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size, g_ui_ctx->dpi) +
-                padding.left;
-        }
-        {
-            b32 has_text = state->text_len > 0;
-            String full_text = has_text ? (String){ state->base, state->text_len } : text_hash.display_str;
-            f32 text_width =
-                get_text_width(renderer, g_ui_ctx->raster_cache, full_text, font, font_size, g_ui_ctx->dpi);
-            f32 inner_width = text_width + padding.left + padding.right;
+            b32 cursor_moved = state->cursor != cursor_before;
 
-            UIBox* inner =
-                ui_box_start(&(BoxConfig){ .sizing = { fixed(inner_width), fit_grow({}) }, .padding = padding });
+            ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig){
+                .hash_str = str_concat(&g_ui_ctx->arena, text_hash.hash_str, str(" (scroll area)")),
+                .sizing = { grow({}), grow({}) },
+                .thumb_color = thumb_color,
+                .fixed_track = True });
+            scroll_ctx.scroll_margin = font_size * 2.f;
+            if (cursor_moved && state->text_len > 0)
             {
-                b32 has_selection = is_focused && state->cursor != state->mark;
-                isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
-                isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
-                f32 cursor_x = 0.f;
-                f32 trail_x = 0.f;
-                f32 glide_x = 0.f;
-                if (is_focused && has_text)
+                String text_to_cursor = { state->base, state->cursor };
+                scroll_ctx.cursor_content_x =
+                    get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size, g_ui_ctx->dpi) +
+                    padding.left;
+            }
+            {
+                b32 has_text = state->text_len > 0;
+                String full_text = has_text ? (String){ state->base, state->text_len } : text_hash.display_str;
+                f32 text_width =
+                    get_text_width(renderer, g_ui_ctx->raster_cache, full_text, font, font_size, g_ui_ctx->dpi);
+                f32 inner_width = text_width + padding.left + padding.right;
+
+                UIBox* inner =
+                    ui_box_start(&(BoxConfig){ .sizing = { fixed(inner_width), fit_grow({}) }, .padding = padding });
                 {
-                    String text_to_cursor = { state->base, state->cursor };
-                    cursor_x = get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size,
-                                              g_ui_ctx->dpi);
-                }
-                if (is_focused)
-                {
-                    trail_x = state->cursor_trail_x;
-                    glide_x = state->cursor_glide_x;
-                }
-                f32 glide_offset = glide_x - cursor_x;
-
-                /* Cursor trail (spans from slow trail position to fast glide position) */
-                if (is_focused)
-                {
-                    f32 t_start = trail_x < glide_x ? trail_x : glide_x;
-                    f32 t_width = trail_x > glide_x ? trail_x - glide_x : glide_x - trail_x;
-                    if (t_width > 0.5f)
+                    b32 has_selection = is_focused && state->cursor != state->mark;
+                    isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
+                    isize sel_end = state->cursor > state->mark ? state->cursor : state->mark;
+                    f32 cursor_x = 0.f;
+                    f32 trail_x = 0.f;
+                    f32 glide_x = 0.f;
+                    if (is_focused && has_text)
                     {
-                        f32 trail_h = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
-                        Color base = cursor_trail_color;
-                        Color fade = { base.r, base.g, base.b, base.a / 4 };
-                        Color corners[4] = { base, base, base, base };
-                        if (trail_x < glide_x)
-                        {
-                            corners[0] = fade;
-                            corners[2] = fade;
-                        }
-                        else
-                        {
-                            corners[1] = fade;
-                            corners[3] = fade;
-                        }
-                        ui_box_end(ui_box_start(&(BoxConfig){
-                            .sizing = { fixed(t_width), fixed(trail_h) },
-                            .color = base,
-                            .rect_style = { .corner_colors = { corners[0], corners[1], corners[2], corners[3] } },
-                            .flags = BoxFlag_Float,
-                            .float_offset = { t_start, -padding.top + CURSORBAR_PADDING },
-                        }));
+                        String text_to_cursor = { state->base, state->cursor };
+                        cursor_x = get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size,
+                                                  g_ui_ctx->dpi);
                     }
-                }
-
-                /* IME composition underline */
-                if (is_focused && state->composition_len > 0)
-                {
-                    String text_before = { state->base, state->composition_start };
-                    f32 comp_x =
-                        get_text_width(renderer, g_ui_ctx->raster_cache, text_before, font, font_size, g_ui_ctx->dpi);
-                    String comp_text = { state->base + state->composition_start, state->composition_len };
-                    f32 comp_w =
-                        get_text_width(renderer, g_ui_ctx->raster_cache, comp_text, font, font_size, g_ui_ctx->dpi);
-                    if (comp_w > 0.f)
-                    {
-                        f32 underline_y = font_size;
-                        ui_box_end(ui_box_start(&(BoxConfig){
-                            .sizing = { fixed(comp_w), fixed(1) },
-                            .color = text_color,
-                            .flags = BoxFlag_Float,
-                            .float_offset = { comp_x, underline_y },
-                        }));
-                    }
-                }
-
-                if (has_text)
-                {
-                    /* Text before selection (or before cursor) */
-                    if (sel_start > 0)
-                    {
-                        String pre_text = { state->base, sel_start };
-                        text_cfg.color = text_color;
-                        ui_text(pre_text, &text_cfg);
-                    }
-
-                    /* Selection highlight (only when focused and selection exists) */
-                    if (has_selection)
-                    {
-                        String sel_text = { state->base + sel_start, sel_end - sel_start };
-                        f32 sel_width =
-                            get_text_width(renderer, g_ui_ctx->raster_cache, sel_text, font, font_size, g_ui_ctx->dpi);
-                        f32 sel_height = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
-                        Color sel_color = selection_color;
-                        Color copy_flash = selection_flash_color;
-                        sel_color = lerp_color(sel_color, copy_flash, state->copy_t);
-                        ui_box_end(ui_box_start(&(BoxConfig){
-                            .sizing = { fixed(sel_width), fixed(sel_height) },
-                            .color = sel_color,
-                            .rect_style = { .corner_radius = 2 },
-                            .flags = BoxFlag_Float,
-                            .float_offset = { 0, -padding.top + CURSORBAR_PADDING },
-                        }));
-
-                        if (state->cursor == sel_start)
-                            cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
-                    }
-
-                    /* Selected text (always rendered; highlight box sits behind when focused) */
-                    if (sel_start < sel_end)
-                    {
-                        String sel_text = { state->base + sel_start, sel_end - sel_start };
-                        text_cfg.color = text_color;
-                        ui_text(sel_text, &text_cfg);
-                    }
-
-                    /* Cursorbar at cursor position */
-                    if (is_focused && state->cursor == sel_end)
-                        cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
-
-                    /* Text after selection (or after cursor) */
-                    if (sel_end < state->text_len)
-                    {
-                        String post_text = { state->base + sel_end, state->text_len - sel_end };
-                        text_cfg.color = text_color;
-                        ui_text(post_text, &text_cfg);
-                    }
-                }
-                else
-                {
                     if (is_focused)
-                        cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
-                    String placeholder = text_hash.display_str;
-                    text_cfg.color = placeholder_color;
-                    ui_text(placeholder, &text_cfg);
+                    {
+                        trail_x = state->cursor_trail_x;
+                        glide_x = state->cursor_glide_x;
+                    }
+                    f32 glide_offset = glide_x - cursor_x;
+
+                    /* Cursor trail (spans from slow trail position to fast glide position) */
+                    if (is_focused)
+                    {
+                        f32 t_start = trail_x < glide_x ? trail_x : glide_x;
+                        f32 t_width = trail_x > glide_x ? trail_x - glide_x : glide_x - trail_x;
+                        if (t_width > 0.5f)
+                        {
+                            f32 trail_h = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
+                            Color base = cursor_trail_color;
+                            Color fade = { base.r, base.g, base.b, base.a / 4 };
+                            Color corners[4] = { base, base, base, base };
+                            if (trail_x < glide_x)
+                            {
+                                corners[0] = fade;
+                                corners[2] = fade;
+                            }
+                            else
+                            {
+                                corners[1] = fade;
+                                corners[3] = fade;
+                            }
+                            ui_box_end(ui_box_start(&(BoxConfig){
+                                .sizing = { fixed(t_width), fixed(trail_h) },
+                                .color = base,
+                                .rect_style = { .corner_colors = { corners[0], corners[1], corners[2], corners[3] } },
+                                .flags = BoxFlag_Float,
+                                .float_offset = { t_start, -padding.top + CURSORBAR_PADDING },
+                            }));
+                        }
+                    }
+
+                    /* IME composition underline */
+                    if (is_focused && state->composition_len > 0)
+                    {
+                        String text_before = { state->base, state->composition_start };
+                        f32 comp_x = get_text_width(renderer, g_ui_ctx->raster_cache, text_before, font, font_size,
+                                                    g_ui_ctx->dpi);
+                        String comp_text = { state->base + state->composition_start, state->composition_len };
+                        f32 comp_w =
+                            get_text_width(renderer, g_ui_ctx->raster_cache, comp_text, font, font_size, g_ui_ctx->dpi);
+                        if (comp_w > 0.f)
+                        {
+                            f32 underline_y = font_size;
+                            ui_box_end(ui_box_start(&(BoxConfig){
+                                .sizing = { fixed(comp_w), fixed(1) },
+                                .color = text_color,
+                                .flags = BoxFlag_Float,
+                                .float_offset = { comp_x, underline_y },
+                            }));
+                        }
+                    }
+
+                    if (has_text)
+                    {
+                        /* Text before selection (or before cursor) */
+                        if (sel_start > 0)
+                        {
+                            String pre_text = { state->base, sel_start };
+                            text_cfg.color = text_color;
+                            ui_text(pre_text, &text_cfg);
+                        }
+
+                        /* Selection highlight (only when focused and selection exists) */
+                        if (has_selection)
+                        {
+                            String sel_text = { state->base + sel_start, sel_end - sel_start };
+                            f32 sel_width = get_text_width(renderer, g_ui_ctx->raster_cache, sel_text, font, font_size,
+                                                           g_ui_ctx->dpi);
+                            f32 sel_height = text_container_height.min_max.min - CURSORBAR_PADDING * 2;
+                            Color sel_color = selection_color;
+                            Color copy_flash = selection_flash_color;
+                            sel_color = lerp_color(sel_color, copy_flash, state->copy_t);
+                            ui_box_end(ui_box_start(&(BoxConfig){
+                                .sizing = { fixed(sel_width), fixed(sel_height) },
+                                .color = sel_color,
+                                .rect_style = { .corner_radius = 2 },
+                                .flags = BoxFlag_Float,
+                                .float_offset = { 0, -padding.top + CURSORBAR_PADDING },
+                            }));
+
+                            if (state->cursor == sel_start)
+                                cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
+                        }
+
+                        /* Selected text (always rendered; highlight box sits behind when focused) */
+                        if (sel_start < sel_end)
+                        {
+                            String sel_text = { state->base + sel_start, sel_end - sel_start };
+                            text_cfg.color = text_color;
+                            ui_text(sel_text, &text_cfg);
+                        }
+
+                        /* Cursorbar at cursor position */
+                        if (is_focused && state->cursor == sel_end)
+                            cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
+
+                        /* Text after selection (or after cursor) */
+                        if (sel_end < state->text_len)
+                        {
+                            String post_text = { state->base + sel_end, state->text_len - sel_end };
+                            text_cfg.color = text_color;
+                            ui_text(post_text, &text_cfg);
+                        }
+                    }
+                    else
+                    {
+                        if (is_focused)
+                            cursor_bar(text_container_height.min_max.min, padding, glide_offset, cursor_bar_color);
+                        String placeholder = text_hash.display_str;
+                        text_cfg.color = placeholder_color;
+                        ui_text(placeholder, &text_cfg);
+                    }
                 }
+                ui_box_end(inner);
+                update_box_key(inner, content_key);
             }
-            ui_box_end(inner);
-            update_box_key(inner, content_key);
+            ui_scrollable_area_end(scroll_ctx);
         }
-        ui_scrollable_area_end(scroll_ctx);
     }
     ui_box_end(box);
 
