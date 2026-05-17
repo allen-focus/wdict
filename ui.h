@@ -546,7 +546,6 @@ typedef struct
     const Font* font_ui;
     f32 font_size;
     CmdQueue* cmd_queue;
-    void* cmd_ctx;
     u32 window_id;
     Padding padding;
     f32 child_gap;

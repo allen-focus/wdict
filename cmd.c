@@ -134,14 +134,10 @@ void cmd_queue_init(CmdQueue* q, Arena* arena)
     q->arena = arena;
 }
 
-CmdQueueNode* cmd_queue_push(CmdQueue* q, String text, const void* payload, isize payload_size)
+CmdQueueNode* cmd_queue_push(CmdQueue* q, String text)
 {
-    isize node_size = sizeof(CmdQueueNode) + payload_size;
-    CmdQueueNode* n = (CmdQueueNode*)arena_push(q->arena, node_size, _Alignof(CmdQueueNode), 1);
+    CmdQueueNode* n = (CmdQueueNode*)arena_push(q->arena, sizeof(CmdQueueNode), _Alignof(CmdQueueNode), 1);
     n->cmd_text = str_clone(q->arena, text);
-    n->payload_size = payload_size;
-    if (payload && payload_size > 0)
-        memcpy(n->payload, payload, (size_t)payload_size);
 
     if (!q->last)
         q->first = n;
@@ -169,7 +165,7 @@ void cmd_queue_execute_all(CmdQueue* q, const CmdRegistry* reg)
         CmdDef* def = cmd_find(reg, cmd_id);
         if (!def || !def->execute)
             continue;
-        def->execute(def->userdata, n->payload, n->payload_size, n->cmd_text);
+        def->execute(def->userdata, n->cmd_text);
     }
 
     arena_pop_to(q->arena, 0);

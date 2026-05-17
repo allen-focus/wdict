@@ -1813,9 +1813,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         char buf[64];
                         i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u tab=%u window=%u",
                                            cfg->panel->id, tab->id, cfg->window_id);
-                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel, .tab = tab },
-                                       sizeof(CmdPayload));
+                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                     }
 
                     /* tab title */
@@ -1844,9 +1842,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         char buf[64];
                         i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u tab=%u window=%u",
                                            cfg->panel->id, tab->id, cfg->window_id);
-                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel, .tab = tab },
-                                       sizeof(CmdPayload));
+                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                     }
 
                     /* drop: reorder */
@@ -1864,9 +1860,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                             i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
                                                cfg->panel->id, (*payload)->id, (i32)delta, cfg->window_id);
 
-                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                           &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel, .tab = *payload },
-                                           sizeof(CmdPayload));
+                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                         }
                     }
                 }
@@ -1902,8 +1896,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 {
                     char buf[64];
                     i32 len = snprintf(buf, sizeof(buf), "tab.new panel=%u window=%u", cfg->panel->id, cfg->window_id);
-                    cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                   &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel }, sizeof(CmdPayload));
+                    cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                 }
             }
             ui_box_end(inner_container);
@@ -1946,8 +1939,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     {
                         char buf[64];
                         i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u window=%u", cfg->panel->id, cfg->window_id);
-                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len },
-                                       &(CmdPayload){ .ctx = cfg->cmd_ctx, .window_id = cfg->window_id, .panel = cfg->panel }, sizeof(CmdPayload));
+                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                     }
                 }
             }

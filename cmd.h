@@ -2,23 +2,7 @@
 
 #include "utils.h"
 
-typedef void (*CmdFn)(void* userdata, void* payload, isize payload_size, String cmd_text);
-
-//
-// Binary payload (pointer cache for command handlers)
-//
-
-typedef struct Panel Panel;
-typedef struct PanelTab PanelTab;
-
-typedef struct
-{
-    void* ctx;
-    u32 window_id;
-    Panel* panel;
-    Panel* to_panel;
-    PanelTab* tab;
-} CmdPayload;
+typedef void (*CmdFn)(void* userdata, String cmd_text);
 
 //
 // cmd registry
@@ -64,8 +48,6 @@ struct CmdQueueNode
 {
     CmdQueueNode* next;
     String cmd_text; // canonical text; first token = cmd_id, rest = args
-    isize payload_size;
-    u8 payload[]; // optional binary pointer cache (CmdPayload or similar)
 };
 
 typedef struct
@@ -79,10 +61,9 @@ typedef struct
 void cmd_queue_init(CmdQueue* q, Arena* arena);
 
 /*
- * Push a command.  cmd_id is extracted from the first whitespace-delimited
- * token of `text`.  `payload` is an optional binary pointer cache; pass
- * NULL / 0 if the handler works from text alone.
+ * Push a command.  The text string is cloned into the queue's arena,
+ * so stack-allocated snprintf buffers are safe.
  */
-CmdQueueNode* cmd_queue_push(CmdQueue* q, String text, const void* payload, isize payload_size);
+CmdQueueNode* cmd_queue_push(CmdQueue* q, String text);
 
 void cmd_queue_execute_all(CmdQueue* q, const CmdRegistry* reg);
