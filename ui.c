@@ -1879,10 +1879,11 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                             {
                                 /* cross-panel: insert before this tab */
                                 char buf[128];
-                                i32 len = snprintf(buf, sizeof(buf),
-                                                   "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d window=%u",
-                                                   payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
-                                                   (i32)tab_index, cfg->window_id);
+                                i32 len = snprintf(
+                                    buf, sizeof(buf),
+                                    "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d window=%u to_window=%u",
+                                    payload->from_panel_id, payload->from_tab_id, cfg->panel->id, (i32)tab_index,
+                                    payload->from_window_id, cfg->window_id);
                                 cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                             }
                         }
@@ -1976,9 +1977,11 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     {
                         /* cross-panel: append to this panel */
                         char buf[128];
-                        i32 len = snprintf(
-                            buf, sizeof(buf), "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=-1 window=%u",
-                            payload->from_panel_id, payload->from_tab_id, cfg->panel->id, cfg->window_id);
+                        i32 len =
+                            snprintf(buf, sizeof(buf),
+                                     "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=-1 window=%u to_window=%u",
+                                     payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
+                                     payload->from_window_id, cfg->window_id);
                         cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
                     }
                 }

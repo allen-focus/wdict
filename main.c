@@ -89,6 +89,12 @@ typedef struct
     CmdRegistry cmd_registry;
     ShortcutRegistry shortcuts;
     CmdQueue cmd_queue;
+
+    /* cross-window drag-drop */
+    b32 cross_drag_active;
+    u8 cross_drag_payload_buf[DRAG_PAYLOAD_MAX];
+    isize cross_drag_payload_size;
+    u32 cross_drag_source_window_id;
 } AppShared;
 
 struct WindowContext
@@ -270,6 +276,23 @@ static void window_list_remove(AppShared* shared, WindowContext* ctx)
 }
 
 static void process_frame(WindowContext* ctx);
+
+static WindowContext* find_window_by_id(AppShared* shared, u32 id)
+{
+    for (WindowContext* w = shared->first_window; w; w = w->next)
+        if (w->id == id)
+            return w;
+    return NULL;
+}
+
+static void cross_window_sync_to(AppShared* shared, WindowContext* ctx, const POINT cursor_pt)
+{
+    ctx->ui.mouse_press = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    ctx->ui.drag_active = True;
+    memcpy(ctx->ui.drag_payload_buf, shared->cross_drag_payload_buf, shared->cross_drag_payload_size);
+    ctx->ui.drag_payload_size = shared->cross_drag_payload_size;
+}
+
 static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32 width, u32 height)
 {
     WindowContext* ctx = (WindowContext*)malloc(sizeof(WindowContext));
@@ -454,6 +477,13 @@ static Panel* resolve_panel_by_key(AppShared* shared, String cmd_text, String ke
     return pid ? find_panel_globally(shared, window_id, pid) : NULL;
 }
 
+static Panel* resolve_target_panel(AppShared* shared, String cmd_text)
+{
+    u32 window_id = cmd_parse_u32(cmd_text, str("to_window"), cmd_parse_u32(cmd_text, str("window"), 0));
+    u32 pid = cmd_parse_u32(cmd_text, str("to_panel"), 0);
+    return pid ? find_panel_globally(shared, window_id, pid) : NULL;
+}
+
 static void cmd_tab_new(void* userdata, String cmd_text)
 {
     AppShared* shared = (AppShared*)userdata;
@@ -515,7 +545,7 @@ static void cmd_tab_move_to_panel(void* userdata, String cmd_text)
 {
     AppShared* shared = (AppShared*)userdata;
     ResolvePanelTabResult rt = resolve_panel_and_tab(shared, cmd_text);
-    Panel* to_panel = resolve_panel_by_key(shared, cmd_text, str("to_panel"));
+    Panel* to_panel = resolve_target_panel(shared, cmd_text);
     i32 to_idx = cmd_parse_i32(cmd_text, str("to_idx"), -1);
 
     if (rt.panel && to_panel && rt.tab)
@@ -772,6 +802,30 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_ctx->mouse_pos.y = GET_Y_LPARAM(lparam) / dpi_scale;
             ui_ctx->mouse_delta.x = ui_ctx->mouse_pos.x - mouse_pos_backup.x;
             ui_ctx->mouse_delta.y = ui_ctx->mouse_pos.y - mouse_pos_backup.y;
+
+            /* Cross-window drag: any window whose client area the cursor
+               enters promotes itself to the foreground. */
+            if (shared->cross_drag_active && GetForegroundWindow() != window)
+            {
+                SetForegroundWindow(window);
+                SetWindowPos(window, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            }
+
+            /* Transfer capture from current window to the window under cursor
+               when cross-drag is active */
+            if (shared->cross_drag_active)
+                if (GetCapture() == window)
+                {
+                    POINT screen_pt;
+                    GetCursorPos(&screen_pt);
+                    HWND under = WindowFromPoint(screen_pt);
+                    if (under && under != window && GetWindowThreadProcessId(under, NULL) == GetCurrentThreadId())
+                    {
+                        ReleaseCapture();
+                        SetCapture(under);
+                    }
+                }
+
             return 0;
         }
 
@@ -804,13 +858,15 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             f64 now = ui_ctx->current_time;
             i32 click_x = GET_X_LPARAM(lparam);
             i32 click_y = GET_Y_LPARAM(lparam);
-            f64 double_click_sec = (f64)GetDoubleClickTime() / 1000.0;
-            f32 dx = (f32)(click_x - ui_ctx->last_lclick_pos.x);
-            f32 dy = (f32)(click_y - ui_ctx->last_lclick_pos.y);
-            f32 dist = sqrtf(dx * dx + dy * dy);
-            if (now - ui_ctx->last_lclick_time <= double_click_sec &&
-                dist <= (f32)GetSystemMetrics(SM_CXDOUBLECLK) * 2.f)
-                ui_ctx->mouse_double_click = True;
+            {
+                f64 double_click_sec = (f64)GetDoubleClickTime() / 1000.0;
+                f32 dx = (f32)(click_x - ui_ctx->last_lclick_pos.x);
+                f32 dy = (f32)(click_y - ui_ctx->last_lclick_pos.y);
+                f32 dist = sqrtf(dx * dx + dy * dy);
+                if (now - ui_ctx->last_lclick_time <= double_click_sec &&
+                    dist <= (f32)GetSystemMetrics(SM_CXDOUBLECLK) * 2.f)
+                    ui_ctx->mouse_double_click = True;
+            }
             ui_ctx->last_lclick_time = now;
             ui_ctx->last_lclick_pos.x = (f32)click_x;
             ui_ctx->last_lclick_pos.y = (f32)click_y;
@@ -842,7 +898,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_CAPTURECHANGED:
         {
             ui_ctx->mouse_press = False;
-            ReleaseCapture();
+            break;
         }
 
         case WM_IME_SETCONTEXT:
@@ -1231,9 +1287,64 @@ i32 WinMainCRTStartup()
 #endif
         cmd_queue_execute_all(&shared.cmd_queue, &shared.cmd_registry);
 
-        /* Process frame */
+        /* Snapshot cursor position once — query WindowFromPoint only once */
+        POINT cursor_pt;
+        GetCursorPos(&cursor_pt);
+        HWND hwnd_under = shared.cross_drag_active ? WindowFromPoint(cursor_pt) : NULL;
+
+        /* Process each window.  Sync drag state to whichever window the
+           cursor is currently over — including the source window itself,
+           because after ReleaseCapture() fires WM_CAPTURECHANGED the
+           source's mouse_press/drag_active are stale. */
         for (WindowContext* w = shared.first_window; w; w = w->next)
+        {
+            if (shared.cross_drag_active)
+            {
+                if (w->window == hwnd_under)
+                    cross_window_sync_to(&shared, w, cursor_pt);
+                else if (w->id != shared.cross_drag_source_window_id)
+                    w->ui.drag_active = False;
+            }
+
             process_frame(w);
+        }
+
+        /* After all frames: either pick up a new drag or tear down a stale one */
+        if (!shared.cross_drag_active)
+        {
+            for (WindowContext* w = shared.first_window; w; w = w->next)
+            {
+                if (w->ui.drag_active)
+                {
+                    shared.cross_drag_active = True;
+                    memcpy(shared.cross_drag_payload_buf, w->ui.drag_payload_buf, w->ui.drag_payload_size);
+                    shared.cross_drag_payload_size = w->ui.drag_payload_size;
+                    shared.cross_drag_source_window_id = w->id;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            WindowContext* src = find_window_by_id(&shared, shared.cross_drag_source_window_id);
+            if (!src || (!src->ui.mouse_press && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)))
+            {
+                /* Don't clear while a target window still holds the drop frame */
+                b32 any_target_dragging = False;
+                for (WindowContext* w = shared.first_window; w; w = w->next)
+                    if (w->id != shared.cross_drag_source_window_id && w->ui.drag_active)
+                    {
+                        any_target_dragging = True;
+                        break;
+                    }
+                if (!any_target_dragging)
+                {
+                    shared.cross_drag_active = False;
+                    shared.cross_drag_payload_size = 0;
+                    shared.cross_drag_source_window_id = 0;
+                }
+            }
+        }
     }
 
     /* Clean up remaining windows */
