@@ -2049,45 +2049,6 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
         }
         ui_box_end(spacer_container);
-
-        /* close panel button */
-        UIBox* close_panel_button_container =
-            ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
-        {
-            UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) } });
-            {
-                if (cfg->panel->parent)
-                {
-                    UIBox* inner_inner_container =
-                        ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) },
-                                                   .padding = { 0, 3, 0, 3 },
-                                                   .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-                    {
-                        u8 close_key[HASH_STR_MAX_LENGTH];
-                        i32 close_len =
-                            snprintf((char*)close_key, sizeof(close_key), "×##panel_close_%u", cfg->panel->id);
-                        String close_str = { close_key, close_len };
-                        UISignalFlags close_flags = ui_button(close_str, cfg->font_ui, 18, (Sizing){ fit({}), fit({}) },
-                                                              (Padding){ 0, 2, 3, 2 }, (Color){ 0 }, cfg->theme->tab_fg,
-                                                              cfg->theme->hover_bg, cfg->theme->click_bg, False);
-                        if (ui_lclicked(close_flags))
-                        {
-                            char buf[64];
-                            i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u window=%u", cfg->panel->id,
-                                               cfg->window_id);
-                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
-                        }
-                    }
-                    ui_box_end(inner_inner_container);
-                }
-            }
-            ui_box_end(inner_container);
-
-            // underline
-            ui_box_end(
-                ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
-        }
-        ui_box_end(close_panel_button_container);
     }
     ui_box_end(tab_bar);
 
