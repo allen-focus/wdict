@@ -1800,7 +1800,47 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 /* tab interaction */
                 UIBoxInteractResult r = ui_box_interact(tab_container, tab_key_str);
 
-                if (ui_dragging(r.flags))
+                /* transition for drop-target highlight */
+                b32 is_drop_target = ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size;
+                b32 own_dragging = ui_dragging(r.flags);
+                if (r.last_box)
+                    update_transition(&r.last_box->hot_t, 15.f, is_drop_target ? 1.f : 0.f);
+                f32 drop_t = r.last_box ? r.last_box->hot_t : 0.f;
+
+                /* insertion indicator line */
+                if (drop_t > 0.01f)
+                {
+                    /* Determine which edge to show the indicator on:
+                       - Cross-panel / source is to the right → left edge (insert before this tab)
+                       - Same panel, source is to the left   → right edge (insert after this tab) */
+                    b32 indent_left = True;
+                    if (g_ui_ctx->drag_payload_size == (isize)sizeof(TabDragPayload))
+                    {
+                        TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                        if (peek->from_panel_id == cfg->panel->id)
+                        {
+                            isize dragged_idx = 0;
+                            for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
+                                if (t->id == peek->from_tab_id)
+                                    break;
+                            indent_left = (dragged_idx > tab_index);
+                        }
+                    }
+                    f32 line_x = indent_left ? 0.f : (r.last_box->size.width - 3.f);
+
+                    Color line_c = cfg->theme->tab_drag_target_bg_accent;
+                    UIBox* line = ui_box_start(&(BoxConfig){
+                        .sizing = { fixed(3), fixed(27) },
+                        .flags = BoxFlag_Float,
+                        .float_offset = { line_x, 0 },
+                    });
+                    {
+                        line->cfg.color = lerp_color((Color){ 0 }, line_c, drop_t);
+                    }
+                    ui_box_end(line);
+                }
+
+                if (own_dragging)
                 {
                     TabDragPayload tdp = { cfg->panel->id, tab->id, cfg->window_id };
                     ui_set_drag_payload(&tdp, sizeof(tdp));
@@ -1813,11 +1853,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     .direction = LAYOUT_LEFT_TO_RIGHT,
                     .child_gap = 4,
                     .alignment = { ALIGN_START, ALIGN_CENTER },
-                    .color =
-                        (ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size)
-                            ? cfg->theme->tab_drag_target_bg
-                            : (ui_dragging(r.flags) ? cfg->theme->tab_dragging_bg
-                                                    : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg)) });
+                    .color = lerp_color(own_dragging ? cfg->theme->tab_dragging_bg
+                                                     : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg),
+                                        cfg->theme->tab_drag_target_bg, drop_t) });
                 {
                     if (ui_lclicked(r.flags))
                     {
@@ -1946,8 +1984,27 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 i32 drop_len = snprintf((char*)drop_key, sizeof(drop_key), "###panel_drop_%u", cfg->panel->id);
                 UIBoxInteractResult dr = ui_box_interact(spacer_inner, (String){ drop_key, drop_len });
 
-                if (ui_drag_over(dr.flags) && g_ui_ctx->drag_payload_size)
-                    spacer_inner->cfg.color = cfg->theme->tab_drag_target_bg;
+                b32 spacer_drop = ui_drag_over(dr.flags) && g_ui_ctx->drag_payload_size;
+                if (dr.last_box)
+                    update_transition(&dr.last_box->hot_t, 15.f, spacer_drop ? 1.f : 0.f);
+                f32 st = dr.last_box ? dr.last_box->hot_t : 0.f;
+
+                /* insertion indicator line at spacer left edge (append position) */
+                if (st > 0.01f)
+                {
+                    Color line_c = cfg->theme->tab_drag_target_bg_accent;
+                    UIBox* line = ui_box_start(&(BoxConfig){
+                        .sizing = { fixed(3), fixed(27) },
+                        .flags = BoxFlag_Float,
+                        .float_offset = { 0, 0 },
+                    });
+                    {
+                        line->cfg.color = lerp_color((Color){ 0 }, line_c, st);
+                    }
+                    ui_box_end(line);
+                }
+
+                spacer_inner->cfg.color = lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg, st);
 
                 if (ui_dropped(dr.flags))
                 {
@@ -2074,7 +2131,7 @@ void ui_panel_end(PanelContext* pf)
         //   |   | Bottom |    |
         //   +---+--------+----+
         //
-        f32 tab_bar_h = 28.f; // TODO: Hard-code tab bar height because of lazy (and hard ...)
+        f32 tab_bar_h = 28.f; // TODO: Hard-code it because of lazy (and hard ...)
         f32 usable_w = pf->panel_w;
         f32 usable_h = pf->panel_h - tab_bar_h;
         f32 pad = 12.f;
@@ -2136,7 +2193,7 @@ void ui_panel_end(PanelContext* pf)
                         /* color transition — fade in/out with DragOver accent */
                         {
                             b32 drag_present = g_ui_ctx->drag_active && g_ui_ctx->drag_payload_size;
-                            b32 zone_hovered  = ui_drag_over(zr.flags) && drag_present;
+                            b32 zone_hovered = ui_drag_over(zr.flags) && drag_present;
 
                             if (zr.last_box)
                             {
@@ -2146,7 +2203,7 @@ void ui_panel_end(PanelContext* pf)
 
                             f32 ht = zr.last_box ? zr.last_box->hot_t : 0.f;
                             f32 at = zr.last_box ? zr.last_box->active_t : 0.f;
-                            Color bg_tint = lerp_color((Color){0}, pf->theme->tab_drag_target_bg, ht);
+                            Color bg_tint = lerp_color((Color){ 0 }, pf->theme->tab_drag_target_bg, ht);
                             z->cfg.color = lerp_color(bg_tint, pf->theme->tab_drag_target_bg_accent, at);
                         }
 
