@@ -1049,7 +1049,7 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
         }
     }
 
-    /* Drag: signal Dragging when mouse moves while held, even outside the box. */
+    /* Drag: signal Dragging when mouse moves while held, even outside the box */
     if (g_ui_ctx->mouse_press && has_mouse_anchor)
     {
         Position delta = {
@@ -1107,16 +1107,6 @@ void* ui_accept_drag_payload(isize expected_size)
     if (expected_size != g_ui_ctx->drag_payload_size)
         return NULL;
     return g_ui_ctx->drag_payload_buf;
-}
-
-b32 ui_is_drag_over(const UIBox* box)
-{
-    if (!g_ui_ctx->drag_active)
-        return False;
-    Rect r = { box->position.x, box->position.y, box->position.x + box->size.width,
-               box->position.y + box->size.height };
-    return rect_contains_point(r, g_ui_ctx->mouse_pos) && box != g_ui_ctx->drag_source_box &&
-           rect_contains_point(box->clip, g_ui_ctx->mouse_pos);
 }
 
 //
@@ -1805,32 +1795,28 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             UIBox* tab_container =
                 ui_box_start(&(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
             {
+                /* tab interaction */
+                UIBoxInteractResult r = ui_box_interact(tab_container, tab_key_str);
+
+                if (ui_dragging(r.flags))
+                {
+                    TabDragPayload tdp = { cfg->panel->id, tab->id, cfg->window_id };
+                    ui_set_drag_payload(&tdp, sizeof(tdp));
+                }
+
+                /* tab title & close button */
                 UIBox* box = ui_box_start(&(BoxConfig){
                     .sizing = { fit({}), fit({}) },
                     .padding = { 5, 10, 5, 10 },
                     .direction = LAYOUT_LEFT_TO_RIGHT,
                     .child_gap = 4,
                     .alignment = { ALIGN_START, ALIGN_CENTER },
-                });
+                    .color =
+                        (ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size)
+                            ? cfg->theme->tab_drag_target_bg
+                            : (ui_dragging(r.flags) ? cfg->theme->tab_dragging_bg
+                                                    : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg)) });
                 {
-                    /* tab interaction */
-                    UIBoxInteractResult r = ui_box_interact(box, tab_key_str);
-
-                    if (ui_dragging(r.flags))
-                    {
-                        TabDragPayload tdp = { cfg->panel->id, tab->id, cfg->window_id };
-                        ui_set_drag_payload(&tdp, sizeof(tdp));
-                    }
-
-                    if (ui_drag_over(r.flags))
-                        box->cfg.color = cfg->theme->tab_drag_target_bg;
-                    else if (ui_dragging(r.flags))
-                        box->cfg.color = cfg->theme->tab_dragging_bg;
-                    else if (is_active)
-                        box->cfg.color = cfg->theme->tab_active_bg;
-                    else
-                        box->cfg.color = cfg->theme->tab_bg;
-
                     if (ui_lclicked(r.flags))
                     {
                         char buf[64];
@@ -1849,14 +1835,15 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     b32 is_first_panel_first_tab = !cfg->panel->parent && tab == cfg->panel->tab_first;
                     u8 ck[HASH_STR_MAX_LENGTH];
                     i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%u_%u", cfg->panel->id, tab->id);
-                    Color cb_text = (ui_hovered(r.flags) && !ui_drag_over(r.flags))
-                                        ? (!is_first_panel_first_tab ? cfg->theme->tab_active_fg : (Color){ 0 })
-                                        : (Color){ 0 };
-                    Color cb_hover = ui_drag_over(r.flags) ? (Color){ 0 } : cfg->theme->hover_bg;
-                    UISignalFlags cf =
-                        ui_button((String){ ck, cl }, cfg->font_ui, 11, (Sizing){ fit({}), fit({}) },
-                                  (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, cb_text,
-                                  !is_first_panel_first_tab ? cb_hover : (Color){ 0 }, cfg->theme->hover_bg, True);
+                    UISignalFlags cf = ui_button(
+                        (String){ ck, cl }, cfg->font_ui, 11, (Sizing){ fit({}), fit({}) }, (Padding){ 3, 3, 3, 3 },
+                        (Color){ 0 }, // background color
+                        (ui_hovered(r.flags) && !ui_drag_over(r.flags))
+                            ? (!is_first_panel_first_tab ? cfg->theme->tab_active_fg : (Color){ 0 })
+                            : (Color){ 0 }, // text color
+                        !is_first_panel_first_tab ? (ui_drag_over(r.flags) ? (Color){ 0 } : cfg->theme->hover_bg)
+                                                  : (Color){ 0 }, // hover color
+                        cfg->theme->hover_bg, True);
                     if (ui_hovered(cf) && !is_active && !ui_drag_over(r.flags))
                         box->cfg.color = cfg->theme->tab_bg;
                     if (ui_lclicked(cf) && !is_first_panel_first_tab)
@@ -1904,9 +1891,13 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 ui_box_end(box);
 
                 /* underline */
-                ui_box_end(ui_box_start(
-                    &(BoxConfig){ .sizing = { grow({}), fixed(1) },
-                                  .color = is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_splitter }));
+                ui_box_end(ui_box_start(&(BoxConfig){
+                    .sizing = { grow({}), fixed(1) },
+                    .color = (ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size)
+                                 ? cfg->theme->tab_splitter
+                                 : (ui_dragging(r.flags)
+                                        ? cfg->theme->tab_dragging_bg
+                                        : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_splitter)) }));
             }
             ui_box_end(tab_container);
 
@@ -1955,7 +1946,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 i32 drop_len = snprintf((char*)drop_key, sizeof(drop_key), "###panel_drop_%u", cfg->panel->id);
                 UIBoxInteractResult dr = ui_box_interact(spacer_inner, (String){ drop_key, drop_len });
 
-                if (ui_drag_over(dr.flags))
+                if (ui_drag_over(dr.flags) && g_ui_ctx->drag_payload_size)
                     spacer_inner->cfg.color = cfg->theme->tab_drag_target_bg;
 
                 if (ui_dropped(dr.flags))
