@@ -293,7 +293,8 @@ static void cross_window_sync_to(AppShared* shared, WindowContext* ctx, const PO
     ctx->ui.drag_payload_size = shared->cross_drag_payload_size;
 }
 
-static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32 width, u32 height)
+static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32 pos_x, i32 pos_y, u32 width,
+                                    u32 height, b32 add_default_tab)
 {
     WindowContext* ctx = (WindowContext*)malloc(sizeof(WindowContext));
     if (!ctx)
@@ -306,7 +307,24 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32
     wcsncpy_s(ctx->title, MAX_TITLE_LENGTH, title, _TRUNCATE);
 
     /* Create window */
-    RECT rect = get_screen_center_rect(width, height, GetDpiForSystem());
+    UINT sys_dpi = GetDpiForSystem();
+    f32 dpi_scale = (f32)sys_dpi / USER_DEFAULT_SCREEN_DPI;
+    u32 physical_width = (u32)(width * dpi_scale);
+    u32 physical_height = (u32)(height * dpi_scale);
+
+    RECT rect;
+    if (pos_x != CW_USEDEFAULT && pos_y != CW_USEDEFAULT)
+    {
+        rect.left = pos_x;
+        rect.top = pos_y;
+        rect.right = pos_x + (i32)physical_width;
+        rect.bottom = pos_y + (i32)physical_height;
+    }
+    else
+    {
+        rect = get_screen_center_rect(width, height, sys_dpi);
+    }
+
     DWORD window_style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRectEx(&rect, window_style, 0, 0);
     ctx->window =
@@ -328,7 +346,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32
         .draw_rect = renderer_draw_rect,
         .draw_text = renderer_draw_text,
     };
-    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, GetDpiForSystem(), render_fn);
+    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, sys_dpi, render_fn);
     ctx->ui.clipboard_copy = win32_clipboard_copy;
     ctx->ui.clipboard_paste = win32_clipboard_paste;
 
@@ -350,6 +368,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, u32
     /* Init per-window root panel */
     ctx->root_panel = panel_alloc();
     ctx->root_panel->pct_of_parent = 1.0f;
+    if (add_default_tab)
     {
         u8 name_buf[PANEL_TAB_NAME_MAX];
         isize name_len;
@@ -378,7 +397,7 @@ static void cmd_create_window(void* userdata, String cmd_text)
 {
     u32 w = cmd_parse_u32(cmd_text, str("w"), CLIENT_WIDTH);
     u32 h = cmd_parse_u32(cmd_text, str("h"), CLIENT_HEIGHT);
-    create_window((AppShared*)userdata, L"Window", w, h);
+    create_window((AppShared*)userdata, L"Window", CW_USEDEFAULT, CW_USEDEFAULT, w, h, True);
 }
 
 static void cmd_toggle_theme(void* userdata, String cmd_text)
@@ -583,6 +602,39 @@ static void cmd_tab_move_to_panel(void* userdata, String cmd_text)
     }
 }
 
+static void cmd_tab_move_to_new_window(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, cmd_text);
+
+    if (!rt.panel || !rt.tab)
+        return;
+
+    /* Parse optional position & size */
+    i32 pos_x = cmd_parse_i32(cmd_text, str("pos_x"), CW_USEDEFAULT);
+    i32 pos_y = cmd_parse_i32(cmd_text, str("pos_y"), CW_USEDEFAULT);
+    u32 w = cmd_parse_u32(cmd_text, str("w"), CLIENT_WIDTH);
+    u32 h = cmd_parse_u32(cmd_text, str("h"), CLIENT_HEIGHT);
+
+    WindowContext* new_win = create_window(shared, L"Window", pos_x, pos_y, w, h, False);
+    if (!new_win)
+        return;
+
+    panel_tab_move_to_panel(rt.panel, rt.tab, new_win->root_panel, -1);
+
+    /* Close source window if it became empty */
+    if (!rt.panel->parent && !rt.panel->tab_first)
+    {
+        u32 from_window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+        if (from_window_id)
+        {
+            WindowContext* from_win = find_window_by_id(shared, from_window_id);
+            if (from_win)
+                DestroyWindow(from_win->window);
+        }
+    }
+}
+
 static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
 {
     AppShared* shared = (AppShared*)userdata;
@@ -622,7 +674,27 @@ static void process_frame(WindowContext* ctx)
             .color = theme->bg_base,
         })
         {
+            String root_hash = str("###window_bg");
+            UIBoxInteractResult rb = ui_box_interact(box, root_hash);
+
             panel_container(ctx, root_rect);
+
+            /* Unhandled drop on background: create a new window with the dragged tab */
+            if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed)
+            {
+                TabDragPayload* payload = (TabDragPayload*)ui_accept_drag_payload(sizeof(TabDragPayload));
+                if (payload)
+                {
+                    POINT cursor_pt;
+                    GetCursorPos(&cursor_pt);
+                    char buf[128];
+                    i32 len =
+                        snprintf(buf, sizeof(buf), "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
+                                 payload->from_panel_id, payload->from_tab_id, payload->from_window_id,
+                                 (i32)cursor_pt.x, (i32)cursor_pt.y);
+                    cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
+                }
+            }
         }
     }
     ui_frame_end(arena_pos_backup);
@@ -1235,6 +1307,7 @@ i32 WinMainCRTStartup()
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate"),        str("Activate Tab"),                  str(""), cmd_tab_activate,        &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),            str("Move Tab"),                      str(""), cmd_tab_move,            &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),   str("Move Tab To Next Panel"),        str(""), cmd_tab_move_to_panel,   &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"),  str("Move Tab To New Window"),          str(""), cmd_tab_move_to_new_window,  &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),    str("Move Tab To New Panel"),         str(""), cmd_tab_to_new_panel,    &shared });
 
     /* Bind shortcuts */
@@ -1289,7 +1362,7 @@ i32 WinMainCRTStartup()
                                 &shared.fonts[FONT_INDEX_ICON]);
 
     /* Create first window */
-    create_window(&shared, L"App Title", CLIENT_WIDTH, CLIENT_HEIGHT);
+    create_window(&shared, L"App Title", CW_USEDEFAULT, CW_USEDEFAULT, CLIENT_WIDTH, CLIENT_HEIGHT, True);
 
     /* Run message loop */
     MSG message;
@@ -1370,6 +1443,32 @@ i32 WinMainCRTStartup()
                     }
                 if (!any_target_dragging)
                 {
+                    /* Desktop drop: if no window consumed the drag payload,
+                       create a new window at the cursor position */
+                    if (shared.cross_drag_payload_size >= (isize)sizeof(TabDragPayload))
+                    {
+                        b32 payload_consumed = False;
+                        for (WindowContext* wc = shared.first_window; wc; wc = wc->next)
+                            if (wc->ui.drag_payload_consumed)
+                            {
+                                payload_consumed = True;
+                                break;
+                            }
+
+                        if (!payload_consumed)
+                        {
+                            TabDragPayload* pld = (TabDragPayload*)shared.cross_drag_payload_buf;
+                            POINT cursor_pt;
+                            GetCursorPos(&cursor_pt);
+                            char buf[128];
+                            i32 len = snprintf(buf, sizeof(buf),
+                                               "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
+                                               pld->from_panel_id, pld->from_tab_id, pld->from_window_id,
+                                               (i32)cursor_pt.x, (i32)cursor_pt.y);
+                            cmd_queue_push(&shared.cmd_queue, (String){ (u8*)buf, len });
+                        }
+                    }
+
                     shared.cross_drag_active = False;
                     shared.cross_drag_payload_size = 0;
                     shared.cross_drag_source_window_id = 0;

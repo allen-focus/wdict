@@ -452,6 +452,7 @@ struct UIContext
     isize drag_payload_size;
     b32 drag_active;
     UIBox* drag_source_box;
+    b32 drag_payload_consumed;
 
     /* box cache */
     UIBox* root;

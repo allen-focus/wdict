@@ -799,6 +799,7 @@ isize ui_frame_begin(UIContext* ui_ctx)
     g_ui_ctx->current_time = get_current_time(g_ui_ctx->frame_index);
     g_ui_ctx->frame_delta_time = (f32)(g_ui_ctx->current_time - last_time);
     g_ui_ctx->desired_cursor = UI_CURSOR_ARROW;
+    g_ui_ctx->drag_payload_consumed = False;
 
     return g_ui_ctx->arena.pos;
 }
@@ -1106,6 +1107,7 @@ void* ui_accept_drag_payload(isize expected_size)
         return NULL;
     if (expected_size != g_ui_ctx->drag_payload_size)
         return NULL;
+    g_ui_ctx->drag_payload_consumed = True;
     return g_ui_ctx->drag_payload_buf;
 }
 
@@ -1995,25 +1997,31 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         UIBox* close_panel_button_container =
             ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
         {
-            UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) },
-                                                                .padding = { 0, 3, 0, 3 },
-                                                                .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) } });
             {
                 if (cfg->panel->parent)
                 {
-                    u8 close_key[HASH_STR_MAX_LENGTH];
-                    i32 close_len = snprintf((char*)close_key, sizeof(close_key), "×##panel_close_%u", cfg->panel->id);
-                    String close_str = { close_key, close_len };
-                    UISignalFlags close_flags =
-                        ui_button(close_str, cfg->font_ui, 18, (Sizing){ fit({}), fit({}) }, (Padding){ 0, 2, 3, 2 },
-                                  (Color){ 0 }, cfg->theme->tab_fg, cfg->theme->hover_bg, cfg->theme->click_bg, False);
-                    if (ui_lclicked(close_flags))
+                    UIBox* inner_inner_container =
+                        ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) },
+                                                   .padding = { 0, 3, 0, 3 },
+                                                   .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
                     {
-                        char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u window=%u", cfg->panel->id,
-                                           cfg->window_id);
-                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                        u8 close_key[HASH_STR_MAX_LENGTH];
+                        i32 close_len =
+                            snprintf((char*)close_key, sizeof(close_key), "×##panel_close_%u", cfg->panel->id);
+                        String close_str = { close_key, close_len };
+                        UISignalFlags close_flags = ui_button(close_str, cfg->font_ui, 18, (Sizing){ fit({}), fit({}) },
+                                                              (Padding){ 0, 2, 3, 2 }, (Color){ 0 }, cfg->theme->tab_fg,
+                                                              cfg->theme->hover_bg, cfg->theme->click_bg, False);
+                        if (ui_lclicked(close_flags))
+                        {
+                            char buf[64];
+                            i32 len = snprintf(buf, sizeof(buf), "panel.close panel=%u window=%u", cfg->panel->id,
+                                               cfg->window_id);
+                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                        }
                     }
+                    ui_box_end(inner_inner_container);
                 }
             }
             ui_box_end(inner_container);
