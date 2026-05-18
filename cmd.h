@@ -38,6 +38,7 @@ CmdDef* cmd_find(const CmdRegistry* reg, String id);
 i32 cmd_parse_i32(String text, String key, i32 def);
 u32 cmd_parse_u32(String text, String key, u32 def);
 i32 cmd_parse_axis(String text, String key, i32 def); // 0 ← "X", 1 ← "Y"
+String cmd_parse_string(String text, String key, String def);
 
 //
 // cmd queue

@@ -529,6 +529,7 @@ typedef struct
     Color tab_active_fg;
     Color tab_dragging_bg;
     Color tab_drag_target_bg;
+    Color tab_drag_target_bg_accent;
 
     Color hover_bg;
     Color click_bg;
@@ -559,6 +560,12 @@ typedef struct
     Panel* panel;
     ScrollContext scroll_ctx;
     UIBox* outer_box;
+    f32 panel_w;
+    f32 panel_h;
+    u32 window_id;
+    CmdQueue* cmd_queue;
+    const PanelTheme* theme;
+    f32 font_size;
 } PanelContext;
 
 //

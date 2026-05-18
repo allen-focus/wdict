@@ -124,6 +124,12 @@ i32 cmd_parse_axis(String text, String key, i32 def)
     return def;
 }
 
+String cmd_parse_string(String text, String key, String def)
+{
+    String val = find_value(text, key);
+    return val.len ? val : def;
+}
+
 //
 // Queue
 //

@@ -62,6 +62,7 @@ typedef struct
     Color warning;
 
     Color cursor;
+    Color selection_preview;
     Color selection;
     Color selection_flash;
     Color cursor_trail;
@@ -128,69 +129,71 @@ static u16 s_utf16_pending_high = 0;
 
 // clang-format off
 static const Theme s_theme_light = {
-    .bg_base         = { LIGHT_1,  255 },
-    .bg_surface      = { LIGHT_2,  255 },
-    .bg_overlay      = { LIGHT_3,  255 },
+    .bg_base           = { LIGHT_1,  255 },
+    .bg_surface        = { LIGHT_2,  255 },
+    .bg_overlay        = { LIGHT_3,  255 },
 
-    .fg_primary      = { DARK_5,   255 },
-    .fg_secondary    = { DARK_1,   255 },
-    .fg_disabled     = { LIGHT_5,  255 },
+    .fg_primary        = { DARK_5,   255 },
+    .fg_secondary      = { DARK_1,   255 },
+    .fg_disabled       = { LIGHT_5,  255 },
 
-    .border_normal   = { LIGHT_4,  255 },
-    .border_focus    = { BLUE_3,   255 },
-    .border_press    = { BLUE_5,   255 },
+    .border_normal     = { LIGHT_4,  255 },
+    .border_focus      = { BLUE_3,   255 },
+    .border_press      = { BLUE_5,   255 },
 
-    .accent          = { BLUE_2,   255 },
-    .accent_hover    = { BLUE_3,   255 },
-    .accent_press    = { BLUE_4,   255 },
-    .accent_fg       = { LIGHT_1,  255 },
+    .accent            = { BLUE_2,   255 },
+    .accent_hover      = { BLUE_3,   255 },
+    .accent_press      = { BLUE_4,   255 },
+    .accent_fg         = { LIGHT_1,  255 },
 
-    .danger          = { RED_3,    255 },
-    .success         = { GREEN_4,  255 },
-    .warning         = { ORANGE_3, 255 },
+    .danger            = { RED_3,    255 },
+    .success           = { GREEN_4,  255 },
+    .warning           = { ORANGE_3, 255 },
 
-    .cursor          = { DARK_5,   255 },
-    .selection       = { BLUE_3,   128 },
-    .selection_flash = { YELLOW_3, 255 },
-    .cursor_trail    = { DARK_5,   110 },
+    .cursor            = { DARK_5,   255 },
+    .selection_preview = { BLUE_3,   64  },
+    .selection         = { BLUE_3,   128 },
+    .selection_flash   = { YELLOW_3, 255 },
+    .cursor_trail      = { DARK_5,   110 },
 
-    .scrollbar_thumb = { DARK_1,   240 },
-    .scrollbar_track = { DARK_1,   96  },
+    .scrollbar_thumb   = { DARK_1,   240 },
+    .scrollbar_track   = { DARK_1,   96  },
 
-    .shadow          = { DARK_5,   255 },
+    .shadow            = { DARK_5,   255 },
 };
 
 static const Theme s_theme_dark = {
-    .bg_base         = { DARK_4,   255 },
-    .bg_surface      = { DARK_3,   255 },
-    .bg_overlay      = { DARK_2,   255 },
+    .bg_base           = { DARK_4,   255 },
+    .bg_surface        = { DARK_3,   255 },
+    .bg_overlay        = { DARK_2,   255 },
 
-    .fg_primary      = { LIGHT_1,  255 },
-    .fg_secondary    = { LIGHT_5,  255 },
-    .fg_disabled     = { DARK_1,   255 },
+    .fg_primary        = { LIGHT_1,  255 },
+    .fg_secondary      = { LIGHT_5,  255 },
+    .fg_disabled       = { DARK_1,   255 },
 
-    .border_normal   = { DARK_2,   255 },
-    .border_focus    = { BLUE_2,   255 },
-    .border_press    = { BLUE_4,   255 },
+    .border_normal     = { DARK_2,   255 },
+    .border_focus      = { BLUE_2,   255 },
+    .border_press      = { BLUE_4,   255 },
 
-    .accent          = { BLUE_2,   255 },
-    .accent_hover    = { BLUE_3,   255 },
-    .accent_press    = { BLUE_4,   255 },
-    .accent_fg       = { LIGHT_2,  255 },
+    .accent            = { BLUE_2,   255 },
+    .accent_hover      = { BLUE_3,   255 },
+    .accent_press      = { BLUE_4,   255 },
+    .accent_fg         = { LIGHT_2,  255 },
 
-    .danger          = { RED_1,    255 },
-    .success         = { GREEN_2,  255 },
-    .warning         = { ORANGE_1, 255 },
+    .danger            = { RED_1,    255 },
+    .success           = { GREEN_2,  255 },
+    .warning           = { ORANGE_1, 255 },
 
-    .cursor          = { LIGHT_1,  255 },
-    .selection       = { BLUE_2,   128 },
-    .selection_flash = { YELLOW_2, 255 },
-    .cursor_trail    = { LIGHT_1,  110 },
+    .cursor            = { LIGHT_1,  255 },
+    .selection_preview = { BLUE_2,   64  },
+    .selection         = { BLUE_2,   128 },
+    .selection_flash   = { YELLOW_2, 255 },
+    .cursor_trail      = { LIGHT_1,  110 },
 
-    .scrollbar_thumb = { LIGHT_5,  240 },
-    .scrollbar_track = { LIGHT_5,  96  },
+    .scrollbar_thumb   = { LIGHT_5,  240 },
+    .scrollbar_track   = { LIGHT_5,  96  },
 
-    .shadow          = { DARK_5,   255 },
+    .shadow            = { DARK_5,   255 },
 };
 // clang-format on
 
@@ -224,14 +227,6 @@ static RECT get_screen_center_rect(u32 width, u32 height, u32 dpi)
     i32 y = (screen_height - physical_height) / 2;
     RECT rect = { x, y, x + physical_width, y + physical_height };
     return rect;
-}
-
-static void set_window_title(WindowContext* ctx, const String title)
-{
-    i32 written =
-        MultiByteToWideChar(CP_UTF8, 0, (const char*)title.data, (i32)title.len, ctx->title, MAX_TITLE_LENGTH - 1);
-    ctx->title[written] = L'\0';
-    SetWindowTextW(ctx->window, ctx->title);
 }
 
 //
@@ -414,7 +409,7 @@ static void cmd_split_panel_h(void* userdata, String cmd_text)
     u32 panel_id = cmd_parse_u32(cmd_text, str("panel"), 0);
     Panel* p = find_panel_globally(shared, window_id, panel_id);
     if (p)
-        panel_split(p, Axis2_X);
+        panel_split(p, Axis2_X, True);
 }
 
 static void cmd_split_panel_v(void* userdata, String cmd_text)
@@ -424,7 +419,7 @@ static void cmd_split_panel_v(void* userdata, String cmd_text)
     u32 panel_id = cmd_parse_u32(cmd_text, str("panel"), 0);
     Panel* p = find_panel_globally(shared, window_id, panel_id);
     if (p)
-        panel_split(p, Axis2_Y);
+        panel_split(p, Axis2_Y, True);
 }
 
 static void cmd_close_panel(void* userdata, String cmd_text)
@@ -440,9 +435,9 @@ static void cmd_close_panel(void* userdata, String cmd_text)
             WindowContext* w = find_window_by_id(shared, window_id);
             if (w)
                 DestroyWindow(w->window);
+            return;
         }
-        p->anim_state = PANEL_ANIM_CLOSING;
-        p->anim_to_pct = 0.0f;
+        p->pending_remove = True;
     }
 }
 
@@ -543,13 +538,10 @@ static void cmd_tab_close(void* userdata, String cmd_text)
             WindowContext* w = find_window_by_id(shared, rt.window_id);
             if (w)
                 DestroyWindow(w->window);
+            return;
         }
 
-        if (rt.panel->parent)
-        {
-            rt.panel->anim_state = PANEL_ANIM_CLOSING;
-            rt.panel->anim_to_pct = 0.0f;
-        }
+        rt.panel->pending_remove = True;
     }
     else
     {
@@ -639,12 +631,26 @@ static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
 {
     AppShared* shared = (AppShared*)userdata;
     ResolvePanelTabResult rt = resolve_panel_and_tab(shared, cmd_text);
-    Panel* to_panel = resolve_panel_by_key(shared, cmd_text, str("to_panel"));
+    Panel* to_panel = resolve_target_panel(shared, cmd_text);
 
     if (!rt.panel || !to_panel || !rt.tab)
         return;
     Axis2 axis = (Axis2)cmd_parse_axis(cmd_text, str("axis"), Axis2_X);
-    panel_tab_to_new_panel(rt.panel, rt.tab, to_panel, axis);
+    String side_str = cmd_parse_string(cmd_text, str("side"), str("after"));
+    PanelDockSide side = str_compare(side_str, str("before")) ? PanelDockSide_Before : PanelDockSide_After;
+    panel_tab_to_new_panel(rt.panel, rt.tab, to_panel, axis, side);
+
+    /* If the source was the root leaf panel and is now empty, close the window */
+    if (!rt.panel->child_a && !rt.panel->parent && !rt.panel->tab_first)
+    {
+        u32 from_window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+        if (from_window_id)
+        {
+            WindowContext* from_win = find_window_by_id(shared, from_window_id);
+            if (from_win)
+                DestroyWindow(from_win->window);
+        }
+    }
 }
 
 //
@@ -663,7 +669,7 @@ static void process_frame(WindowContext* ctx)
 
     isize arena_pos_backup = ui_frame_begin(ui_ctx);
     {
-        ctx->root_panel = panel_update_animations(ctx->root_panel, g_ui_ctx->current_time);
+        ctx->root_panel = panel_process_pending_removes(ctx->root_panel);
         f32 client_w = (f32)ui_ctx->client_width;
         f32 client_h = (f32)ui_ctx->client_height;
         Rect root_rect = { 0, 0, client_w, client_h };
@@ -708,22 +714,23 @@ static void panel_container(WindowContext* ctx, const Rect rect)
 
     // clang-format off
     PanelTheme pt = {
-        .panel_bg            = theme->bg_surface,
-        .panel_border        = theme->fg_disabled,
-        .tab_splitter        = theme->fg_disabled,
-        .tab_bar             = theme->bg_surface,
-        .tab_bg              = theme->bg_surface,
-        .tab_fg              = theme->fg_secondary,
-        .tab_active_bg       = theme->bg_base,
-        .tab_active_fg       = theme->fg_primary,
-        .tab_dragging_bg     = theme->accent,
-        .tab_drag_target_bg  = theme->selection,
-        .hover_bg            = theme->bg_overlay,
-        .click_bg            = theme->bg_overlay,
-        .splitter_idle       = theme->fg_disabled,
-        .splitter_hover      = theme->border_focus,
-        .splitter_drag       = theme->border_press,
-        .scrollbar_thumb     = theme->scrollbar_thumb,
+        .panel_bg                  = theme->bg_surface,
+        .panel_border              = theme->fg_disabled,
+        .tab_splitter              = theme->fg_disabled,
+        .tab_bar                   = theme->bg_surface,
+        .tab_bg                    = theme->bg_surface,
+        .tab_fg                    = theme->fg_secondary,
+        .tab_active_bg             = theme->bg_base,
+        .tab_active_fg             = theme->fg_primary,
+        .tab_dragging_bg           = theme->accent,
+        .tab_drag_target_bg        = theme->selection_preview,
+        .tab_drag_target_bg_accent = theme->selection,
+        .hover_bg                  = theme->bg_overlay,
+        .click_bg                  = theme->bg_overlay,
+        .splitter_idle             = theme->fg_disabled,
+        .splitter_hover            = theme->border_focus,
+        .splitter_drag             = theme->border_press,
+        .scrollbar_thumb           = theme->scrollbar_thumb,
     };
     // clang-format on
 
@@ -1297,17 +1304,17 @@ i32 WinMainCRTStartup()
 
     /* Register commands */
     // clang-format off
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),       str("New Window"),                    str(""), cmd_create_window,       &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),    str("Toggle Light/Dark Theme"),       str(""), cmd_toggle_theme,        &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),       str("Split Panel Horizontally"),      str(""), cmd_split_panel_h,       &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_v"),       str("Split Panel Vertically"),        str(""), cmd_split_panel_v,       &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.close"),         str("Close Panel"),                   str(""), cmd_close_panel,         &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.new"),             str("New Tab"),                       str(""), cmd_tab_new,             &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.close"),           str("Close Tab"),                     str(""), cmd_tab_close,           &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate"),        str("Activate Tab"),                  str(""), cmd_tab_activate,        &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),            str("Move Tab"),                      str(""), cmd_tab_move,            &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),   str("Move Tab To Next Panel"),        str(""), cmd_tab_move_to_panel,   &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"),  str("Move Tab To New Window"),          str(""), cmd_tab_move_to_new_window,  &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_create_window,          &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),          str("Split Panel Horizontally"), str(""), cmd_split_panel_h,          &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_v"),          str("Split Panel Vertically"),   str(""), cmd_split_panel_v,          &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.close"),            str("Close Panel"),              str(""), cmd_close_panel,            &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.new"),                str("New Tab"),                  str(""), cmd_tab_new,                &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.close"),              str("Close Tab"),                str(""), cmd_tab_close,              &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate"),           str("Activate Tab"),             str(""), cmd_tab_activate,           &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),               str("Move Tab"),                 str(""), cmd_tab_move,               &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),      str("Move Tab To Next Panel"),   str(""), cmd_tab_move_to_panel,      &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"), str("Move Tab To New Window"),   str(""), cmd_tab_move_to_new_window, &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),    str("Move Tab To New Panel"),         str(""), cmd_tab_to_new_panel,    &shared });
 
     /* Bind shortcuts */
@@ -1445,7 +1452,7 @@ i32 WinMainCRTStartup()
                 {
                     /* Desktop drop: if no window consumed the drag payload,
                        create a new window at the cursor position */
-                    if (shared.cross_drag_payload_size >= (isize)sizeof(TabDragPayload))
+                    if (shared.cross_drag_payload_size == (isize)sizeof(TabDragPayload))
                     {
                         b32 payload_consumed = False;
                         for (WindowContext* wc = shared.first_window; wc; wc = wc->next)

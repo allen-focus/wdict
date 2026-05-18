@@ -5,11 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PANEL_ANIM_DURATION  0.1f
 #define PANEL_STACK_CAPACITY 16
 
 static u32 s_panel_next_id = 1; /* 0 reserved for none */
-static u32 s_tab_next_id = 1;   /* 0 reserved for none */
+static u32 s_tab_next_id = 1; /* 0 reserved for none */
 
 Panel* panel_alloc(void)
 {
@@ -104,7 +103,7 @@ PanelTab* panel_tab_declare(Panel* panel, const String name)
     PanelTab* tab = (PanelTab*)calloc(1, sizeof(PanelTab));
     if (!tab)
         return NULL;
-    tab->id  = s_tab_next_id++;
+    tab->id = s_tab_next_id++;
     memcpy(tab->name, name.data, (size_t)name.len);
     tab->name_len = name.len;
     tab->frame_declared = True;
@@ -297,10 +296,7 @@ void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to, i32 to_idx)
 
     /* Close source panel if now empty */
     if (!from->tab_first && from->parent)
-    {
-        from->anim_state = PANEL_ANIM_CLOSING;
-        from->anim_to_pct = 0.0f;
-    }
+        from->pending_remove = True;
 
     /* Insert into destination panel at specified position */
     if (to_idx < 0 || to_idx >= panel_tab_count(to))
@@ -341,7 +337,7 @@ void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to, i32 to_idx)
     to->active_tab = tab;
 }
 
-Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, const Axis2 axis)
+Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, const Axis2 axis, PanelDockSide side)
 {
     if (!from || !tab || !anchor || anchor->child_a)
         return NULL;
@@ -367,21 +363,45 @@ Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, const A
     if (from->active_tab == tab)
         from->active_tab = tab->next ? tab->next : from->tab_first;
 
-    /* Split the anchor panel; child_a inherits anchor's tabs, child_b gets a default */
-    if (!panel_split(anchor, axis))
+    /* Close source panel if now empty (cross-panel dock only) */
+    if (from != anchor && !from->tab_first && from->parent)
+        from->pending_remove = True;
+
+    /* Split the anchor panel; child_a inherits anchor's tabs */
+    if (!panel_split(anchor, axis, False))
         return NULL;
 
-    /* child_b is the newly created second child */
-    Panel* child_b = anchor->child_b;
+    if (side == PanelDockSide_Before)
+    {
+        Panel* child_a = anchor->child_a;
+        Panel* child_b = anchor->child_b;
 
-    /* Free child_b's auto-generated default tab and replace with the moved tab */
-    panel_tab_close(child_b, child_b->tab_first);
+        /* Move anchor's original tabs from child_a to child_b */
+        child_b->tab_first = child_a->tab_first;
+        child_b->tab_last = child_a->tab_last;
+        child_b->active_tab = child_a->active_tab;
 
-    child_b->tab_first = tab;
-    child_b->tab_last = tab;
-    child_b->active_tab = tab;
+        /* Place the moved tab in child_a (the new panel on the left/top) */
+        child_a->tab_first = tab;
+        child_a->tab_last = tab;
+        child_a->active_tab = tab;
 
-    return child_b;
+        child_a->pct_of_parent = 0.5f;
+        child_b->pct_of_parent = 0.5f;
+
+        return child_a;
+    }
+    else
+    {
+        /* PanelDockSide_After: tab goes to child_b (right/bottom) */
+        Panel* child_b = anchor->child_b;
+
+        child_b->tab_first = tab;
+        child_b->tab_last = tab;
+        child_b->active_tab = tab;
+
+        return child_b;
+    }
 }
 
 void panel_tabs_cleanup(Panel* panel)
@@ -427,7 +447,7 @@ static void panel_free_tabs(Panel* panel)
 // Panel lifecycle
 //
 
-Panel* panel_split(Panel* panel, const Axis2 axis)
+Panel* panel_split(Panel* panel, const Axis2 axis, const b32 create_default_tab)
 {
     if (!panel || panel->child_a)
         return NULL;
@@ -449,7 +469,8 @@ Panel* panel_split(Panel* panel, const Axis2 axis)
     panel->tab_last = NULL;
     panel->active_tab = NULL;
 
-    /* child_b gets one default tab */
+    /* child_b gets a default tab only when requested */
+    if (create_default_tab)
     {
         u8 name_buf[PANEL_TAB_NAME_MAX];
         isize name_len;
@@ -470,9 +491,8 @@ Panel* panel_split(Panel* panel, const Axis2 axis)
     panel->child_a = child_a;
     panel->child_b = child_b;
 
-    /* Animate child_b growing from 0% to 50%; child_a shrinks via sibling delta */
-    child_b->anim_state = PANEL_ANIM_OPENING;
-    child_b->anim_to_pct = 0.5f;
+    child_a->pct_of_parent = 0.5f;
+    child_b->pct_of_parent = 0.5f;
 
     return panel;
 }
@@ -535,61 +555,29 @@ void panel_free_tree(Panel* root)
     panel_free_node(root);
 }
 
-Panel* panel_update_animations(Panel* root, f64 now)
+Panel* panel_process_pending_removes(Panel* root)
 {
-    Stack(Panel*, PANEL_STACK_CAPACITY) pending_remove;
-    pending_remove.depth = 0;
+    Stack(u32, PANEL_STACK_CAPACITY) pending_ids;
+    pending_ids.depth = 0;
 
+    /* Collect IDs of leaf panels marked for removal */
     for (Panel* p = root; p; p = panel_iter_next(p))
     {
-        if (p->anim_state == PANEL_ANIM_NONE)
-            continue;
         if (p->child_a)
             continue;
-
-        Panel* parent = p->parent;
-        if (!parent)
-            continue;
-
-        /* First animation frame: snapshot initial state */
-        if (p->anim_started_at == 0.0)
+        if (p->pending_remove)
         {
-            p->anim_from_pct = p->pct_of_parent;
-            p->anim_started_at = now;
-        }
-
-        /* Compute progress, clamped to [0, 1] */
-        f64 elapsed = now - p->anim_started_at;
-        f32 t = (f32)(elapsed / (f64)PANEL_ANIM_DURATION);
-        if (t > 1.0f)
-            t = 1.0f;
-
-        /* Ease-out quadratic: decelerate toward target */
-        f32 e = 1.0f - (1.0f - t) * (1.0f - t);
-
-        /* Lerp toward anim_to_pct and push the delta to the sibling */
-        f32 old_pct = p->pct_of_parent;
-        p->pct_of_parent = p->anim_from_pct + (p->anim_to_pct - p->anim_from_pct) * e;
-
-        Panel* sibling = (parent->child_a == p) ? parent->child_b : parent->child_a;
-        sibling->pct_of_parent += (old_pct - p->pct_of_parent);
-
-        if (t >= 1.0f)
-        {
-            if (p->anim_state == PANEL_ANIM_CLOSING)
-            {
-                Assert(pending_remove.depth < PANEL_STACK_CAPACITY);
-                pending_remove.items[pending_remove.depth++] = p;
-            }
-            p->anim_state = PANEL_ANIM_NONE;
-            p->anim_started_at = 0.0;
+            Assert(pending_ids.depth < PANEL_STACK_CAPACITY);
+            pending_ids.items[pending_ids.depth++] = p->id;
         }
     }
 
-    /* Remove panels that completed their closing animation */
-    for (isize i = 0; i < pending_remove.depth; i++)
+    /* Process removals by ID (stable across tree mutations) */
+    for (isize i = 0; i < pending_ids.depth; i++)
     {
-        Panel* target = pending_remove.items[i];
+        Panel* target = panel_find_by_id(root, pending_ids.items[i]);
+        if (!target || !target->parent)
+            continue;
         Panel* old_parent = target->parent;
         Panel* survivor = panel_remove(target);
         if (old_parent == root)

@@ -11,14 +11,14 @@ typedef enum
 
 typedef enum
 {
-    PANEL_ANIM_NONE = 0,
-    PANEL_ANIM_CLOSING,
-    PANEL_ANIM_OPENING,
-} PanelAnimState;
+    PanelDockSide_Before,
+    PanelDockSide_After,
+} PanelDockSide;
 
 #define PANEL_TAB_NAME_MAX 64
 
-typedef struct {
+typedef struct
+{
     u32 from_panel_id;
     u32 from_tab_id;
     u32 from_window_id;
@@ -49,10 +49,7 @@ struct Panel
     f32 drag_saved_pct;
     f32 drag_saved_partner_pct;
 
-    PanelAnimState anim_state;
-    f32 anim_from_pct;
-    f32 anim_to_pct;
-    f64 anim_started_at;
+    b32 pending_remove;
 
     PanelTab* tab_first;
     PanelTab* tab_last;
@@ -64,7 +61,7 @@ Panel* panel_alloc(void);
 Panel* panel_find_by_id(const Panel* root, u32 id);
 Rect panel_calc_rect(const Panel* panel, const Rect root_rect);
 Rect panel_calc_rect_from_parent(const Panel* child, const Rect parent_rect);
-Panel* panel_split(Panel* panel, const Axis2 axis);
+Panel* panel_split(Panel* panel, const Axis2 axis, b32 create_default_tab);
 Panel* panel_remove(Panel* panel);
 void panel_free_tree(Panel* root);
 
@@ -76,7 +73,7 @@ void panel_tab_close(Panel* panel, PanelTab* tab);
 void panel_tab_move(Panel* panel, PanelTab* tab, i32 delta);
 isize panel_tab_count(const Panel* panel);
 void panel_tab_move_to_panel(Panel* from, PanelTab* tab, Panel* to, i32 to_idx);
-Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, Axis2 axis);
+Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, Axis2 axis, PanelDockSide side);
 void panel_tabs_cleanup(Panel* panel);
 void panel_tab_generate_default_name(const Panel* panel, u8* buf, isize buf_size, isize* out_len);
-Panel* panel_update_animations(Panel* root, f64 now);
+Panel* panel_process_pending_removes(Panel* root);

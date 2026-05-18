@@ -2046,13 +2046,133 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                                           .direction = cfg->direction,
                                                           .thumb_color = cfg->theme->scrollbar_thumb });
 
-    PanelContext pf = { .panel = cfg->panel, .scroll_ctx = scroll_ctx, .outer_box = outer_box };
+    PanelContext pf = { .panel = cfg->panel,
+                        .scroll_ctx = scroll_ctx,
+                        .outer_box = outer_box,
+                        .panel_w = iw,
+                        .panel_h = ih,
+                        .window_id = cfg->window_id,
+                        .cmd_queue = cfg->cmd_queue,
+                        .theme = cfg->theme,
+                        .font_size = cfg->font_size };
     return pf;
 }
 
 void ui_panel_end(PanelContext* pf)
 {
     ui_scrollable_area_end(pf->scroll_ctx);
+
+    /* Edge drop zones for docking tabs at panel edges */
+    {
+        //   +----+-------+----+
+        //   |    |  Top  |    |
+        //   |    +-------+    |
+        //   +---+         +---+
+        //   | L |         | R |
+        //   +---+         +---+
+        //   |   +--------+    |
+        //   |   | Bottom |    |
+        //   +---+--------+----+
+        //
+        f32 tab_bar_h = 28.f; // TODO: Hard-code tab bar height because of lazy (and hard ...)
+        f32 usable_w = pf->panel_w;
+        f32 usable_h = pf->panel_h - tab_bar_h;
+        f32 pad = 12.f;
+
+        UIBox* container = ui_box_start(&(BoxConfig){ .sizing = { fixed(pf->panel_w), fixed(pf->panel_h) },
+                                                      .flags = BoxFlag_Float,
+                                                      .float_offset = { 0, -usable_h },
+                                                      .padding = { pad, pad, pad, pad } });
+        {
+            usable_w -= pad * 2;
+            usable_h -= pad * 2;
+
+            f32 quad_w = usable_w * 0.25f;
+            f32 quad_h = usable_h * 0.25f;
+
+            f32 half_w = usable_w * 0.5f;
+            f32 half_h = usable_h * 0.5f;
+
+            const char* sides[4] = { "Y_before", "Y_after", "X_before", "X_after" };
+
+            // clang-format off
+            Position positions[4]  = {
+                { quad_w,          0          },  // top
+                { quad_w,          half_h + quad_h    },  // bottom
+                { 0,               quad_h },  // left
+                { half_w + quad_w, quad_h },  // right
+            };
+            Sizing sizings[4] = {
+                { fixed(half_w), fixed(quad_h) },  // top
+                { fixed(half_w), fixed(quad_h) },  // bottom
+                { fixed(quad_w), fixed(half_h) },  // left
+                { fixed(quad_w), fixed(half_h) },  // right
+            };
+            // clang-format on
+
+            /* Skip zones entirely: dragging the last tab of this panel onto itself */
+            b32 skip_zone = False;
+            if (g_ui_ctx->drag_payload_size == (isize)sizeof(TabDragPayload))
+            {
+                TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                if (peek->from_panel_id == pf->panel->id && panel_tab_count(pf->panel) == 1)
+                    skip_zone = True;
+            }
+
+            if (!skip_zone)
+                for (i32 zi = 0; zi < 4; zi++)
+                {
+                    u8 key[HASH_STR_MAX_LENGTH];
+                    i32 kl = snprintf((char*)key, sizeof(key), "###dock_%s_%u", sides[zi], pf->panel->id);
+                    UIBox* z = ui_box_start(&(BoxConfig){
+                        .sizing = sizings[zi],
+                        .rect_style = { .corner_radius = 12 },
+                        .flags = BoxFlag_Float,
+                        .float_offset = positions[zi],
+                    });
+                    {
+                        UIBoxInteractResult zr = ui_box_interact(z, (String){ key, kl });
+
+                        /* color transition — fade in/out with DragOver accent */
+                        {
+                            b32 drag_present = g_ui_ctx->drag_active && g_ui_ctx->drag_payload_size;
+                            b32 zone_hovered  = ui_drag_over(zr.flags) && drag_present;
+
+                            if (zr.last_box)
+                            {
+                                update_transition(&zr.last_box->hot_t, 12.f, drag_present ? 1.f : 0.f);
+                                update_transition(&zr.last_box->active_t, 12.f, zone_hovered ? 1.f : 0.f);
+                            }
+
+                            f32 ht = zr.last_box ? zr.last_box->hot_t : 0.f;
+                            f32 at = zr.last_box ? zr.last_box->active_t : 0.f;
+                            Color bg_tint = lerp_color((Color){0}, pf->theme->tab_drag_target_bg, ht);
+                            z->cfg.color = lerp_color(bg_tint, pf->theme->tab_drag_target_bg_accent, at);
+                        }
+
+                        /* dropped */
+                        if (ui_dropped(zr.flags) && !g_ui_ctx->drag_payload_consumed)
+                        {
+                            TabDragPayload* pld = (TabDragPayload*)ui_accept_drag_payload(sizeof(TabDragPayload));
+                            if (pld)
+                            {
+                                char buf[128];
+                                i32 len = snprintf(buf, sizeof(buf),
+                                                   "tab.to_new_panel panel=%u tab=%u to_panel=%u axis=%s side=%s "
+                                                   "window=%u to_window=%u",
+                                                   pld->from_panel_id, pld->from_tab_id, pf->panel->id,
+                                                   (zi < 2) ? "Y" : "X", (zi == 0 || zi == 2) ? "before" : "after",
+                                                   pld->from_window_id, pf->window_id);
+                                cmd_queue_push(pf->cmd_queue, (String){ (u8*)buf, len });
+                            }
+                        }
+                    }
+                    ui_box_end(z);
+                }
+        }
+        ui_box_end(container);
+    }
+
     ui_box_end(pf->outer_box);
     pf->panel = NULL;
 }
