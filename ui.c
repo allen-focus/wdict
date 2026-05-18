@@ -1832,21 +1832,18 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                                                                  .line_height = font_sz });
 
                     /* close button (hidden while dragging) */
-                    b32 is_first_panel_first_tab = !cfg->panel->parent && tab == cfg->panel->tab_first;
                     u8 ck[HASH_STR_MAX_LENGTH];
                     i32 cl = snprintf((char*)ck, sizeof(ck), "×##tc_%u_%u", cfg->panel->id, tab->id);
-                    UISignalFlags cf = ui_button(
-                        (String){ ck, cl }, cfg->font_ui, 11, (Sizing){ fit({}), fit({}) }, (Padding){ 3, 3, 3, 3 },
-                        (Color){ 0 }, // background color
-                        (ui_hovered(r.flags) && !ui_drag_over(r.flags))
-                            ? (!is_first_panel_first_tab ? cfg->theme->tab_active_fg : (Color){ 0 })
-                            : (Color){ 0 }, // text color
-                        !is_first_panel_first_tab ? (ui_drag_over(r.flags) ? (Color){ 0 } : cfg->theme->hover_bg)
-                                                  : (Color){ 0 }, // hover color
-                        cfg->theme->hover_bg, True);
+                    UISignalFlags cf =
+                        ui_button((String){ ck, cl }, cfg->font_ui, 11, (Sizing){ fit({}), fit({}) },
+                                  (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, // background color
+                                  (ui_hovered(r.flags) && !ui_drag_over(r.flags)) ? cfg->theme->tab_active_fg
+                                                                                  : (Color){ 0 }, // text color
+                                  ui_drag_over(r.flags) ? (Color){ 0 } : cfg->theme->hover_bg, // hover color
+                                  cfg->theme->hover_bg, True);
                     if (ui_hovered(cf) && !is_active && !ui_drag_over(r.flags))
                         box->cfg.color = cfg->theme->tab_bg;
-                    if (ui_lclicked(cf) && !is_first_panel_first_tab)
+                    if (ui_lclicked(cf))
                     {
                         char buf[64];
                         i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u tab=%u window=%u", cfg->panel->id,

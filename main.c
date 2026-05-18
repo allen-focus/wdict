@@ -416,6 +416,12 @@ static void cmd_close_panel(void* userdata, String cmd_text)
     Panel* p = find_panel_globally(shared, window_id, panel_id);
     if (p)
     {
+        if (!p->parent)
+        {
+            WindowContext* w = find_window_by_id(shared, window_id);
+            if (w)
+                DestroyWindow(w->window);
+        }
         p->anim_state = PANEL_ANIM_CLOSING;
         p->anim_to_pct = 0.0f;
     }
@@ -453,6 +459,7 @@ static PanelTab* find_tab_globally(AppShared* shared, u32 window_id, u32 tab_id)
 
 typedef struct
 {
+    u32 window_id;
     Panel* panel;
     PanelTab* tab;
 } ResolvePanelTabResult;
@@ -461,6 +468,8 @@ static ResolvePanelTabResult resolve_panel_and_tab(AppShared* shared, String cmd
 {
     ResolvePanelTabResult r = { 0 };
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    if (window_id)
+        r.window_id = window_id;
     u32 pid = cmd_parse_u32(cmd_text, str("panel"), 0);
     if (pid)
         r.panel = find_panel_globally(shared, window_id, pid);
@@ -506,9 +515,17 @@ static void cmd_tab_close(void* userdata, String cmd_text)
     if (!rt.panel || !rt.tab)
         return;
 
-    /* If this is the only tab left, close the panel instead */
+    /* If this is the last remaining tab in the panel, determine whether
+       to close the panel or destroy the window */
     if (rt.panel->tab_first && !rt.panel->tab_first->next && rt.panel->tab_first == rt.tab)
     {
+        if (!rt.panel->parent)
+        {
+            WindowContext* w = find_window_by_id(shared, rt.window_id);
+            if (w)
+                DestroyWindow(w->window);
+        }
+
         if (rt.panel->parent)
         {
             rt.panel->anim_state = PANEL_ANIM_CLOSING;
@@ -548,8 +565,22 @@ static void cmd_tab_move_to_panel(void* userdata, String cmd_text)
     Panel* to_panel = resolve_target_panel(shared, cmd_text);
     i32 to_idx = cmd_parse_i32(cmd_text, str("to_idx"), -1);
 
-    if (rt.panel && to_panel && rt.tab)
-        panel_tab_move_to_panel(rt.panel, rt.tab, to_panel, to_idx);
+    if (!rt.panel || !to_panel || !rt.tab)
+        return;
+    panel_tab_move_to_panel(rt.panel, rt.tab, to_panel, to_idx);
+
+    /* If the source panel was the root panel and is now empty,
+       the window has no tabs left — close it */
+    if (!rt.panel->parent && !rt.panel->tab_first)
+    {
+        u32 from_window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+        if (from_window_id)
+        {
+            WindowContext* from_win = find_window_by_id(shared, from_window_id);
+            if (from_win)
+                DestroyWindow(from_win->window);
+        }
+    }
 }
 
 static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
