@@ -977,30 +977,28 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 ui_box_end(box2);
 
                 /* Text test */
-                // TODO: The current text width calculation is VERY heavy (And maybe should not be called so many
-                // times!).
-                //       Just tried 10 round, and the FPS dropped to ~8 frames per second on my laptop.
-                // for (isize i = 0; i < 1; i++)
-                //     ui_text(
-                //         str("Dream of the Red Chamber has a complicated textual history that scholars have long
-                //         debated.
-                //         "
-                //             "It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was
-                //             a " "member of a prominent Chinese family that had served the Manchu emperors of the Qing
-                //             dynasty " "but whose fortunes had begun to decline. By the time of Cao's death in 1763 or
-                //             1764, " "hand-copied manuscripts of the novel's first 80 chapters had begun circulating,
-                //             and he may " "have written drafts of the remaining chapters. These hand-copied
-                //             manuscripts circulated first " "among his personal friends and a growing circle of
-                //             aficionados, then eventually on the open " "market where they sold for large sums of
-                //             money."),
-                //         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
-                //                        .font_size = 11,
-                //                        .color = theme->fg_primary,
-                //                        .line_height = 20,
-                //                        .wrap = True });
+                // TODO(important):
+                //       The current text width calculation is VERY heavy (and probably shouldn't be called so many
+                //       times!). Just tried 10 rounds, and the FPS dropped to ~8 frames per second on my laptop. With
+                //       `.wrap = False`, 10 rounds give ~70 FPS. With 0 rounds, ~110 FPS.
+                for (isize i = 0; i < 0; i++)
+                    ui_text(
+                        str("Dream of the Red Chamber has a complicated textual history that scholars have long "
+                            "debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. "
+                            "Cao was a member of a prominent Chinese family that had served the Manchu emperors of the "
+                            "Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 "
+                            "or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, "
+                            "and he may have written drafts of the remaining chapters. These hand-copied manuscripts "
+                            "circulated first among his personal friends and a growing circle of aficionados, then "
+                            "eventually on the open market where they sold for large sums of money."),
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
+                                       .font_size = 11,
+                                       .color = theme->fg_primary,
+                                       .line_height = 20,
+                                       .wrap = True });
             }
-            ui_panel_end(&panel);
         }
+        ui_panel_end(&panel);
     }
 
     /* Clean up tabs not declared this frame */

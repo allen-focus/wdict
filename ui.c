@@ -304,44 +304,46 @@ UIBox* ui_text(const String text, const TextConfig* text_cfg)
     isize word_count = 0;
     {
         String text = text_box->data.text.content;
-        isize start = 0;
-        const byte* ptr = text.data;
-        do
+        if (text_cfg->wrap)
         {
-            UnicodeDecode res_current = utf8_decode(ptr);
-            const byte* next = res_current.next_p;
-            if (res_current.codepoint == ' ' || res_current.codepoint > 127)
+            isize start = 0;
+            const byte* ptr = text.data;
+            do
             {
-                UnicodeDecode res_start = utf8_decode(&text.data[start]);
-                if (res_start.codepoint != ' ')
+                UnicodeDecode res_current = utf8_decode(ptr);
+                const byte* next = res_current.next_p;
+                if (res_current.codepoint == ' ' || res_current.codepoint > 127)
                 {
-                    /* For ASCII: measure up to current position (word boundary before delimiter).
-                    For non-ASCII: include this character itself, treating it as a single-word unit. */
-                    isize end = res_start.codepoint < 127 ? ptr - text.data : next - text.data;
-                    f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, end),
-                                                    text_box->data.text.font, text_box->data.text.font_size, dpi);
-                    min_width = max(min_width, word_width);
-                    word_count++;
+                    UnicodeDecode res_start = utf8_decode(&text.data[start]);
+                    if (res_start.codepoint != ' ')
+                    {
+                        /* For ASCII: measure up to current position (word boundary before delimiter).
+                        For non-ASCII: include this character itself, treating it as a single-word unit. */
+                        isize end = res_start.codepoint < 127 ? ptr - text.data : next - text.data;
+                        f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, end),
+                                                        text_box->data.text.font, text_box->data.text.font_size, dpi);
+                        min_width = max(min_width, word_width);
+                        word_count++;
+                    }
+                    start = next - text.data;
                 }
-                start = next - text.data;
+                ptr = next;
+            } while (ptr - text.data < text.len);
+
+            /* Handle last word */
+            if (start < text.len && text.data[start] != ' ')
+            {
+                f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, text.len),
+                                                text_box->data.text.font, text_box->data.text.font_size, dpi);
+                min_width = max(min_width, word_width);
+                word_count++;
             }
-            ptr = next;
-        } while (ptr - text.data < text.len);
-
-        /* Handle last word */
-        if (start < text.len && text.data[start] != ' ')
-        {
-            f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, text.len),
-                                            text_box->data.text.font, text_box->data.text.font_size, dpi);
-            min_width = max(min_width, word_width);
-            word_count++;
         }
-
-        whole_text_width = get_text_width(renderer, raster_cache, text_box->data.text.content, text_box->data.text.font,
-                                          text_box->data.text.font_size, dpi);
+        whole_text_width =
+            get_text_width(renderer, raster_cache, text, text_box->data.text.font, text_box->data.text.font_size, dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
-    text_box->cfg.sizing.width.min_max.min = text_cfg->wrap ? min_width : whole_text_width;
+    text_box->cfg.sizing.width.min_max.min = min_width;
     text_box->cfg.sizing.width.min_max.max = whole_text_width;
     text_box->cfg.sizing.height.min_max.min = (f32)text_box->data.text.line_height;
     text_box->cfg.sizing.height.min_max.max = (f32)text_box->data.text.line_height * word_count;
