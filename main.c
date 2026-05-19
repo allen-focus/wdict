@@ -12,12 +12,12 @@
 #include "utils.h"
 #include "win32_helper.h"
 
+#include <ShellScalingApi.h>
 #include <math.h>
 #include <stdio.h>
 #include <wchar.h>
 #include <windows.h>
 #include <windowsx.h>
-#include <ShellScalingApi.h>
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
 
@@ -91,7 +91,7 @@ typedef struct
     Theme theme;
     GlyphRasterCache raster_cache;
     RendererShared renderer_shared;
-    HCURSOR cursors[5];
+    HCURSOR cursors[UI_CURSOR_COUNT];
     WindowContext* first_window;
     WindowContext* last_window;
     Arena cfg_arena;
@@ -532,7 +532,6 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     /* Render first frames to rasterize glyphs, then show */
     process_frame(ctx);
     process_frame(ctx);
-    SetCursor(shared->cursors[ctx->ui.desired_cursor]);
     ShowWindow(ctx->window, SW_SHOWDEFAULT);
 
     return ctx;
@@ -1455,41 +1454,44 @@ i32 WinMainCRTStartup()
     shortcut_registry_init(&shared.shortcuts, &shared.cfg_arena, 64);
     cmd_queue_init(&shared.cmd_queue, &shared.cmd_arena);
 
-    /* Register commands */
     // clang-format off
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_create_window,          &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),          str("Split Panel Horizontally"), str(""), cmd_split_panel_h,          &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_v"),          str("Split Panel Vertically"),   str(""), cmd_split_panel_v,          &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.close"),            str("Close Panel"),              str(""), cmd_close_panel,            &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.new"),                str("New Tab"),                  str(""), cmd_tab_new,                &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.close"),              str("Close Tab"),                str(""), cmd_tab_close,              &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate"),           str("Activate Tab"),             str(""), cmd_tab_activate,           &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),               str("Move Tab"),                 str(""), cmd_tab_move,               &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),      str("Move Tab To Next Panel"),   str(""), cmd_tab_move_to_panel,      &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"), str("Move Tab To New Window"),   str(""), cmd_tab_move_to_new_window, &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),       str("Move Tab To New Panel"),    str(""), cmd_tab_to_new_panel,       &shared });
+    {
+        /* Register commands */
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_create_window,          &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),          str("Split Panel Horizontally"), str(""), cmd_split_panel_h,          &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_v"),          str("Split Panel Vertically"),   str(""), cmd_split_panel_v,          &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.close"),            str("Close Panel"),              str(""), cmd_close_panel,            &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.new"),                str("New Tab"),                  str(""), cmd_tab_new,                &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.close"),              str("Close Tab"),                str(""), cmd_tab_close,              &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate"),           str("Activate Tab"),             str(""), cmd_tab_activate,           &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),               str("Move Tab"),                 str(""), cmd_tab_move,               &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),      str("Move Tab To Next Panel"),   str(""), cmd_tab_move_to_panel,      &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"), str("Move Tab To New Window"),   str(""), cmd_tab_move_to_new_window, &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),       str("Move Tab To New Panel"),    str(""), cmd_tab_to_new_panel,       &shared });
 
-    /* Bind shortcuts */
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },      str("tab.new"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'W' },      str("tab.close"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'H' },      str("panel.split_h"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'V' },      str("panel.split_v"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_LEFT },  str("tab.move delta=-1"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_RIGHT }, str("tab.move delta=+1"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },      str("tab.move_to_panel"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },      str("tab.to_new_panel axis=X"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },      str("tab.to_new_panel axis=Y"));
-    shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                       VK_F11 },  str("app.toggle_theme"));
-    Assert(!shortcut_detect_conflicts(&shared.shortcuts));
+        /* Bind shortcuts */
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },      str("tab.new"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'W' },      str("tab.close"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'H' },      str("panel.split_h"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'V' },      str("panel.split_v"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_LEFT },  str("tab.move delta=-1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_RIGHT }, str("tab.move delta=+1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },      str("tab.move_to_panel"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },      str("tab.to_new_panel axis=X"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },      str("tab.to_new_panel axis=Y"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                       VK_F11 },  str("app.toggle_theme"));
+        Assert(!shortcut_detect_conflicts(&shared.shortcuts));
+
+        /* Load cursors */
+        shared.cursors[UI_CURSOR_ARROW]      = LoadCursor(NULL, IDC_ARROW);
+        shared.cursors[UI_CURSOR_IBEAM]      = LoadCursor(NULL, IDC_IBEAM);
+        shared.cursors[UI_CURSOR_HAND]       = LoadCursor(NULL, IDC_HAND);
+        shared.cursors[UI_CURSOR_HORIZONTAL] = LoadCursor(NULL, IDC_SIZEWE);
+        shared.cursors[UI_CURSOR_VERTICAL]   = LoadCursor(NULL, IDC_SIZENS);
+        shared.cursors[UI_CURSOR_MOVE]       = LoadCursor(NULL, IDC_SIZEALL);
+    }
     // clang-format on
-
-    /* Load cursors */
-    shared.cursors[UI_CURSOR_ARROW] = LoadCursor(NULL, IDC_ARROW);
-    shared.cursors[UI_CURSOR_IBEAM] = LoadCursor(NULL, IDC_IBEAM);
-    shared.cursors[UI_CURSOR_HAND] = LoadCursor(NULL, IDC_HAND);
-    shared.cursors[UI_CURSOR_HORIZONTAL] = LoadCursor(NULL, IDC_SIZEWE);
-    shared.cursors[UI_CURSOR_VERTICAL] = LoadCursor(NULL, IDC_SIZENS);
 
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -1584,6 +1586,23 @@ i32 WinMainCRTStartup()
             }
 
             process_frame(w);
+        }
+
+        /* Force cursor update during cross-window drag: WM_SETCURSOR
+           is suppressed when another window captures mouse. Use
+           authoritative source (cross-drag source or local drag-active
+           window) to apply desired cursor. */
+        {
+            // clang-format off
+            WindowContext* ac = NULL;
+            if (shared.cross_drag_active)
+                ac = find_window_by_id(&shared, shared.cross_drag_source_window_id);
+            else
+                for (WindowContext* w = shared.first_window; w; w = w->next)
+                    if (w->ui.drag_active) { ac = w; break; }
+            if (ac && ac->ui.drag_active)
+                SetCursor(shared.cursors[ac->ui.desired_cursor]);
+            // clang-format on
         }
 
         /* After all frames: either pick up a new drag or tear down a stale one */

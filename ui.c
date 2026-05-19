@@ -1375,8 +1375,6 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     if (last_bar)
     {
         update_interaction_flags(last_bar, &bar_flags);
-        if (ui_hovered(thumb_flags) || ui_hovered(bar_flags))
-            ui_set_desired_cursor(UI_CURSOR_ARROW);
 
         /* Expand scrollbar (track & thumb) with a fade-out transition when mouse hovers over it */
         if (ui_dragging(thumb_flags) || ui_hovered(bar_flags))
@@ -1836,6 +1834,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     memcpy(tdp.title, tab->name, (size_t)copy_len);
                     tdp.title[copy_len] = '\0';
                     ui_set_drag_payload(&tdp, sizeof(tdp));
+                    ui_set_desired_cursor(UI_CURSOR_MOVE);
                 }
 
                 /* tab title & close button */
@@ -1989,18 +1988,12 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                 /* insertion indicator line at spacer left edge (append position) */
                 if (st > 0.01f)
-                {
-                    Color line_c = cfg->theme->tab_drag_target_bg_accent;
-                    UIBox* line = ui_box_start(&(BoxConfig){
+                    ui_box_end(ui_box_start(&(BoxConfig){
                         .sizing = { fixed(3), fixed(27) },
+                        .color = lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg_accent, st),
                         .flags = BoxFlag_Float,
                         .float_offset = { 0, 0 },
-                    });
-                    {
-                        line->cfg.color = lerp_color((Color){ 0 }, line_c, st);
-                    }
-                    ui_box_end(line);
-                }
+                    }));
 
                 spacer_inner->cfg.color = lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg, st);
 

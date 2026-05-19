@@ -84,6 +84,8 @@ typedef enum
     UI_CURSOR_HAND,
     UI_CURSOR_HORIZONTAL,
     UI_CURSOR_VERTICAL,
+    UI_CURSOR_MOVE,
+    UI_CURSOR_COUNT
 } Cursor;
 
 //
