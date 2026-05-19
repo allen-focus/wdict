@@ -17,11 +17,18 @@ typedef enum
 
 #define PANEL_TAB_NAME_MAX 64
 
+typedef enum
+{
+    DRAG_TYPE_TAB = 0,
+} DragType;
+
 typedef struct
 {
+    u32 drag_type;
     u32 from_panel_id;
     u32 from_tab_id;
     u32 from_window_id;
+    char title[44]; // UTF-8 tab name, null-terminated
 } TabDragPayload;
 
 typedef struct PanelTab PanelTab;

@@ -13,6 +13,7 @@ static u32 s_tab_next_id = 1; /* 0 reserved for none */
 Panel* panel_alloc(void)
 {
     Panel* p = (Panel*)calloc(1, sizeof(Panel));
+    Assert(p);
     p->id = s_panel_next_id++;
     return p;
 }
@@ -101,8 +102,7 @@ PanelTab* panel_tab_declare(Panel* panel, const String name)
 
     /* Create new tab */
     PanelTab* tab = (PanelTab*)calloc(1, sizeof(PanelTab));
-    if (!tab)
-        return NULL;
+    Assert(tab);
     tab->id = s_tab_next_id++;
     memcpy(tab->name, name.data, (size_t)name.len);
     tab->name_len = name.len;

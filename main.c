@@ -75,6 +75,13 @@ typedef struct
 
 typedef struct WindowContext WindowContext;
 
+typedef struct DragPopup
+{
+    HWND window;
+    UIContext ui;
+    Renderer renderer;
+} DragPopup;
+
 typedef struct
 {
     DWriteContext dwrite;
@@ -96,6 +103,9 @@ typedef struct
     u8 cross_drag_payload_buf[DRAG_PAYLOAD_MAX];
     isize cross_drag_payload_size;
     u32 cross_drag_source_window_id;
+
+    /* drag hint popup (heap-allocated — UIContext + Renderer are too large for the stack) */
+    DragPopup* drag_popup;
 } AppShared;
 
 struct WindowContext
@@ -202,13 +212,11 @@ static const Theme s_theme_dark = {
 //
 
 // clang-format off
-static Padding s_padding_big    = { 30, 30, 30, 30 };
 static Padding s_padding_medium = { 20, 20, 20, 20 };
 static Padding s_padding_small  = { 10, 10, 10, 10 };
 
 static f32 s_child_gap_big    = 20;
 static f32 s_child_gap_medium = 10;
-static f32 s_child_gap_small  = 5;
 // clang-format on
 
 //
@@ -288,13 +296,150 @@ static void cross_window_sync_to(AppShared* shared, WindowContext* ctx, const PO
     ctx->ui.drag_payload_size = shared->cross_drag_payload_size;
 }
 
+static LRESULT CALLBACK drag_popup_window_procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    if (message == WM_CLOSE)
+    {
+        ShowWindow(window, SW_HIDE);
+        return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+static void drag_popup_render(AppShared* shared)
+{
+    DragPopup* popup = shared->drag_popup;
+    UIContext* ui = &popup->ui;
+    String title = { 0 };
+
+    if (shared->cross_drag_active && shared->cross_drag_payload_size >= (isize)sizeof(TabDragPayload))
+    {
+        TabDragPayload* pld = (TabDragPayload*)shared->cross_drag_payload_buf;
+        if (pld->drag_type == DRAG_TYPE_TAB && pld->title[0])
+            title = (String){ (u8*)pld->title, (isize)strlen(pld->title) };
+    }
+
+    isize arena_pos = ui_frame_begin(ui);
+    {
+        f32 cw = (f32)ui->client_width;
+        f32 ch = (f32)ui->client_height;
+
+        ui_box({
+            .sizing = { fixed(cw), fixed(ch) },
+            .color = shared->theme.bg_base,
+            .rect_style = { .border_color = shared->theme.border_normal, .border_thickness = 1 },
+            .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+        })
+        {
+            if (title.data)
+                ui_text(title, &(TextConfig){
+                                   .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = 12.f,
+                                   .color = shared->theme.fg_primary,
+                                   .line_height = ch,
+                               });
+        }
+    }
+    ui_frame_end(arena_pos);
+}
+
+static void drag_popup_apply_size(DragPopup* popup, const u32 logical_w, const u32 logical_h, const u32 dpi)
+{
+    if (logical_w == (u32)popup->ui.client_width && logical_h == (u32)popup->ui.client_height && dpi == popup->ui.dpi)
+        return;
+
+    popup->ui.client_width = logical_w;
+    popup->ui.client_height = logical_h;
+    popup->ui.dpi = dpi;
+
+    f32 scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    u32 phys_w = (u32)(logical_w * scale);
+    u32 phys_h = (u32)(logical_h * scale);
+    SetWindowPos(popup->window, NULL, 0, 0, (i32)phys_w, (i32)phys_h,
+                 SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOREDRAW);
+    renderer_resize(&popup->renderer, phys_w, phys_h);
+}
+
+static void drag_popup_update(AppShared* shared)
+{
+    b32 should_show = shared->cross_drag_active && shared->cross_drag_payload_size >= (isize)sizeof(TabDragPayload) &&
+                      ((TabDragPayload*)shared->cross_drag_payload_buf)->drag_type == DRAG_TYPE_TAB;
+
+    if (should_show)
+    {
+        POINT pt;
+        GetCursorPos(&pt);
+
+        TabDragPayload* pld = (TabDragPayload*)shared->cross_drag_payload_buf;
+        String title = { 0 };
+        if (pld->title[0])
+            title = (String){ (u8*)pld->title, (isize)strlen(pld->title) };
+
+        /* Compute popup logical size matching the source tab's box layout:
+           padding = 10 left + 10 right, child_gap = 4, close button ≈ 13 px */
+        f32 text_w = 0.f;
+        if (title.data)
+        {
+            Font* font = &shared->fonts[FONT_INDEX_UI];
+            const f32 font_size = 12.f;
+            u32 dpi = shared->drag_popup ? shared->drag_popup->ui.dpi : GetDpiForSystem();
+            text_w = renderer_get_text_width_for_dpi(NULL, &shared->raster_cache, title, font, font_size, dpi);
+        }
+        u32 logical_w = (u32)(text_w + 10.f + 10.f + 4.f + 13.f + 0.5f);
+        u32 logical_h = 29;
+
+        /* Create the popup on first use */
+        if (!shared->drag_popup)
+        {
+            DragPopup* popup = (DragPopup*)calloc(1, sizeof(DragPopup));
+            Assert(popup);
+            shared->drag_popup = popup;
+
+            u32 dpi = GetDpiForSystem();
+            f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+
+            popup->window =
+                CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, L"UIDragPopup",
+                                L"", WS_POPUP, pt.x + 12, pt.y + 12, (i32)(logical_w * dpi_scale),
+                                (i32)(logical_h * dpi_scale), NULL, NULL, GetModuleHandleW(NULL), shared);
+            Assert(popup->window);
+
+            UIRenderFunc render_fn = {
+                .flush_and_present = renderer_flush_and_present,
+                .on_resize = renderer_resize,
+                .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
+                .get_text_width = renderer_get_text_width_for_dpi,
+                .get_text_height = renderer_get_text_height_for_dpi,
+                .draw_rect = renderer_draw_rect,
+                .draw_text = renderer_draw_text,
+            };
+            ui_init(popup->window, &popup->ui, &popup->renderer, &shared->raster_cache, logical_w, logical_h, dpi,
+                    render_fn);
+            renderer_init(&popup->renderer, &shared->renderer_shared, popup->window);
+        }
+
+        DragPopup* popup = shared->drag_popup;
+
+        /* Reposition to cursor + offset */
+        SetWindowPos(popup->window, HWND_TOPMOST, pt.x + 12, pt.y + 12, 0, 0,
+                     SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+
+        /* DPI may have changed if the popup crossed monitors */
+        u32 dpi = GetDpiForWindow(popup->window);
+
+        /* Apply DPI awared size and render */
+        drag_popup_apply_size(popup, logical_w, logical_h, dpi);
+        drag_popup_render(shared);
+    }
+    else if (shared->drag_popup)
+        ShowWindow(shared->drag_popup->window, SW_HIDE);
+}
+
 static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32 pos_x, i32 pos_y, u32 width,
                                     u32 height, b32 add_default_tab)
 {
-    WindowContext* ctx = (WindowContext*)malloc(sizeof(WindowContext));
-    if (!ctx)
-        return NULL;
-    memset(ctx, 0, sizeof(*ctx));
+    WindowContext* ctx = (WindowContext*)calloc(1, sizeof(WindowContext));
+    Assert(ctx);
     ctx->shared = shared;
     ctx->id = s_window_next_id++;
 
@@ -493,13 +638,6 @@ static ResolvePanelTabResult resolve_panel_and_tab(AppShared* shared, String cmd
     return r;
 }
 
-static Panel* resolve_panel_by_key(AppShared* shared, String cmd_text, String key)
-{
-    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
-    u32 pid = cmd_parse_u32(cmd_text, key, 0);
-    return pid ? find_panel_globally(shared, window_id, pid) : NULL;
-}
-
 static Panel* resolve_target_panel(AppShared* shared, String cmd_text)
 {
     u32 window_id = cmd_parse_u32(cmd_text, str("to_window"), cmd_parse_u32(cmd_text, str("window"), 0));
@@ -686,11 +824,14 @@ static void process_frame(WindowContext* ctx)
             panel_container(ctx, root_rect);
 
             /* Unhandled drop on background: create a new window with the dragged tab */
-            if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed)
+            if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed &&
+                g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
             {
-                TabDragPayload* payload = (TabDragPayload*)ui_accept_drag_payload(sizeof(TabDragPayload));
-                if (payload)
+                TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                if (payload->drag_type == DRAG_TYPE_TAB)
                 {
+                    g_ui_ctx->drag_payload_consumed = True;
+
                     POINT cursor_pt;
                     GetCursorPos(&cursor_pt);
                     char buf[128];
@@ -929,7 +1070,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     POINT screen_pt;
                     GetCursorPos(&screen_pt);
                     HWND under = WindowFromPoint(screen_pt);
-                    if (under && under != window && GetWindowThreadProcessId(under, NULL) == GetCurrentThreadId())
+                    if (under && under != window && under != (shared->drag_popup ? shared->drag_popup->window : NULL) &&
+                        GetWindowThreadProcessId(under, NULL) == GetCurrentThreadId())
                     {
                         ReleaseCapture();
                         SetCapture(under);
@@ -987,7 +1129,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_RBUTTONDOWN:
         {
             ui_ctx->mouse_rclick = True;
-            SetCapture(window);
             return 0;
         }
 
@@ -1001,7 +1142,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_RBUTTONUP:
         {
             ui_ctx->mouse_press = False;
-            ReleaseCapture();
             return 0;
         }
 
@@ -1315,7 +1455,7 @@ i32 WinMainCRTStartup()
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),               str("Move Tab"),                 str(""), cmd_tab_move,               &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),      str("Move Tab To Next Panel"),   str(""), cmd_tab_move_to_panel,      &shared });
     cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"), str("Move Tab To New Window"),   str(""), cmd_tab_move_to_new_window, &shared });
-    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),    str("Move Tab To New Panel"),         str(""), cmd_tab_to_new_panel,    &shared });
+    cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),       str("Move Tab To New Panel"),    str(""), cmd_tab_to_new_panel,       &shared });
 
     /* Bind shortcuts */
     shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },      str("tab.new"));
@@ -1348,6 +1488,14 @@ i32 WinMainCRTStartup()
         .lpszClassName = L"window class",
     };
     RegisterClassW(&wc);
+
+    /* Register drag popup window class */
+    WNDCLASSW dp_wc = {
+        .lpfnWndProc = drag_popup_window_procedure,
+        .hInstance = GetModuleHandleW(NULL),
+        .lpszClassName = L"UIDragPopup",
+    };
+    RegisterClassW(&dp_wc);
 
     /* Initialize font rasterizer */
     dwrite_init(&shared.dwrite);
@@ -1401,6 +1549,11 @@ i32 WinMainCRTStartup()
         /* Snapshot cursor position once — query WindowFromPoint only once */
         POINT cursor_pt;
         GetCursorPos(&cursor_pt);
+
+        /* Position popup BEFORE WindowFromPoint so the cursor is never
+           inside the popup rect (popup sits at cursor+12px offset). */
+        drag_popup_update(&shared);
+
         HWND hwnd_under = shared.cross_drag_active ? WindowFromPoint(cursor_pt) : NULL;
 
         /* Process each window.  Sync drag state to whichever window the
@@ -1452,7 +1605,8 @@ i32 WinMainCRTStartup()
                 {
                     /* Desktop drop: if no window consumed the drag payload,
                        create a new window at the cursor position */
-                    if (shared.cross_drag_payload_size == (isize)sizeof(TabDragPayload))
+                    if (shared.cross_drag_payload_size >= (isize)sizeof(TabDragPayload) &&
+                        ((TabDragPayload*)shared.cross_drag_payload_buf)->drag_type == DRAG_TYPE_TAB)
                     {
                         b32 payload_consumed = False;
                         for (WindowContext* wc = shared.first_window; wc; wc = wc->next)
@@ -1491,6 +1645,18 @@ i32 WinMainCRTStartup()
         WindowContext* next = w->next;
         DestroyWindow(w->window);
         w = next;
+    }
+
+    /* Clean up drag hint popup */
+    if (shared.drag_popup)
+    {
+        DragPopup* popup = shared.drag_popup;
+        ShowWindow(popup->window, SW_HIDE);
+        DestroyWindow(popup->window);
+        ui_deinit(&popup->ui);
+        renderer_deinit(&popup->renderer);
+        free(popup);
+        shared.drag_popup = NULL;
     }
 
     font_unregister(&shared.fonts[FONT_INDEX_UI]);

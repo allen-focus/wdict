@@ -1101,16 +1101,6 @@ void ui_set_drag_payload(void* payload, isize size)
     g_ui_ctx->drag_payload_size = size;
 }
 
-void* ui_accept_drag_payload(isize expected_size)
-{
-    if (!g_ui_ctx->drag_active)
-        return NULL;
-    if (expected_size != g_ui_ctx->drag_payload_size)
-        return NULL;
-    g_ui_ctx->drag_payload_consumed = True;
-    return g_ui_ctx->drag_payload_buf;
-}
-
 //
 // Animation
 //
@@ -1801,10 +1791,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 UIBoxInteractResult r = ui_box_interact(tab_container, tab_key_str);
 
                 /* transition for drop-target highlight */
-                b32 is_drop_target = ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size;
-                b32 own_dragging = ui_dragging(r.flags);
                 if (r.last_box)
-                    update_transition(&r.last_box->hot_t, 15.f, is_drop_target ? 1.f : 0.f);
+                    update_transition(&r.last_box->hot_t, 15.f,
+                                      ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f);
                 f32 drop_t = r.last_box ? r.last_box->hot_t : 0.f;
 
                 /* insertion indicator line */
@@ -1814,10 +1803,10 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                        - Cross-panel / source is to the right → left edge (insert before this tab)
                        - Same panel, source is to the left   → right edge (insert after this tab) */
                     b32 indent_left = True;
-                    if (g_ui_ctx->drag_payload_size == (isize)sizeof(TabDragPayload))
+                    if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                     {
                         TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                        if (peek->from_panel_id == cfg->panel->id)
+                        if (peek->drag_type == DRAG_TYPE_TAB && peek->from_panel_id == cfg->panel->id)
                         {
                             isize dragged_idx = 0;
                             for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
@@ -1840,9 +1829,12 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     ui_box_end(line);
                 }
 
-                if (own_dragging)
+                if (ui_dragging(r.flags))
                 {
-                    TabDragPayload tdp = { cfg->panel->id, tab->id, cfg->window_id };
+                    TabDragPayload tdp = { DRAG_TYPE_TAB, cfg->panel->id, tab->id, cfg->window_id };
+                    isize copy_len = tab->name_len < 43 ? tab->name_len : 43;
+                    memcpy(tdp.title, tab->name, (size_t)copy_len);
+                    tdp.title[copy_len] = '\0';
                     ui_set_drag_payload(&tdp, sizeof(tdp));
                 }
 
@@ -1853,9 +1845,10 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     .direction = LAYOUT_LEFT_TO_RIGHT,
                     .child_gap = 4,
                     .alignment = { ALIGN_START, ALIGN_CENTER },
-                    .color = lerp_color(own_dragging ? cfg->theme->tab_dragging_bg
-                                                     : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg),
-                                        cfg->theme->tab_drag_target_bg, drop_t) });
+                    .color =
+                        lerp_color(ui_dragging(r.flags) ? cfg->theme->tab_dragging_bg
+                                                        : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg),
+                                   cfg->theme->tab_drag_target_bg, drop_t) });
                 {
                     if (ui_lclicked(r.flags))
                     {
@@ -1892,36 +1885,41 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     }
 
                     /* drop: reorder (same panel) or move to panel (cross-panel) */
-                    if (ui_dropped(r.flags))
+                    if (ui_dropped(r.flags) && !g_ui_ctx->drag_payload_consumed &&
+                        g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                     {
-                        TabDragPayload* payload = (TabDragPayload*)ui_accept_drag_payload(sizeof(TabDragPayload));
-                        if (payload && payload->from_tab_id != tab->id)
+                        TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                        if (payload->drag_type == DRAG_TYPE_TAB)
                         {
-                            if (payload->from_panel_id == cfg->panel->id)
+                            g_ui_ctx->drag_payload_consumed = True;
+                            if (payload->from_tab_id != tab->id)
                             {
-                                /* same panel: reorder */
-                                isize dragged_idx = 0;
-                                for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
-                                    if (t->id == payload->from_tab_id)
-                                        break;
-                                i32 delta = (i32)(tab_index - dragged_idx);
+                                if (payload->from_panel_id == cfg->panel->id)
+                                {
+                                    /* same panel: reorder */
+                                    isize dragged_idx = 0;
+                                    for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
+                                        if (t->id == payload->from_tab_id)
+                                            break;
+                                    i32 delta = (i32)(tab_index - dragged_idx);
 
-                                char buf[64];
-                                i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
-                                                   cfg->panel->id, payload->from_tab_id, delta, cfg->window_id);
+                                    char buf[64];
+                                    i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
+                                                       cfg->panel->id, payload->from_tab_id, delta, cfg->window_id);
 
-                                cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
-                            }
-                            else
-                            {
-                                /* cross-panel: insert before this tab */
-                                char buf[128];
-                                i32 len = snprintf(
-                                    buf, sizeof(buf),
-                                    "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d window=%u to_window=%u",
-                                    payload->from_panel_id, payload->from_tab_id, cfg->panel->id, (i32)tab_index,
-                                    payload->from_window_id, cfg->window_id);
-                                cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                                    cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                                }
+                                else
+                                {
+                                    /* cross-panel: insert before this tab */
+                                    char buf[128];
+                                    i32 len = snprintf(buf, sizeof(buf),
+                                                       "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d "
+                                                       "window=%u to_window=%u",
+                                                       payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
+                                                       (i32)tab_index, payload->from_window_id, cfg->window_id);
+                                    cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                                }
                             }
                         }
                     }
@@ -2008,7 +2006,16 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                 if (ui_dropped(dr.flags))
                 {
-                    TabDragPayload* payload = (TabDragPayload*)ui_accept_drag_payload(sizeof(TabDragPayload));
+                    TabDragPayload* payload = NULL;
+                    if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
+                    {
+                        TabDragPayload* p = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                        if (p->drag_type == DRAG_TYPE_TAB)
+                        {
+                            g_ui_ctx->drag_payload_consumed = True;
+                            payload = p;
+                        }
+                    }
                     if (!payload)
                     {
                     }
@@ -2130,10 +2137,11 @@ void ui_panel_end(PanelContext* pf)
 
             /* Skip zones entirely: dragging the last tab of this panel onto itself */
             b32 skip_zone = False;
-            if (g_ui_ctx->drag_payload_size == (isize)sizeof(TabDragPayload))
+            if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
             {
                 TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                if (peek->from_panel_id == pf->panel->id && panel_tab_count(pf->panel) == 1)
+                if (peek->drag_type == DRAG_TYPE_TAB && peek->from_panel_id == pf->panel->id &&
+                    panel_tab_count(pf->panel) == 1)
                     skip_zone = True;
             }
 
@@ -2169,11 +2177,14 @@ void ui_panel_end(PanelContext* pf)
                         }
 
                         /* dropped */
-                        if (ui_dropped(zr.flags) && !g_ui_ctx->drag_payload_consumed)
+                        if (ui_dropped(zr.flags) && !g_ui_ctx->drag_payload_consumed &&
+                            g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                         {
-                            TabDragPayload* pld = (TabDragPayload*)ui_accept_drag_payload(sizeof(TabDragPayload));
-                            if (pld)
+                            TabDragPayload* pld = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                            if (pld->drag_type == DRAG_TYPE_TAB)
                             {
+                                g_ui_ctx->drag_payload_consumed = True;
+
                                 char buf[128];
                                 i32 len = snprintf(buf, sizeof(buf),
                                                    "tab.to_new_panel panel=%u tab=%u to_panel=%u axis=%s side=%s "

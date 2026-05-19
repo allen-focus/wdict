@@ -589,7 +589,6 @@ UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str);
 
 Position ui_box_drag_delta(const UIBox* box);
 void ui_set_drag_payload(void* payload, isize size);
-void* ui_accept_drag_payload(isize expected_size);
 
 void ui_set_desired_cursor(Cursor shape);
 

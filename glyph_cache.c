@@ -64,6 +64,7 @@ static IUnknownVtbl s_font_data_owner_vtbl = { FontDataOwner_QueryInterface, Fon
 FontDataOwner* FontDataOwner_Create(void* data, UINT32 size)
 {
     FontDataOwner* obj = (FontDataOwner*)malloc(sizeof(FontDataOwner));
+    Assert(obj);
     obj->iface.lpVtbl = &s_font_data_owner_vtbl;
     obj->ref_count = 1;
     obj->data = data;
@@ -201,6 +202,7 @@ void font_register_from_resource(DWriteContext* dwrite, wchar_t* resource_name, 
     UINT32 size = (UINT32)SizeofResource(instance, resource_info);
 
     void* heap_data = malloc(size);
+    Assert(heap_data);
     memcpy(heap_data, data, size);
 
     font_register_from_malloc_heap_memory(dwrite, heap_data, size, weight, style, font);
