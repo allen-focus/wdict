@@ -16,7 +16,15 @@
 
 ///
 
+#define UI_IDLE_WAKE_FRAMES 4
+
 UIContext* g_ui_ctx = NULL;
+
+void ui_request_frames(void)
+{
+    if (g_ui_ctx)
+        g_ui_ctx->requested_frames = UI_IDLE_WAKE_FRAMES;
+}
 
 //
 // Box cache
@@ -1124,9 +1132,15 @@ Color lerp_color(const Color a, const Color b, const f32 t)
     return c;
 }
 
-static void approach_f32(f32* value, const f32 target, const f32 speed)
+static b32 approach_f32(f32* value, const f32 target, const f32 speed)
 {
     *value += (target - *value) * min(speed * g_ui_ctx->frame_delta_time, 1.f);
+    b32 is_done = fabs(*value - target) < 0.001f;
+    if (is_done)
+        *value = target;
+    else
+        ui_request_frames();
+    return is_done;
 }
 
 b32 update_transition(f32* transition, const f32 speed, const f32 target)
@@ -1142,6 +1156,8 @@ b32 update_transition(f32* transition, const f32 speed, const f32 target)
         is_done = True;
         *transition = target;
     }
+    else
+        ui_request_frames();
     return is_done;
 }
 
@@ -1480,6 +1496,10 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
     scroll_ctx.last_area->scroll_delta.x = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_x, now);
     scroll_ctx.last_area->scroll_delta.y = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_y, now);
     scroll_ctx.delta = scroll_ctx.last_area->scroll_delta;
+
+    if (fabs(scroll_ctx.last_area->scroll_anim_x.target - scroll_ctx.last_area->scroll_delta.x) > 0.01f ||
+        fabs(scroll_ctx.last_area->scroll_anim_y.target - scroll_ctx.last_area->scroll_delta.y) > 0.01f)
+        ui_request_frames();
 
     /* Prepare content result for _end() */
     scroll_ctx.last_content = find_or_insert_box_with_same_hash_str(content_hash_str);

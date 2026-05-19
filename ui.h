@@ -444,6 +444,9 @@ struct UIContext
     UIBox* drag_source_box;
     b32 drag_payload_consumed;
 
+    /* idle */
+    i32 requested_frames;
+
     /* box cache */
     UIBox* root;
     UIBoxCache box_cache;
@@ -585,6 +588,7 @@ void ui_set_desired_cursor(Cursor shape);
 // transition
 Color lerp_color(const Color a, const Color b, const f32 t);
 b32 update_transition(f32* transition, const f32 speed, const f32 target);
+void ui_request_frames(void);
 
 // scroll area
 ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg);

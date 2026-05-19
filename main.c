@@ -26,6 +26,12 @@
 #define CLIENT_WIDTH  1000
 #define CLIENT_HEIGHT 750
 
+#ifdef TRACY_ENABLE
+#    define IDLE_WAKE_FRAMES 0x7FFFFFFF
+#else
+#    define IDLE_WAKE_FRAMES 4
+#endif
+
 #define MAX_TITLE_LENGTH 64
 #define TEXT_BUFFER_SIZE 1024
 #define MAX_WINDOWS      16
@@ -120,6 +126,7 @@ struct WindowContext
     WindowContext* next;
     u32 id;
 
+    /* panel */
     Panel* root_panel;
     Panel* hovered_panel;
 
@@ -290,8 +297,17 @@ static WindowContext* find_window_by_id(AppShared* shared, u32 id)
     return NULL;
 }
 
+static b32 any_window_needs_frames(const AppShared* shared)
+{
+    for (const WindowContext* w = shared->first_window; w; w = w->next)
+        if (w->ui.requested_frames > 0)
+            return True;
+    return False;
+}
+
 static void cross_window_sync_to(AppShared* shared, WindowContext* ctx, const POINT cursor_pt)
 {
+    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
     ctx->ui.mouse_press = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
     ctx->ui.drag_active = True;
     memcpy(ctx->ui.drag_payload_buf, shared->cross_drag_payload_buf, shared->cross_drag_payload_size);
@@ -503,6 +519,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, dpi, render_fn);
     ctx->ui.clipboard_copy = win32_clipboard_copy;
     ctx->ui.clipboard_paste = win32_clipboard_paste;
+    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
 
     /* Init per-window renderer */
     renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
@@ -812,6 +829,9 @@ static void panel_container(WindowContext* ctx, const Rect root_rect);
 
 static void process_frame(WindowContext* ctx)
 {
+    if (IsIconic(ctx->window) || !IsWindowVisible(ctx->window))
+        return;
+
     AppShared* shared = ctx->shared;
     UIContext* ui_ctx = &ctx->ui;
     const Theme* theme = &shared->theme;
@@ -1066,6 +1086,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     {
         case WM_MOUSEMOVE:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+
             f32 dpi_scale = (f32)ui_ctx->dpi / USER_DEFAULT_SCREEN_DPI;
             Position mouse_pos_backup = ui_ctx->mouse_pos;
             ui_ctx->mouse_pos.x = GET_X_LPARAM(lparam) / dpi_scale;
@@ -1112,18 +1134,21 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_MOUSEHWHEEL:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->mouse_scroll_delta.x += GET_WHEEL_DELTA_WPARAM(wparam) / 10;
             return 0;
         }
 
         case WM_MOUSEWHEEL:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->mouse_scroll_delta.y += GET_WHEEL_DELTA_WPARAM(wparam) / -10;
             return 0;
         }
 
         case WM_LBUTTONDOWN:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->mouse_lclick = True;
             ui_ctx->mouse_press = True;
             f64 now = ui_ctx->current_time;
@@ -1147,12 +1172,14 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_RBUTTONDOWN:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->mouse_rclick = True;
             return 0;
         }
 
         case WM_LBUTTONUP:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->mouse_press = False;
             ReleaseCapture();
             return 0;
@@ -1160,6 +1187,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_RBUTTONUP:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->mouse_press = False;
             return 0;
         }
@@ -1230,6 +1258,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_KEYDOWN:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             b32 ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             b32 shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
             b32 alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
@@ -1361,6 +1390,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_CHAR:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             wchar_t c = (wchar_t)wparam;
             u32 codepoint = 0;
             if (is_high_surrogate(c))
@@ -1384,6 +1414,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_SIZE:
         {
+            if (wparam == SIZE_MINIMIZED)
+                return 0;
+
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+
             f32 dpi_scale = (f32)ui_ctx->dpi / USER_DEFAULT_SCREEN_DPI;
             u32 physical_client_width = LOWORD(lparam);
             u32 physical_client_height = HIWORD(lparam);
@@ -1398,6 +1433,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_DPICHANGED:
         {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->dpi = GetDpiForWindow(window);
             // Per-window atlas recreated; shared raster cache NOT reset — glyphs at
             // old DPI remain available for other windows while new DPI entries accumulate.
@@ -1539,19 +1575,44 @@ i32 WinMainCRTStartup()
                                 &shared.fonts[FONT_INDEX_ICON]);
 
     /* Create first window */
-    create_window(&shared, L"App Title", CW_USEDEFAULT, CW_USEDEFAULT, CLIENT_WIDTH, CLIENT_HEIGHT, True);
+    WindowContext* first =
+        create_window(&shared, L"App Title", CW_USEDEFAULT, CW_USEDEFAULT, CLIENT_WIDTH, CLIENT_HEIGHT, True);
+    first->ui.requested_frames = IDLE_WAKE_FRAMES;
 
     /* Run message loop */
     MSG message;
     while (True)
     {
-        if (PeekMessageW(&message, 0, 0, 0, PM_REMOVE))
+        if (any_window_needs_frames(&shared) || shared.cross_drag_active)
         {
-            if (message.message == WM_QUIT)
+            /* Poll: drain all pending messages without blocking */
+            if (PeekMessageW(&message, 0, 0, 0, PM_REMOVE))
+            {
+                if (message.message == WM_QUIT)
+                    break;
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+                continue;
+            }
+        }
+        else
+        {
+            /* Idle: block until any message arrives */
+            if (!GetMessageW(&message, 0, 0, 0))
                 break;
             TranslateMessage(&message);
             DispatchMessageW(&message);
-            continue;
+
+            /* Drain any remaining messages */
+            while (PeekMessageW(&message, 0, 0, 0, PM_REMOVE))
+            {
+                if (message.message == WM_QUIT)
+                    break;
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            if (message.message == WM_QUIT)
+                break;
         }
 
         TracyCFrameMark;
@@ -1566,7 +1627,18 @@ i32 WinMainCRTStartup()
                 OutputDebugStringA(buf);
         }
 #endif
-        cmd_queue_execute_all(&shared.cmd_queue, &shared.cmd_registry);
+        { /* Register command count before execution. If there are commands, force at least one frame on all
+             windows to render the result (essential for cross-window drops to render on the target window). */
+            u64 command_count = shared.cmd_queue.count;
+            cmd_queue_execute_all(&shared.cmd_queue, &shared.cmd_registry);
+            if (command_count > 0)
+                for (WindowContext* wf = shared.first_window; wf; wf = wf->next)
+                    if (wf->ui.requested_frames <= 0)
+                        wf->ui.requested_frames = 1;
+        }
+
+        if (!any_window_needs_frames(&shared))
+            continue;
 
         /* Snapshot cursor position once — query WindowFromPoint only once */
         POINT cursor_pt;
@@ -1592,7 +1664,12 @@ i32 WinMainCRTStartup()
                     w->ui.drag_active = False;
             }
 
-            process_frame(w);
+            if (w->ui.requested_frames > 0)
+            {
+                process_frame(w);
+                if (w->ui.requested_frames > 0)
+                    w->ui.requested_frames--;
+            }
         }
 
         /* Force cursor update during cross-window drag: WM_SETCURSOR
