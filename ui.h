@@ -4,18 +4,6 @@
 #include "glyph_cache.h"
 #include "panel.h"
 
-// clang-format off
-#define ui_box(...)                                                                                                    \
-    for (UIBox* box = ui_box_start(&(BoxConfig)__VA_ARGS__);                                                           \
-         box != NULL;                                                                                                  \
-         ui_box_end(box), box = NULL)
-
-#define ui_scrollable_area(...)                                                                                        \
-    for (ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig)__VA_ARGS__);                      \
-         scroll_ctx.area != NULL;                                                                                      \
-         ui_scrollable_area_end(scroll_ctx), scroll_ctx.area = NULL)
-// clang-format on
-
 // NOTE: In FIT mode, min/max constraints act as bounds on content wrapping:
 // They define the range within which content can shrink or expand due to wrapping,
 // but do not override the content's natural size if it falls outside this range.
@@ -582,7 +570,7 @@ void ui_deinit(UIContext* ui_ctx);
 isize ui_frame_begin(UIContext* ui_ctx);
 void ui_frame_end(isize arena_pos_backup);
 
-UIBox* ui_box_start(const BoxConfig* cfg);
+UIBox* ui_box_begin(const BoxConfig* cfg);
 void ui_box_end(UIBox* box);
 UIBox* ui_text(const String text, const TextConfig* text_cfg);
 
@@ -599,14 +587,10 @@ Color lerp_color(const Color a, const Color b, const f32 t);
 b32 update_transition(f32* transition, const f32 speed, const f32 target);
 
 // scroll area
-ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* cfg);
+ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg);
 void ui_scrollable_area_end(ScrollContext scroll_ctx);
 
 // panel
-#define ui_panel(...)                                                                                                  \
-    for (PanelContext __pf = ui_panel_begin(&(PanelConfig)__VA_ARGS__); __pf.panel != NULL;                            \
-         ui_panel_end(&__pf), __pf.panel = NULL)
-
 String panel_str_impl(u8* buf, const char* text_with_hash_str, u32 panel_id);
 #define panel_str(fmt, id) panel_str_impl((u8[HASH_STR_MAX_LENGTH]){ 0 }, fmt, id)
 

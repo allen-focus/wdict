@@ -208,7 +208,7 @@ static b32 axis_has_grow_attribute(const SizingMode mode)
     return mode == SIZING_MODE_GROW || mode == SIZING_MODE_FIT_GROW;
 }
 
-UIBox* ui_box_start(const BoxConfig* cfg)
+UIBox* ui_box_begin(const BoxConfig* cfg)
 {
     Assert(g_ui_ctx->box_stack.depth <= BOX_STACK_CAPACITY);
     Assert(g_ui_ctx->box_queue.count <= BOX_QUEUE_CAPACITY);
@@ -267,7 +267,7 @@ UIBox* ui_text(const String text, const TextConfig* text_cfg)
     BoxConfig box_cfg = { .sizing = { .width = { { fixed_width, fixed_width }, SIZING_MODE_FIXED },
                                       .height = { { line_height, line_height }, SIZING_MODE_FIXED } } };
 
-    UIBox* text_box = ui_box_start(&box_cfg);
+    UIBox* text_box = ui_box_begin(&box_cfg);
     {
         text_box->type = BOX_TYPE_TEXT;
 
@@ -1420,24 +1420,24 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     /* Create scrollbar */
     // clang-format off
     ScrollBarLayout L = make_scrollbar_layout(is_horizontal, thickness, padding_end, bar_thickness_max, thumb_size, scroll_ctx.thumb_delta);
-    UIBox* bar_container = ui_box_start(&(BoxConfig){ .sizing = L.container_sizing, .flags = BoxFlag_Float, .float_offset = L.float_offset, .direction = L.padding_direction });
+    UIBox* bar_container = ui_box_begin(&(BoxConfig){ .sizing = L.container_sizing, .flags = BoxFlag_Float, .float_offset = L.float_offset, .direction = L.padding_direction });
     {
         // `padding-start` and `padding-end` is used to do the transition of scrollbar expanding
-        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.padding_start_sizing, .alignment = { ALIGN_START, ALIGN_CENTER } }));
-        UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = L.inner_container_sizing, .direction = L.spacer_direction });
+        ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = L.padding_start_sizing, .alignment = { ALIGN_START, ALIGN_CENTER } }));
+        UIBox* inner_container = ui_box_begin(&(BoxConfig){ .sizing = L.inner_container_sizing, .direction = L.spacer_direction });
         {
-            ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.spacer_sizing }));
-            UIBox* track = ui_box_start(&(BoxConfig){
+            ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = L.spacer_sizing }));
+            UIBox* track = ui_box_begin(&(BoxConfig){
                 .sizing = L.track_sizing,
                 .color = track_color,
                 .rect_style = { .corner_radius = thickness / 2 }
             });
             {
-                UIBox* thumb_container = ui_box_start(&(BoxConfig){
+                UIBox* thumb_container = ui_box_begin(&(BoxConfig){
                     .sizing = L.thumb_container_sizing,
                     .child_offset = L.thumb_container_child_offset
                 });
-                UIBox* thumb = ui_box_start(&(BoxConfig){
+                UIBox* thumb = ui_box_begin(&(BoxConfig){
                     .sizing = L.thumb_sizing,
                     .color = thumb_color,
                     .rect_style = { .corner_radius = thickness / 2 }
@@ -1447,17 +1447,17 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                 ui_box_end(thumb_container);
             }
             ui_box_end(track);
-            ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.spacer_sizing }));
+            ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = L.spacer_sizing }));
         }
         ui_box_end(inner_container);
-        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = L.padding_end_sizing, .alignment = { ALIGN_END, ALIGN_CENTER } }));
+        ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = L.padding_end_sizing, .alignment = { ALIGN_END, ALIGN_CENTER } }));
     }
     ui_box_end(bar_container);
     update_box_key(bar_container, bar_hash_str);
     // clang-format on
 }
 
-ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* cfg)
+ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
 {
     f64 now = g_ui_ctx->current_time;
     ScrollContext scroll_ctx = { 0 };
@@ -1467,7 +1467,7 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* cfg)
 
     /* Create area box */
     scroll_ctx.area =
-        ui_box_start(&(BoxConfig){ .sizing = cfg->sizing, .color = cfg->bg_color, .flags = BoxFlag_Clip });
+        ui_box_begin(&(BoxConfig){ .sizing = cfg->sizing, .color = cfg->bg_color, .flags = BoxFlag_Clip });
 
     /* Handle interaction and animation */
     UIBoxInteractResult result = ui_box_interact(scroll_ctx.area, cfg->hash_str);
@@ -1486,9 +1486,9 @@ ScrollContext ui_scrollable_area_start(const ScrollableAreaConfig* cfg)
     Assert(scroll_ctx.last_content);
 
     /* Create container & inner container & content box */
-    ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
-    ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } }); // Inner Container
-    UIBox* content = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
+    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
+    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) } }); // Inner Container
+    UIBox* content = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
                                                 .padding = cfg->padding,
                                                 .child_gap = cfg->child_gap,
                                                 .direction = cfg->direction,
@@ -1646,7 +1646,7 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
             bound_h = PANEL_BOUNDARY;
         }
 
-        UIBox* box = ui_box_start(&(BoxConfig){
+        UIBox* box = ui_box_begin(&(BoxConfig){
             .sizing = { fixed(bound_w), fixed(bound_h) },
             .flags = BoxFlag_Float,
             .float_offset = bound_pos,
@@ -1711,23 +1711,23 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
             if (p->split_axis == Axis2_X)
             {
 
-                UIBox* line_container = ui_box_start(
+                UIBox* line_container = ui_box_begin(
                     &(BoxConfig){ .sizing = { grow({}), grow({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
                 {
-                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = virtual_line_color }));
-                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = line_color }));
-                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = virtual_line_color }));
+                    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = virtual_line_color }));
+                    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = line_color }));
+                    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(1), fixed(bound_h) }, .color = virtual_line_color }));
                 }
                 ui_box_end(line_container);
             }
             else
             {
-                UIBox* line_container = ui_box_start(
+                UIBox* line_container = ui_box_begin(
                     &(BoxConfig){ .sizing = { grow({}), grow({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER }, .direction = LAYOUT_TOP_TO_BOTTOM });
                 {
-                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = virtual_line_color }));
-                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = line_color }));
-                    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = virtual_line_color }));
+                    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = virtual_line_color }));
+                    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = line_color }));
+                    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(bound_w), fixed(1) }, .color = virtual_line_color }));
                 }
                 ui_box_end(line_container);
             }
@@ -1739,8 +1739,11 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
 
 PanelContext ui_panel_begin(const PanelConfig* cfg)
 {
+    /* This function only accepts leaf nodes.
+       Internal nodes (those with children in the binary-tree encoding of a multi-tree)
+       are not real UI containers and should never call ui_panel_begin() */
     if (cfg->panel->child_a)
-        return (PanelContext){ 0 };
+        Assert(0);
 
     /* Mark all existing tabs as declared so they survive cleanup */
     for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next)
@@ -1752,7 +1755,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
     f32 iw = max(0.f, inner.xmax - inner.xmin);
     f32 ih = max(0.f, inner.ymax - inner.ymin);
 
-    UIBox* outer_box = ui_box_start(&(BoxConfig){
+    UIBox* outer_box = ui_box_begin(&(BoxConfig){
         .sizing = { fixed(iw), fixed(ih) },
         .direction = LAYOUT_TOP_TO_BOTTOM,
         .flags = BoxFlag_Float,
@@ -1766,7 +1769,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
     }
 
     /* tab bar */
-    UIBox* tab_bar = ui_box_start(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+    UIBox* tab_bar = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
                                                 .color = cfg->theme->tab_bar,
                                                 .alignment = { ALIGN_START, ALIGN_CENTER } });
     {
@@ -1783,7 +1786,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             String tab_key_str = { tab_key, tab_key_len };
 
             UIBox* tab_container =
-                ui_box_start(&(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+                ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
             {
                 /* tab interaction */
                 UIBoxInteractResult r = ui_box_interact(tab_container, tab_key_str);
@@ -1816,7 +1819,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     f32 line_x = indent_left ? 0.f : (r.last_box->size.width - 3.f);
 
                     Color line_c = cfg->theme->tab_drag_target_bg_accent;
-                    UIBox* line = ui_box_start(&(BoxConfig){
+                    UIBox* line = ui_box_begin(&(BoxConfig){
                         .sizing = { fixed(3), fixed(27) },
                         .flags = BoxFlag_Float,
                         .float_offset = { line_x, 0 },
@@ -1838,7 +1841,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 }
 
                 /* tab title & close button */
-                UIBox* box = ui_box_start(&(BoxConfig){
+                UIBox* box = ui_box_begin(&(BoxConfig){
                     .sizing = { fit({}), fit({}) },
                     .padding = { 5, 10, 5, 10 },
                     .direction = LAYOUT_LEFT_TO_RIGHT,
@@ -1926,7 +1929,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 ui_box_end(box);
 
                 /* underline */
-                ui_box_end(ui_box_start(&(BoxConfig){
+                ui_box_end(ui_box_begin(&(BoxConfig){
                     .sizing = { grow({}), fixed(1) },
                     .color = (ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size)
                                  ? cfg->theme->tab_splitter
@@ -1938,15 +1941,15 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
             /* tab splitter */
             ui_box_end(
-                ui_box_start(&(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_splitter }));
+                ui_box_begin(&(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_splitter }));
         }
 
         /* new tab button */
         UIBox* new_button_container =
-            ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+            ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
         {
 
-            UIBox* inner_container = ui_box_start(&(BoxConfig){ .sizing = { fit({}), grow({}) },
+            UIBox* inner_container = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) },
                                                                 .padding = { 0, 3, 0, 3 },
                                                                 .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
             {
@@ -1967,15 +1970,15 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
             /* underline */
             ui_box_end(
-                ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+                ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
         }
         ui_box_end(new_button_container);
 
         /* spacer (also serves as tab bar drop target for appending tabs) */
         UIBox* spacer_container =
-            ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+            ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
         {
-            UIBox* spacer_inner = ui_box_start(&(BoxConfig){ .sizing = { grow({}), grow({}) } });
+            UIBox* spacer_inner = ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) } });
             {
                 u8 drop_key[HASH_STR_MAX_LENGTH];
                 i32 drop_len = snprintf((char*)drop_key, sizeof(drop_key), "###panel_drop_%u", cfg->panel->id);
@@ -1988,7 +1991,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                 /* insertion indicator line at spacer left edge (append position) */
                 if (st > 0.01f)
-                    ui_box_end(ui_box_start(&(BoxConfig){
+                    ui_box_end(ui_box_begin(&(BoxConfig){
                         .sizing = { fixed(3), fixed(27) },
                         .color = lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg_accent, st),
                         .flags = BoxFlag_Float,
@@ -2046,7 +2049,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
             /* underline */
             ui_box_end(
-                ui_box_start(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+                ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
         }
         ui_box_end(spacer_container);
     }
@@ -2056,7 +2059,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
     u8 sa_key[HASH_STR_MAX_LENGTH];
     i32 sa_len = snprintf((char*)sa_key, sizeof(sa_key), "panel_scroll_%u", cfg->panel->id);
     ScrollContext scroll_ctx =
-        ui_scrollable_area_start(&(ScrollableAreaConfig){ .hash_str = { sa_key, sa_len },
+        ui_scrollable_area_begin(&(ScrollableAreaConfig){ .hash_str = { sa_key, sa_len },
                                                           .sizing = { grow({}), grow({}) },
                                                           .bg_color = cfg->theme->tab_active_bg,
                                                           .padding = cfg->padding,
@@ -2097,7 +2100,7 @@ void ui_panel_end(PanelContext* pf)
         f32 usable_h = pf->panel_h - tab_bar_h;
         f32 pad = 12.f;
 
-        UIBox* container = ui_box_start(&(BoxConfig){ .sizing = { fixed(pf->panel_w), fixed(pf->panel_h) },
+        UIBox* container = ui_box_begin(&(BoxConfig){ .sizing = { fixed(pf->panel_w), fixed(pf->panel_h) },
                                                       .flags = BoxFlag_Float,
                                                       .float_offset = { 0, -usable_h },
                                                       .padding = { pad, pad, pad, pad } });
@@ -2143,7 +2146,7 @@ void ui_panel_end(PanelContext* pf)
                 {
                     u8 key[HASH_STR_MAX_LENGTH];
                     i32 kl = snprintf((char*)key, sizeof(key), "###dock_%s_%u", sides[zi], pf->panel->id);
-                    UIBox* z = ui_box_start(&(BoxConfig){
+                    UIBox* z = ui_box_begin(&(BoxConfig){
                         .sizing = sizings[zi],
                         .rect_style = { .corner_radius = 12 },
                         .flags = BoxFlag_Float,
@@ -2194,9 +2197,7 @@ void ui_panel_end(PanelContext* pf)
         }
         ui_box_end(container);
     }
-
     ui_box_end(pf->outer_box);
-    pf->panel = NULL;
 }
 
 //
@@ -2217,7 +2218,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
 
     /* Create button box */
-    UIBox* box = ui_box_start(&(BoxConfig){ .sizing = sizing,
+    UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = sizing,
                                             .rect_style = { .corner_radius = 4 },
                                             .padding = padding,
                                             .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
@@ -2274,7 +2275,7 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     f32 shadow_offset_x = 0.f;
 
     /* Create checkbox */
-    UIBox* container = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT * 2), fixed(CHECKBOX_HEIGHT) },
+    UIBox* container = ui_box_begin(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT * 2), fixed(CHECKBOX_HEIGHT) },
                                                   .rect_style = { .corner_radius = CHECKBOX_HEIGHT / 2 },
                                                   .padding = { CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD, CHECKBOX_PAD },
                                                   .alignment = { ALIGN_START, ALIGN_CENTER } });
@@ -2301,15 +2302,15 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     container->cfg.color = bg_color_transition;
     {
         /* left padding */
-        UIBox* pad_left = ui_box_start(
+        UIBox* pad_left = ui_box_begin(
             &(BoxConfig){ .sizing = { fixed(pad_width), grow({}) }, .alignment = { ALIGN_START, ALIGN_CENTER } });
-        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(5), grow({}) } }));
+        ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(5), grow({}) } }));
         ui_text(str(ICON_FONT_UTF8_OK), &(TextConfig){ .font = font, .font_size = 9, .color = status_color_ok });
         ui_box_end(pad_left);
 
         /* switch button */
         f32 switch_button_width = CHECKBOX_HEIGHT - CHECKBOX_PAD * 2;
-        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(switch_button_width), fixed(switch_button_width) },
+        ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(switch_button_width), fixed(switch_button_width) },
                                               .color = switch_button_color,
                                               .rect_style = { .corner_radius = switch_button_width / 2,
                                                               .shadow_color = shadow_color,
@@ -2317,11 +2318,11 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
                                                               .shadow_sigma = 1.2f } }));
 
         /* right padding */
-        UIBox* pad_right = ui_box_start(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },
+        UIBox* pad_right = ui_box_begin(&(BoxConfig){ .sizing = { fixed(CHECKBOX_HEIGHT - pad_width), grow({}) },
                                                       .alignment = { ALIGN_END, ALIGN_CENTER } });
         ui_text(str(ICON_FONT_UTF8_CANCEL),
                 &(TextConfig){ .font = font, .font_size = 9, .color = status_color_cancel });
-        ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(6), grow({}) } }));
+        ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(6), grow({}) } }));
         ui_box_end(pad_right);
     }
     ui_box_end(container);
@@ -2426,7 +2427,7 @@ static void cursor_bar(const f32 parent_height, const Padding parent_padding, co
 {
     f32 bar_height = parent_height - CURSORBAR_PADDING * 2;
     Position float_offset = { x_offset, -parent_padding.top + CURSORBAR_PADDING };
-    ui_box_end(ui_box_start(&(BoxConfig){ .sizing = { fixed(2), fixed(bar_height) },
+    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(2), fixed(bar_height) },
                                           .color = color,
                                           .flags = BoxFlag_Float,
                                           .float_offset = float_offset }));
@@ -2663,7 +2664,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 
     /* Create text field box */
     UIBoxInteractResult result = { 0 };
-    UIBox* box = ui_box_start(&(BoxConfig){
+    UIBox* box = ui_box_begin(&(BoxConfig){
         .sizing = { sizing_x, text_container_height },
         .rect_style = { .corner_radius = 4, .border_thickness = 2 },
         .color = bg_color,
@@ -2722,7 +2723,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             b32 cursor_moved = state->cursor != cursor_before;
 
-            ScrollContext scroll_ctx = ui_scrollable_area_start(&(ScrollableAreaConfig){
+            ScrollContext scroll_ctx = ui_scrollable_area_begin(&(ScrollableAreaConfig){
                 .hash_str = str_concat(&g_ui_ctx->arena, text_hash.hash_str, str(" (scroll area)")),
                 .sizing = { grow({}), grow({}) },
                 .thumb_color = thumb_color,
@@ -2743,7 +2744,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 f32 inner_width = text_width + padding.left + padding.right;
 
                 UIBox* inner =
-                    ui_box_start(&(BoxConfig){ .sizing = { fixed(inner_width), fit_grow({}) }, .padding = padding });
+                    ui_box_begin(&(BoxConfig){ .sizing = { fixed(inner_width), fit_grow({}) }, .padding = padding });
                 {
                     b32 has_selection = is_focused && state->cursor != state->mark;
                     isize sel_start = state->cursor < state->mark ? state->cursor : state->mark;
@@ -2785,7 +2786,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                                 corners[1] = fade;
                                 corners[3] = fade;
                             }
-                            ui_box_end(ui_box_start(&(BoxConfig){
+                            ui_box_end(ui_box_begin(&(BoxConfig){
                                 .sizing = { fixed(t_width), fixed(trail_h) },
                                 .color = base,
                                 .rect_style = { .corner_colors = { corners[0], corners[1], corners[2], corners[3] } },
@@ -2807,7 +2808,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         if (comp_w > 0.f)
                         {
                             f32 underline_y = font_size;
-                            ui_box_end(ui_box_start(&(BoxConfig){
+                            ui_box_end(ui_box_begin(&(BoxConfig){
                                 .sizing = { fixed(comp_w), fixed(1) },
                                 .color = text_color,
                                 .flags = BoxFlag_Float,
@@ -2836,7 +2837,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             Color sel_color = selection_color;
                             Color copy_flash = selection_flash_color;
                             sel_color = lerp_color(sel_color, copy_flash, state->copy_t);
-                            ui_box_end(ui_box_start(&(BoxConfig){
+                            ui_box_end(ui_box_begin(&(BoxConfig){
                                 .sizing = { fixed(sel_width), fixed(sel_height) },
                                 .color = sel_color,
                                 .rect_style = { .corner_radius = 2 },
