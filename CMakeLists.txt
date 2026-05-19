@@ -49,7 +49,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE
     /W3 /WX /MP /utf-8
     /D_CRT_SECURE_NO_WARNINGS
     $<$<CONFIG:Debug>:/Od /Zi /RTC1>
-    $<$<CONFIG:Profile>:/O2 /Zi /DNDEBUG /DTRACY_ENABLE>
+    $<$<CONFIG:Profile>:/O2 /Zi /DNDEBUG /DTRACY_ENABLE /DTRACY_SUBSYSTEMS=0x7FF>
     $<$<CONFIG:Release>:/O2 /GS- /DNDEBUG>
 )
 

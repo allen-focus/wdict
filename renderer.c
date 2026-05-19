@@ -18,6 +18,7 @@
 #include "utils.h"
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
+#include "tracy_config.h" // IWYU pragma: keep
 
 ///
 
@@ -336,11 +337,13 @@ void renderer_recreate_glyph_atlas_texture(Renderer* renderer)
 
 static void map_vertex_buffer(Renderer* renderer)
 {
+    TracyCZoneNC(ctx_map_vb, "MapVertexBuf", TracyColor_Render, TRACY_SUBSYSTEMS & TracySys_Render);
     D3D11_MAPPED_SUBRESOURCE mapped;
     ID3D11DeviceContext_Map(renderer->shared->context, (ID3D11Resource*)renderer->vertex_buffer, 0,
                             D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     memcpy(mapped.pData, renderer->vertex_cache.data, sizeof(Vertex) * renderer->vertex_cache.count);
     ID3D11DeviceContext_Unmap(renderer->shared->context, (ID3D11Resource*)renderer->vertex_buffer, 0);
+    TracyCZoneEnd(ctx_map_vb);
 }
 
 static void map_clip_rects_to_cbuffer(Renderer* renderer)
@@ -381,7 +384,7 @@ void renderer_wait_for_last_submitted_frame(Renderer* renderer)
 
 void renderer_flush_and_present(Renderer* renderer, const u32 client_width, const u32 client_height)
 {
-    TracyCZone(ctx, 1);
+    TracyCZoneNC(ctx_flush, "FlushPresent", TracyColor_Render, TRACY_SUBSYSTEMS & TracySys_Render);
 
     /* Map buffer */
     map_vertex_buffer(renderer);
@@ -439,7 +442,7 @@ void renderer_flush_and_present(Renderer* renderer, const u32 client_width, cons
     renderer->clip_cache.current_index = 0;
     renderer->clip_cache.count = 0;
 
-    TracyCZoneEnd(ctx);
+    TracyCZoneEnd(ctx_flush);
 }
 
 //
@@ -448,7 +451,7 @@ void renderer_flush_and_present(Renderer* renderer, const u32 client_width, cons
 
 void renderer_resize(Renderer* renderer, const u32 client_width, const u32 client_height)
 {
-    TracyCZone(ctx, 1);
+    TracyCZoneNC(ctx_resize, "Resize", TracyColor_Render, TRACY_SUBSYSTEMS & TracySys_Render);
 
     /* Release old swapchain buffers */
     ID3D11DeviceContext_OMSetRenderTargets(renderer->shared->context, 0, NULL, NULL);
@@ -470,7 +473,7 @@ void renderer_resize(Renderer* renderer, const u32 client_width, const u32 clien
                                         &renderer->render_target_view);
     ID3D11Texture2D_Release(texture);
 
-    TracyCZoneEnd(ctx);
+    TracyCZoneEnd(ctx_resize);
 }
 
 //
@@ -603,20 +606,29 @@ static void renderer_push_rect(Renderer* renderer, const Rect target_rect, const
 // If already present, returns the UV. Otherwise packs, inserts, and uploads.
 static AtlasGlyphPosition renderer_ensure_glyph_in_atlas(Renderer* renderer, GlyphRasterInfo* info, const GlyphKey* key)
 {
+    TracyCZoneNC(ctx_gal, "GlyphAtlas", TracyColor_Glyph, TRACY_SUBSYSTEMS & TracySys_Glyph);
     AtlasGlyphFindResult find_result = atlas_glyph_map_find(&renderer->atlas_map, key);
+    AtlasGlyphPosition pos;
     if (find_result.found)
-        return (AtlasGlyphPosition){ find_result.atlas_x, find_result.atlas_y };
+    {
+        pos = (AtlasGlyphPosition){ find_result.atlas_x, find_result.atlas_y };
+        goto end;
+    }
 
     /* Not in this window's atlas yet — pack it and upload */
-    AtlasGlyphPosition pos = atlas_insert_glyph(&renderer->cpu_atlas, info->w, info->h, info->bitmap);
+    pos = atlas_insert_glyph(&renderer->cpu_atlas, info->w, info->h, info->bitmap);
     atlas_glyph_map_insert(&renderer->atlas_map, key, pos.atlas_x, pos.atlas_y);
     renderer_upload_glyph(renderer, pos.atlas_x, pos.atlas_y, info->w, info->h);
+
+end:
+    TracyCZoneEnd(ctx_gal);
     return pos;
 }
 
 f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphRasterCache* raster_cache, const String text,
                                     const Font* font, const f32 font_size, const u32 dpi)
 {
+    TracyCZoneNC(ctx_tw, "TextWidth", TracyColor_Text, TRACY_SUBSYSTEMS & TracySys_Text);
     f32 text_width = 0;
     const byte* p = text.data;
     while (p - text.data < text.len)
@@ -631,6 +643,7 @@ f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphRasterCache* raster
         text_width += result.info->xadvance;
     }
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    TracyCZoneEnd(ctx_tw);
     return text_width / dpi_scale;
 }
 
@@ -653,6 +666,7 @@ f32 renderer_get_text_height_for_dpi(Renderer* renderer, GlyphRasterCache* raste
 
 void renderer_draw_rect(Renderer* renderer, const Rect rect, const Color color, const RectStyle style, const Rect* clip)
 {
+    TracyCZoneNC(ctx_dr, "DrawRect", TracyColor_Render, TRACY_SUBSYSTEMS & TracySys_Render);
     /* Calculate expanded rect */
     Rect expanded_rect = rect;
     if (style.shadow_sigma)
@@ -672,11 +686,13 @@ void renderer_draw_rect(Renderer* renderer, const Rect rect, const Color color, 
         .ymax = WHITE_GLYPH_Y + WHITE_GLYPH_H,
     };
     renderer_push_rect(renderer, expanded_rect, white_rect, color, style, clip);
+    TracyCZoneEnd(ctx_dr);
 }
 
 void renderer_draw_text(Renderer* renderer, GlyphRasterCache* raster_cache, String text, const Position position,
                         const Color color, const Font* font, const f32 font_size, const u32 dpi, const Rect* clip)
 {
+    TracyCZoneNC(ctx_dt, "DrawText", TracyColor_Render, TRACY_SUBSYSTEMS & TracySys_Render);
     f32 next_position_x = position.x;
 
     /* Get physical pixel position of y */
@@ -725,4 +741,5 @@ void renderer_draw_text(Renderer* renderer, GlyphRasterCache* raster_cache, Stri
         /* Update x position for next char */
         next_position_x += (f32)result.info->xadvance;
     }
+    TracyCZoneEnd(ctx_dt);
 }

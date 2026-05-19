@@ -20,6 +20,7 @@
 #include <windowsx.h>
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
+#include "tracy_config.h" // IWYU pragma: keep
 
 ///
 
@@ -42,6 +43,7 @@ typedef enum
     FONT_INDEX_UI,
     FONT_INDEX_ZH,
     FONT_INDEX_MONO,
+    FONT_INDEX_MDL,
     FONT_INDEX_ICON,
     FONT_CAPACITY
 } FontIndex;
@@ -387,11 +389,13 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
 
 static void cross_window_sync_to(AppShared* shared, WindowContext* ctx, const POINT cursor_pt)
 {
+    TracyCZoneNC(ctx_cws, "CrossWindowSync", TracyColor_Drag, TRACY_SUBSYSTEMS & TracySys_Drag);
     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
     ctx->ui.mouse_press = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
     ctx->ui.drag_active = True;
     memcpy(ctx->ui.drag_payload_buf, shared->cross_drag_payload_buf, shared->cross_drag_payload_size);
     ctx->ui.drag_payload_size = shared->cross_drag_payload_size;
+    TracyCZoneEnd(ctx_cws);
 }
 
 static LRESULT CALLBACK drag_popup_window_procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
@@ -406,6 +410,7 @@ static LRESULT CALLBACK drag_popup_window_procedure(HWND window, UINT message, W
 
 static void drag_popup_render(AppShared* shared)
 {
+    TracyCZoneNC(ctx_dpr, "DragPopupRender", TracyColor_Drag, TRACY_SUBSYSTEMS & TracySys_Drag);
     DragPopup* popup = shared->drag_popup;
     UIContext* ui = &popup->ui;
     String title = { 0 };
@@ -440,6 +445,7 @@ static void drag_popup_render(AppShared* shared)
         ui_box_end(box);
     }
     ui_frame_end(arena_pos);
+    TracyCZoneEnd(ctx_dpr);
 }
 
 static void drag_popup_apply_size(DragPopup* popup, const u32 logical_w, const u32 logical_h, const u32 dpi)
@@ -461,6 +467,7 @@ static void drag_popup_apply_size(DragPopup* popup, const u32 logical_w, const u
 
 static void drag_popup_update(AppShared* shared)
 {
+    TracyCZoneNC(ctx_dpu, "DragPopupUpdate", TracyColor_Drag, TRACY_SUBSYSTEMS & TracySys_Drag);
     b32 should_show = shared->cross_drag_active && shared->cross_drag_payload_size >= (isize)sizeof(TabDragPayload) &&
                       ((TabDragPayload*)shared->cross_drag_payload_buf)->drag_type == DRAG_TYPE_TAB;
 
@@ -532,6 +539,7 @@ static void drag_popup_update(AppShared* shared)
     }
     else if (shared->drag_popup)
         ShowWindow(shared->drag_popup->window, SW_HIDE);
+    TracyCZoneEnd(ctx_dpu);
 }
 
 //
@@ -810,6 +818,7 @@ static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
 
 static void panel_container(WindowContext* ctx, const Rect rect)
 {
+    TracyCZoneNC(ctx_pc, "PanelContainer", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
     AppShared* shared = ctx->shared;
     const Theme* theme = &shared->theme;
 
@@ -880,7 +889,10 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                                   .color = theme->accent,
                                                   .line_height = 20 });
 
-                // clang-format off
+                ui_text(str("   "), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL],
+                                                               .font_size = 11,
+                                                               .color = theme->fg_primary,
+                                                               .line_height = 16 });
                 ui_text(str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
                         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                        .font_size = 11,
@@ -906,7 +918,6 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                        .font_size = 11,
                                        .color = theme->fg_primary,
                                        .line_height = 16 });
-                // clang-format on
 
                 UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
                                                         .child_gap = s_child_gap_medium,
@@ -964,9 +975,32 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                         ctx->check = !ctx->check;
                 }
                 ui_box_end(box2);
+
+                /* Text test */
+                // TODO: The current text width calculation is VERY heavy (And maybe should not be called so many
+                // times!).
+                //       Just tried 10 round, and the FPS dropped to ~8 frames per second on my laptop.
+                // for (isize i = 0; i < 1; i++)
+                //     ui_text(
+                //         str("Dream of the Red Chamber has a complicated textual history that scholars have long
+                //         debated.
+                //         "
+                //             "It is known with certainty that Cao Xueqin began writing the novel in the 1740s. Cao was
+                //             a " "member of a prominent Chinese family that had served the Manchu emperors of the Qing
+                //             dynasty " "but whose fortunes had begun to decline. By the time of Cao's death in 1763 or
+                //             1764, " "hand-copied manuscripts of the novel's first 80 chapters had begun circulating,
+                //             and he may " "have written drafts of the remaining chapters. These hand-copied
+                //             manuscripts circulated first " "among his personal friends and a growing circle of
+                //             aficionados, then eventually on the open " "market where they sold for large sums of
+                //             money."),
+                //         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
+                //                        .font_size = 11,
+                //                        .color = theme->fg_primary,
+                //                        .line_height = 20,
+                //                        .wrap = True });
             }
+            ui_panel_end(&panel);
         }
-        ui_panel_end(&panel);
     }
 
     /* Clean up tabs not declared this frame */
@@ -976,6 +1010,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             continue;
         panel_tabs_cleanup(p);
     }
+    TracyCZoneEnd(ctx_pc);
 }
 
 static void process_frame(WindowContext* ctx)
@@ -987,7 +1022,7 @@ static void process_frame(WindowContext* ctx)
     UIContext* ui_ctx = &ctx->ui;
     const Theme* theme = &shared->theme;
 
-    TracyCZone(ctx_frame, 1);
+    TracyCZoneNC(ctx_frame, "ProcessFrame", TracyColor_Frame, TRACY_SUBSYSTEMS & TracySys_Frame);
 
     isize arena_pos_backup = ui_frame_begin(ui_ctx);
     {
@@ -1556,6 +1591,8 @@ i32 WinMainCRTStartup()
                               &shared.fonts[FONT_INDEX_ZH]);
     font_register_from_system(&shared.dwrite, L"Consolas", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                               &shared.fonts[FONT_INDEX_MONO]);
+    font_register_from_system(&shared.dwrite, L"Segoe MDL2 Assets", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                              &shared.fonts[FONT_INDEX_MDL]);
     font_register_from_resource(&shared.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                                 &shared.fonts[FONT_INDEX_ICON]);
 
@@ -1624,6 +1661,8 @@ i32 WinMainCRTStartup()
 
         if (!any_window_needs_frames(&shared))
             continue;
+
+        TracyCZoneNC(ctx_main_loop, "MainLoop", TracyColor_Frame, TRACY_SUBSYSTEMS & TracySys_Frame);
 
         /* Snapshot cursor position once — query WindowFromPoint only once */
         POINT cursor_pt;
@@ -1737,6 +1776,8 @@ i32 WinMainCRTStartup()
                 }
             }
         }
+
+        TracyCZoneEnd(ctx_main_loop);
     }
 
     /* Clean up remaining windows */
@@ -1763,6 +1804,7 @@ i32 WinMainCRTStartup()
     font_unregister(&shared.fonts[FONT_INDEX_UI]);
     font_unregister(&shared.fonts[FONT_INDEX_ZH]);
     font_unregister(&shared.fonts[FONT_INDEX_MONO]);
+    font_unregister(&shared.fonts[FONT_INDEX_MDL]);
     font_unregister(&shared.fonts[FONT_INDEX_ICON]);
 
     renderer_shared_deinit(&shared.renderer_shared);

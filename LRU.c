@@ -2,6 +2,9 @@
 #include "utils.h"
 #include <string.h>
 
+#include "thirdparty/tracy/public/tracy/TracyC.h"
+#include "tracy_config.h" // IWYU pragma: keep
+
 // clang-format off
 //                       +------------------------------------------------------------------------------------------+
 //                       |                                                                                          |
@@ -189,6 +192,7 @@ LRUCacheFindResult lru_cache_find(const LRUCache* lru_cache, const void* key)
 
 LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const void* key)
 {
+    TracyCZoneNC(ctx_lru, "LRUFindOrEvict", TracyColor_Cache, TRACY_SUBSYSTEMS & TracySys_Cache);
     LRUCacheFindOrEvictResult result = { 0 };
     Entry* sentinel = &lru_cache->entries[0];
 
@@ -257,5 +261,6 @@ LRUCacheFindOrEvictResult lru_cache_find_or_evict(LRUCache* lru_cache, const voi
     lru_cache->entries[sentinel->lru_next].lru_prev = entry_index;
     sentinel->lru_next = entry_index;
 
+    TracyCZoneEnd(ctx_lru);
     return result;
 }

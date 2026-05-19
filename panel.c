@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "thirdparty/tracy/public/tracy/TracyC.h"
+#include "tracy_config.h" // IWYU pragma: keep
+
 #define PANEL_STACK_CAPACITY 16
 
 static u32 s_panel_next_id = 1; /* 0 reserved for none */
@@ -63,10 +66,15 @@ Rect panel_calc_rect_from_parent(const Panel* child, const Rect parent_rect)
 
 Rect panel_calc_rect(const Panel* panel, const Rect root_rect)
 {
-    if (!panel->parent)
-        return root_rect;
-    Rect parent_rect = panel_calc_rect(panel->parent, root_rect);
-    return panel_calc_rect_from_parent(panel, parent_rect);
+    TracyCZoneNC(ctx_cr, "CalcRect", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
+    Rect result = root_rect;
+    if (panel->parent)
+    {
+        Rect parent_rect = panel_calc_rect(panel->parent, root_rect);
+        result = panel_calc_rect_from_parent(panel, parent_rect);
+    }
+    TracyCZoneEnd(ctx_cr);
+    return result;
 }
 
 //
@@ -406,6 +414,7 @@ Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, const A
 
 void panel_tabs_cleanup(Panel* panel)
 {
+    TracyCZoneNC(ctx_tc, "TabsCleanup", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
     /* Remove undeclared tabs */
     PanelTab** prev = &panel->tab_first;
     while (*prev)
@@ -427,6 +436,7 @@ void panel_tabs_cleanup(Panel* panel)
         }
     }
     panel_tab_list_refresh_last(panel);
+    TracyCZoneEnd(ctx_tc);
 }
 
 static void panel_free_tabs(Panel* panel)
@@ -557,6 +567,7 @@ void panel_free_tree(Panel* root)
 
 Panel* panel_process_pending_removes(Panel* root)
 {
+    TracyCZoneNC(ctx_ppr, "PendingRemoves", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
     Stack(u32, PANEL_STACK_CAPACITY) pending_ids;
     pending_ids.depth = 0;
 
@@ -584,5 +595,6 @@ Panel* panel_process_pending_removes(Panel* root)
             root = survivor;
     }
 
+    TracyCZoneEnd(ctx_ppr);
     return root;
 }

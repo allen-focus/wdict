@@ -4,6 +4,9 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "thirdparty/tracy/public/tracy/TracyC.h"
+#include "tracy_config.h" // IWYU pragma: keep
+
 ///
 
 #define RASTER_CACHE_ARENA_CAPACITY MB(32)
@@ -311,6 +314,7 @@ void raster_cache_deinit(GlyphRasterCache* cache)
 static void raster_cache_rasterize_impl(const DWriteContext* dwrite, Arena* arena, GlyphRasterInfo* info, u32 codepoint,
                                         const Font* font, const f32 font_size, const u32 dpi)
 {
+    TracyCZoneNC(ctx_rast, "RasterizeGlyph", TracyColor_Glyph, TRACY_SUBSYSTEMS & TracySys_Glyph);
     IDWriteFontFace* font_face;
     IDWriteFontFace3_QueryInterface(font->face3, &IID_IDWriteFontFace, (void**)&font_face);
 
@@ -383,6 +387,7 @@ static void raster_cache_rasterize_impl(const DWriteContext* dwrite, Arena* aren
     }
 
     IDWriteFontFace_Release(font_face);
+    TracyCZoneEnd(ctx_rast);
 }
 
 void raster_cache_rasterize(GlyphRasterCache* cache, GlyphRasterInfo* info, u32 codepoint, const Font* font,
@@ -394,11 +399,13 @@ void raster_cache_rasterize(GlyphRasterCache* cache, GlyphRasterInfo* info, u32 
 GlyphRasterResult raster_cache_find_or_insert(GlyphRasterCache* cache, u32 codepoint, const Font* font, f32 font_size,
                                               u32 dpi)
 {
+    TracyCZoneNC(ctx_rcache, "RasterCache", TracyColor_Cache, TRACY_SUBSYSTEMS & TracySys_Cache);
     GlyphRasterResult result = { 0 };
     GlyphKey key = { font, font_size, dpi, codepoint };
     LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&cache->lru_cache, &key);
     result.signal = lru_result.signal;
     result.info =
         (GlyphRasterInfo*)((byte*)cache->lru_cache.values_buf + lru_result.index * cache->lru_cache.value_size);
+    TracyCZoneEnd(ctx_rcache);
     return result;
 }

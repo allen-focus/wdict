@@ -1,5 +1,8 @@
 #include "cmd.h"
 
+#include "thirdparty/tracy/public/tracy/TracyC.h"
+#include "tracy_config.h" // IWYU pragma: keep
+
 /*
  * Parse the first whitespace-delimited token from text.
  *   "window.create w=600 h=600"  → { "window.create",  "w=600 h=600" }
@@ -156,23 +159,24 @@ CmdQueueNode* cmd_queue_push(CmdQueue* q, String text)
 
 void cmd_queue_execute_all(CmdQueue* q, const CmdRegistry* reg)
 {
+    TracyCZoneNC(ctx_cmd, "CmdExec", TracyColor_Cmd, TRACY_SUBSYSTEMS & TracySys_Cmd);
+
     /* Save & clear before iterating — handlers may re-enter. */
     CmdQueueNode* list = q->first;
     q->first = NULL;
     q->last = NULL;
     q->count = 0;
 
-    if (!list)
-        return;
+    if (list)
+        for (CmdQueueNode* n = list; n; n = n->next)
+        {
+            String cmd_id = parse_first_token(n->cmd_text).token;
+            CmdDef* def = cmd_find(reg, cmd_id);
+            if (!def || !def->execute)
+                continue;
+            def->execute(def->userdata, n->cmd_text);
+        }
 
-    for (CmdQueueNode* n = list; n; n = n->next)
-    {
-        String cmd_id = parse_first_token(n->cmd_text).token;
-        CmdDef* def = cmd_find(reg, cmd_id);
-        if (!def || !def->execute)
-            continue;
-        def->execute(def->userdata, n->cmd_text);
-    }
-
+    TracyCZoneEnd(ctx_cmd);
     arena_pop_to(q->arena, 0);
 }

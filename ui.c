@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
+#include "tracy_config.h" // IWYU pragma: keep
 
 #define EPSILON                   1e-4f
 #define UI_CONTEXT_ARENA_CAPACITY MB(16)
@@ -114,6 +115,7 @@ static BoxKey generate_box_key(String hash_str)
 
 static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
 {
+    TracyCZoneNC(ctx_boxfind, "BoxFind", TracyColor_Cache, TRACY_SUBSYSTEMS & TracySys_Cache);
     UIBoxCache* box_cache = &g_ui_ctx->box_cache;
     BoxKey key = { .len = hash_str.len };
     memcpy(key.str, hash_str.data, hash_str.len);
@@ -142,11 +144,13 @@ static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
             Assert(0);
     }
 
+    TracyCZoneEnd(ctx_boxfind);
     return last_box;
 }
 
 static void box_cache_remove_unused()
 {
+    TracyCZoneNC(ctx_rmunused, "BoxCacheCleanup", TracyColor_Cache, TRACY_SUBSYSTEMS & TracySys_Cache);
     LRUCache* lru_cache = &g_ui_ctx->box_cache.lru_cache;
     u32 lru_entry_index = lru_cache->entries[0].lru_prev;
     UIBox* lru_box = (UIBox*)((byte*)lru_cache->values_buf + lru_entry_index * lru_cache->value_size);
@@ -157,6 +161,7 @@ static void box_cache_remove_unused()
         memset(lru_box, 0, sizeof(*lru_box));
         lru_box = (UIBox*)((byte*)lru_cache->values_buf + lru_entry_index * lru_cache->value_size);
     }
+    TracyCZoneEnd(ctx_rmunused);
 }
 
 //
@@ -263,6 +268,7 @@ void ui_box_end(UIBox* box)
 
 UIBox* ui_text(const String text, const TextConfig* text_cfg)
 {
+    TracyCZoneNC(ctx_ut, "UIText", TracyColor_Text, TRACY_SUBSYSTEMS & TracySys_Text);
     GlyphRasterCache* raster_cache = g_ui_ctx->raster_cache;
     u32 dpi = g_ui_ctx->dpi;
     get_text_width_fn get_text_width = g_ui_ctx->render_fn.get_text_width;
@@ -341,6 +347,7 @@ UIBox* ui_text(const String text, const TextConfig* text_cfg)
     text_box->cfg.sizing.height.min_max.max = (f32)text_box->data.text.line_height * word_count;
 
     ui_box_end(text_box);
+    TracyCZoneEnd(ctx_ut);
     return text_box;
 }
 
@@ -398,6 +405,7 @@ static AxisContext get_axis_ctx(UIBox* box, const Axis axis)
 // Recursively calculate sizes for boxes cfg with 'fit' attribute
 static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
 {
+    TracyCZoneNC(ctx_fit, "FitAxis", TracyColor_Layout, TRACY_SUBSYSTEMS & TracySys_Layout);
     AxisContext box_ctx = get_axis_ctx(box, axis);
 
     f32 box_ctx_min_size_backup = *box_ctx.min_size;
@@ -436,6 +444,7 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
         if (*box_ctx.max_size != 0 && *box_ctx.max_size != INFINITY && *box_ctx.size > *box_ctx.max_size)
             *box_ctx.size = *box_ctx.max_size;
     }
+    TracyCZoneEnd(ctx_fit);
 
     /* If the current box is a child, adjust its parent's size based on box direction. */
     UIBox* parent = box->parent;
@@ -542,8 +551,12 @@ static void distribute_axis(f32* remaining, DistributeAbles ables, const Distrib
 // Recursively grow/shrink axis size of box
 static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
 {
+    TracyCZoneNC(ctx_gs, "GrowShrinkAxis", TracyColor_Layout, TRACY_SUBSYSTEMS & TracySys_Layout);
     if (box->type != BOX_TYPE_CONTAINER)
+    {
+        TracyCZoneEnd(ctx_gs);
         return;
+    }
 
     isize arena_pos_backup = g_ui_ctx->arena.pos;
     {
@@ -627,10 +640,12 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
             child = child->next;
         }
     }
+    TracyCZoneEnd(ctx_gs);
 }
 
 static void ui_box_resolve_position(UIBox* box)
 {
+    TracyCZoneNC(ctx_pos, "ResolvePos", TracyColor_Layout, TRACY_SUBSYSTEMS & TracySys_Layout);
     if (box->parent)
     {
         UIBox* parent = box->parent;
@@ -700,10 +715,12 @@ static void ui_box_resolve_position(UIBox* box)
         //   it indicates a duplicate key (panic condition).
         last_box->last_frame_index = g_ui_ctx->frame_index;
     }
+    TracyCZoneEnd(ctx_pos);
 }
 
 static void perform_text_wrapping(UIBox* text_box)
 {
+    TracyCZoneNC(ctx_wp, "TextWrap", TracyColor_Layout, TRACY_SUBSYSTEMS & TracySys_Layout);
     u32 dpi = g_ui_ctx->dpi;
     GlyphRasterCache* raster_cache = g_ui_ctx->raster_cache;
     get_text_width_fn get_text_width = g_ui_ctx->render_fn.get_text_width;
@@ -715,7 +732,10 @@ static void perform_text_wrapping(UIBox* text_box)
     f32 max_width = text_box->size.width;
 
     if (get_text_width(renderer, raster_cache, text, font, font_size, dpi) <= max_width)
+    {
+        TracyCZoneEnd(ctx_wp);
         return;
+    }
 
     isize line_start = 0;
     isize last_break = 0;
@@ -751,10 +771,12 @@ static void perform_text_wrapping(UIBox* text_box)
 
     text_box->size.height = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
     text_box->cfg.sizing.height.min_max.min = text_box->size.height;
+    TracyCZoneEnd(ctx_wp);
 }
 
 static void ui_box_apply_text_wrapping(UIBox* box)
 {
+    TracyCZoneNC(ctx_wrap, "WrapTree", TracyColor_Layout, TRACY_SUBSYSTEMS & TracySys_Layout);
     if (box->type == BOX_TYPE_TEXT)
     {
         perform_text_wrapping(box);
@@ -768,18 +790,19 @@ static void ui_box_apply_text_wrapping(UIBox* box)
             child = child->next;
         }
     }
+    TracyCZoneEnd(ctx_wrap);
 }
 
 static void ui_calculate_layout(UIBox* box)
 {
-    TracyCZone(ctx, 1);
+    TracyCZoneNC(ctx_layout, "CalcLayout", TracyColor_Layout, TRACY_SUBSYSTEMS & TracySys_Layout);
     ui_box_calculate_fit_axis(box, WIDTH);
     ui_box_grow_shrink_children_axis(box, WIDTH);
     ui_box_apply_text_wrapping(box);
     ui_box_calculate_fit_axis(box, HEIGHT);
     ui_box_grow_shrink_children_axis(box, HEIGHT);
     ui_box_resolve_position(box);
-    TracyCZoneEnd(ctx);
+    TracyCZoneEnd(ctx_layout);
 }
 
 //
@@ -799,6 +822,7 @@ static f64 get_current_time(u64 frame_index)
 
 isize ui_frame_begin(UIContext* ui_ctx)
 {
+    TracyCZoneNC(ctx_fb, "FrameBegin", TracyColor_Frame, TRACY_SUBSYSTEMS & TracySys_Frame);
     ui_ctx->prev_ctx = g_ui_ctx;
     g_ui_ctx = ui_ctx;
     if (g_ui_ctx->frame_index > 0)
@@ -809,6 +833,7 @@ isize ui_frame_begin(UIContext* ui_ctx)
     g_ui_ctx->desired_cursor = UI_CURSOR_ARROW;
     g_ui_ctx->drag_payload_consumed = False;
 
+    TracyCZoneEnd(ctx_fb);
     return g_ui_ctx->arena.pos;
 }
 
@@ -830,6 +855,7 @@ static Rect intersect_rects(Rect r1, Rect r2)
 
 static void ui_generate_render_commands(const UIBox* box, const Rect clip)
 {
+    TracyCZoneNC(ctx_rc, "GenRenderCmds", TracyColor_Render, TRACY_SUBSYSTEMS & TracySys_Render);
     f32 dpi_scale = (f32)g_ui_ctx->dpi / USER_DEFAULT_SCREEN_DPI;
     Rect rect = {
         box->position.x * dpi_scale,
@@ -925,10 +951,12 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
             child = child->next;
         }
     }
+    TracyCZoneEnd(ctx_rc);
 }
 
 void ui_frame_end(isize arena_pos_backup)
 {
+    TracyCZoneNC(ctx_fe, "FrameEnd", TracyColor_Frame, TRACY_SUBSYSTEMS & TracySys_Frame);
     GlyphRasterCache* raster_cache = g_ui_ctx->raster_cache;
     u32 dpi = g_ui_ctx->dpi;
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
@@ -990,6 +1018,7 @@ void ui_frame_end(isize arena_pos_backup)
 
     g_ui_ctx->frame_index++;
     arena_pop_to(&g_ui_ctx->arena, arena_pos_backup);
+    TracyCZoneEnd(ctx_fe);
     g_ui_ctx = g_ui_ctx->prev_ctx;
 }
 
@@ -1013,6 +1042,7 @@ static b32 rect_contains_point(Rect r, Position p)
 
 static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
 {
+    TracyCZoneNC(ctx_interact, "Interaction", TracyColor_Interaction, TRACY_SUBSYSTEMS & TracySys_Interaction);
     *flags = UI_Signal_Flag_None;
     Rect box_rect = {
         .xmin = box->position.x,
@@ -1080,6 +1110,7 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
     /* Dropped: release while a drag was active, over this box */
     if (!g_ui_ctx->mouse_press && g_ui_ctx->drag_active && in_box && in_clip)
         *flags |= UI_Signal_Flag_Dropped;
+    TracyCZoneEnd(ctx_interact);
 }
 
 UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str)
@@ -1285,6 +1316,7 @@ static ScrollBarLayout make_scrollbar_layout(b32 is_horizontal, f32 thumb_thickn
 
 static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f32 thumb_size)
 {
+    TracyCZoneNC(ctx_sb, "Scrollbar", TracyColor_Scroll, TRACY_SUBSYSTEMS & TracySys_Scroll);
 
     UIBox* last_area = scroll_ctx.last_area;
 
@@ -1471,10 +1503,12 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
     ui_box_end(bar_container);
     update_box_key(bar_container, bar_hash_str);
     // clang-format on
+    TracyCZoneEnd(ctx_sb);
 }
 
 ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
 {
+    TracyCZoneNC(ctx_sab, "SABegin", TracyColor_Scroll, TRACY_SUBSYSTEMS & TracySys_Scroll);
     f64 now = g_ui_ctx->current_time;
     ScrollContext scroll_ctx = { 0 };
     scroll_ctx.thumb_color = cfg->thumb_color;
@@ -1515,11 +1549,13 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
                                                 .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
     update_box_key(content, content_hash_str);
 
+    TracyCZoneEnd(ctx_sab);
     return scroll_ctx;
 }
 
 void ui_scrollable_area_end(ScrollContext scroll_ctx)
 {
+    TracyCZoneNC(ctx_sae, "SAEnd", TracyColor_Scroll, TRACY_SUBSYSTEMS & TracySys_Scroll);
     ScrollBarFlags bar_flags = SCROLLBAR_NONE;
     Size thumb_size = { 0 };
 
@@ -1622,6 +1658,7 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
         if (scroll_ctx.last_area)
             scrollbar(scroll_ctx, False, thumb_size.height);
     ui_box_end(scroll_ctx.area);
+    TracyCZoneEnd(ctx_sae);
 }
 
 //
@@ -1640,6 +1677,7 @@ String panel_str_impl(u8* buf, const char* text_with_hash_str, u32 panel_id)
 
 void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme)
 {
+    TracyCZoneNC(ctx_pbd, "PanelBounds", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
     for (const Panel* p = root; p; p = panel_iter_next(p))
     {
         if (!p->child_a)
@@ -1755,6 +1793,7 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
         }
         ui_box_end(box);
     }
+    TracyCZoneEnd(ctx_pbd);
 }
 
 PanelContext ui_panel_begin(const PanelConfig* cfg)
@@ -1764,6 +1803,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
        are not real UI containers and should never call ui_panel_begin() */
     if (cfg->panel->child_a)
         Assert(0);
+
+    TracyCZoneNC(ctx_pb, "PanelBegin", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
 
     /* Mark all existing tabs as declared so they survive cleanup */
     for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next)
@@ -2096,11 +2137,13 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         .cmd_queue = cfg->cmd_queue,
                         .theme = cfg->theme,
                         .font_size = cfg->font_size };
+    TracyCZoneEnd(ctx_pb);
     return pf;
 }
 
 void ui_panel_end(PanelContext* pf)
 {
+    TracyCZoneNC(ctx_pe, "PanelEnd", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
     ui_scrollable_area_end(pf->scroll_ctx);
 
     /* Edge drop zones for docking tabs at panel edges */
@@ -2218,6 +2261,7 @@ void ui_panel_end(PanelContext* pf)
         ui_box_end(container);
     }
     ui_box_end(pf->outer_box);
+    TracyCZoneEnd(ctx_pe);
 }
 
 //
@@ -2233,6 +2277,7 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                         const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
                         const Color bg_color_press, const b32 use_animation)
 {
+    TracyCZoneNC(ctx_btn, "Button", TracyColor_Widget, TRACY_SUBSYSTEMS & TracySys_Widget);
     Color bg_color_transition = bg_color;
 
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
@@ -2281,12 +2326,14 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                 .font = font, .font_size = font_size, .color = text_color, .line_height = font_size, .wrap = False });
     ui_box_end(box);
 
+    TracyCZoneEnd(ctx_btn);
     return result.flags;
 }
 
 UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
                            const Color switch_button_color, const Color shadow_color, const Color bg_color_active)
 {
+    TracyCZoneNC(ctx_sw, "Switchbox", TracyColor_Widget, TRACY_SUBSYSTEMS & TracySys_Widget);
     /* Transition-related variables */
     Color bg_color_transition = bg_color;
     Color status_color_ok = switch_button_color;
@@ -2347,6 +2394,7 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
     }
     ui_box_end(container);
 
+    TracyCZoneEnd(ctx_sw);
     return result.flags;
 }
 
@@ -2463,6 +2511,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             const Color cursor_trail_color, const Color cursor_bar_color, const Color selection_color,
                             const Color selection_flash_color)
 {
+    TracyCZoneNC(ctx_tf, "TextField", TracyColor_Widget, TRACY_SUBSYSTEMS & TracySys_Widget);
     // clang-format off
     get_text_height_fn get_text_height = g_ui_ctx->render_fn.get_text_height;
     get_text_width_fn get_text_width = g_ui_ctx->render_fn.get_text_width;
@@ -2934,5 +2983,6 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         win32_ime_update_candidate(g_ui_ctx->window, cx, cy, &g_ui_ctx->ime_cursor_screen_pos);
     }
 
+    TracyCZoneEnd(ctx_tf);
     return result.flags;
 }

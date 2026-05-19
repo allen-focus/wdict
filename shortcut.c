@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "thirdparty/tracy/public/tracy/TracyC.h"
+
 /*
  * Extract the first token (up to first space or end) from text.
  * Returns True if it matches `ref`.
