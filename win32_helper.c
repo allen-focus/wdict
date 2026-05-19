@@ -7,6 +7,7 @@
 #pragma comment(lib, "user32")
 #pragma comment(lib, "kernel32")
 #pragma comment(lib, "imm32")
+#pragma comment(lib, "advapi32")
 
 void win32_clipboard_copy(const HWND window, const String text)
 {

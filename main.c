@@ -1,5 +1,6 @@
 #pragma comment(lib, "kernel32")
 #pragma comment(lib, "user32")
+#pragma comment(lib, "shcore")
 
 #include "cmd.h"
 #include "glyph_cache.h"
@@ -16,6 +17,7 @@
 #include <wchar.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <ShellScalingApi.h>
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
 
@@ -446,9 +448,22 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     /* Copy title */
     wcsncpy_s(ctx->title, MAX_TITLE_LENGTH, title, _TRUNCATE);
 
-    /* Create window */
-    UINT sys_dpi = GetDpiForSystem();
-    f32 dpi_scale = (f32)sys_dpi / USER_DEFAULT_SCREEN_DPI;
+    /* Determine target DPI — when creating from drag-drop desktop drop,
+       the window may land on a different-DPI monitor. */
+    UINT dpi;
+    if (pos_x != CW_USEDEFAULT && pos_y != CW_USEDEFAULT)
+    {
+        HMONITOR hmon = MonitorFromPoint((POINT){ pos_x, pos_y }, MONITOR_DEFAULTTONEAREST);
+        UINT dpi_x, dpi_y;
+        if (SUCCEEDED(GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y)))
+            dpi = dpi_x;
+        else
+            dpi = GetDpiForSystem();
+    }
+    else
+        dpi = GetDpiForSystem();
+
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     u32 physical_width = (u32)(width * dpi_scale);
     u32 physical_height = (u32)(height * dpi_scale);
 
@@ -461,9 +476,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
         rect.bottom = pos_y + (i32)physical_height;
     }
     else
-    {
-        rect = get_screen_center_rect(width, height, sys_dpi);
-    }
+        rect = get_screen_center_rect(width, height, dpi);
 
     DWORD window_style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRectEx(&rect, window_style, 0, 0);
@@ -486,7 +499,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
         .draw_rect = renderer_draw_rect,
         .draw_text = renderer_draw_text,
     };
-    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, sys_dpi, render_fn);
+    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, dpi, render_fn);
     ctx->ui.clipboard_copy = win32_clipboard_copy;
     ctx->ui.clipboard_paste = win32_clipboard_paste;
 
