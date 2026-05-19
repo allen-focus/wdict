@@ -143,7 +143,7 @@ static u32 s_window_next_id = 1; /* 0 reserved for none */
 static u16 s_utf16_pending_high = 0;
 
 //
-// Static Variables: Theme
+// Theme
 //
 
 // clang-format off
@@ -214,13 +214,7 @@ static const Theme s_theme_dark = {
 
     .shadow            = { DARK_5,   255 },
 };
-// clang-format on
 
-//
-// Static Variables: Padding & Child Gap
-//
-
-// clang-format off
 static Padding s_padding_medium = { 20, 20, 20, 20 };
 static Padding s_padding_small  = { 10, 10, 10, 10 };
 
@@ -229,7 +223,7 @@ static f32 s_child_gap_medium = 10;
 // clang-format on
 
 //
-// Helpers
+// Window Creation
 //
 
 static RECT get_screen_center_rect(u32 width, u32 height, u32 dpi)
@@ -245,10 +239,6 @@ static RECT get_screen_center_rect(u32 width, u32 height, u32 dpi)
     RECT rect = { x, y, x + physical_width, y + physical_height };
     return rect;
 }
-
-//
-// Window creation
-//
 
 static void window_list_add(AppShared* shared, WindowContext* ctx)
 {
@@ -287,23 +277,113 @@ static void window_list_remove(AppShared* shared, WindowContext* ctx)
     }
 }
 
+// Forward declarations for global lookup helpers used by handlers
 static void process_frame(WindowContext* ctx);
 
-static WindowContext* find_window_by_id(AppShared* shared, u32 id)
+static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32 pos_x, i32 pos_y, u32 width,
+                                    u32 height, b32 add_default_tab)
 {
-    for (WindowContext* w = shared->first_window; w; w = w->next)
-        if (w->id == id)
-            return w;
-    return NULL;
+    WindowContext* ctx = (WindowContext*)calloc(1, sizeof(WindowContext));
+    Assert(ctx);
+    ctx->shared = shared;
+    ctx->id = s_window_next_id++;
+
+    /* Copy title */
+    wcsncpy_s(ctx->title, MAX_TITLE_LENGTH, title, _TRUNCATE);
+
+    /* Determine target DPI — when creating from drag-drop desktop drop,
+       the window may land on a different-DPI monitor. */
+    UINT dpi;
+    if (pos_x != CW_USEDEFAULT && pos_y != CW_USEDEFAULT)
+    {
+        HMONITOR hmon = MonitorFromPoint((POINT){ pos_x, pos_y }, MONITOR_DEFAULTTONEAREST);
+        UINT dpi_x, dpi_y;
+        if (SUCCEEDED(GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y)))
+            dpi = dpi_x;
+        else
+            dpi = GetDpiForSystem();
+    }
+    else
+        dpi = GetDpiForSystem();
+
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    u32 physical_width = (u32)(width * dpi_scale);
+    u32 physical_height = (u32)(height * dpi_scale);
+
+    RECT rect;
+    if (pos_x != CW_USEDEFAULT && pos_y != CW_USEDEFAULT)
+    {
+        rect.left = pos_x;
+        rect.top = pos_y;
+        rect.right = pos_x + (i32)physical_width;
+        rect.bottom = pos_y + (i32)physical_height;
+    }
+    else
+        rect = get_screen_center_rect(width, height, dpi);
+
+    DWORD window_style = WS_OVERLAPPEDWINDOW;
+    AdjustWindowRectEx(&rect, window_style, 0, 0);
+    ctx->window =
+        CreateWindowExW(0, L"window class", ctx->title, window_style, rect.left, rect.top, rect.right - rect.left,
+                        rect.bottom - rect.top, NULL, NULL, GetModuleHandleW(NULL), ctx);
+    if (!ctx->window)
+    {
+        free(ctx);
+        return NULL;
+    }
+
+    /* Init UI context */
+    UIRenderFunc render_fn = {
+        .flush_and_present = renderer_flush_and_present,
+        .on_resize = renderer_resize,
+        .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
+        .get_text_width = renderer_get_text_width_for_dpi,
+        .get_text_height = renderer_get_text_height_for_dpi,
+        .draw_rect = renderer_draw_rect,
+        .draw_text = renderer_draw_text,
+    };
+    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, dpi, render_fn);
+    ctx->ui.clipboard_copy = win32_clipboard_copy;
+    ctx->ui.clipboard_paste = win32_clipboard_paste;
+    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+
+    /* Init per-window renderer */
+    renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
+
+    /* Init per-window switch box check state */
+    ctx->check = False;
+
+    /* Init per-window text edit state */
+    ctx->text_edit_1.base = ctx->text_buf_1;
+    ctx->text_edit_1.size = TEXT_BUFFER_SIZE;
+    ctx->text_edit_2.base = ctx->text_buf_2;
+    ctx->text_edit_2.size = TEXT_BUFFER_SIZE;
+
+    /* Add to window list */
+    window_list_add(shared, ctx);
+
+    /* Init per-window root panel */
+    ctx->root_panel = panel_alloc();
+    ctx->root_panel->pct_of_parent = 1.0f;
+    if (add_default_tab)
+    {
+        u8 name_buf[PANEL_TAB_NAME_MAX];
+        isize name_len;
+        panel_tab_generate_default_name(ctx->root_panel, name_buf, sizeof(name_buf), &name_len);
+        panel_tab_declare(ctx->root_panel, (String){ name_buf, name_len });
+    }
+
+    /* Render first frames to rasterize glyphs, then show */
+    process_frame(ctx);
+    process_frame(ctx);
+    ShowWindow(ctx->window, SW_SHOWDEFAULT);
+
+    return ctx;
 }
 
-static b32 any_window_needs_frames(const AppShared* shared)
-{
-    for (const WindowContext* w = shared->first_window; w; w = w->next)
-        if (w->ui.requested_frames > 0)
-            return True;
-    return False;
-}
+//
+// Window Dragging
+//
 
 static void cross_window_sync_to(AppShared* shared, WindowContext* ctx, const POINT cursor_pt)
 {
@@ -454,114 +534,47 @@ static void drag_popup_update(AppShared* shared)
         ShowWindow(shared->drag_popup->window, SW_HIDE);
 }
 
-static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32 pos_x, i32 pos_y, u32 width,
-                                    u32 height, b32 add_default_tab)
+//
+// Find (window, panel, tab)
+//
+
+static WindowContext* find_window_by_id(AppShared* shared, u32 id)
 {
-    WindowContext* ctx = (WindowContext*)calloc(1, sizeof(WindowContext));
-    Assert(ctx);
-    ctx->shared = shared;
-    ctx->id = s_window_next_id++;
+    for (WindowContext* w = shared->first_window; w; w = w->next)
+        if (w->id == id)
+            return w;
+    return NULL;
+}
 
-    /* Copy title */
-    wcsncpy_s(ctx->title, MAX_TITLE_LENGTH, title, _TRUNCATE);
-
-    /* Determine target DPI — when creating from drag-drop desktop drop,
-       the window may land on a different-DPI monitor. */
-    UINT dpi;
-    if (pos_x != CW_USEDEFAULT && pos_y != CW_USEDEFAULT)
+static Panel* find_panel_globally(AppShared* shared, u32 window_id, u32 panel_id)
+{
+    for (WindowContext* w = shared->first_window; w; w = w->next)
     {
-        HMONITOR hmon = MonitorFromPoint((POINT){ pos_x, pos_y }, MONITOR_DEFAULTTONEAREST);
-        UINT dpi_x, dpi_y;
-        if (SUCCEEDED(GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y)))
-            dpi = dpi_x;
-        else
-            dpi = GetDpiForSystem();
+        if (window_id && w->id != window_id)
+            continue;
+        Panel* p = panel_find_by_id(w->root_panel, panel_id);
+        if (p)
+            return p;
     }
-    else
-        dpi = GetDpiForSystem();
+    return NULL;
+}
 
-    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
-    u32 physical_width = (u32)(width * dpi_scale);
-    u32 physical_height = (u32)(height * dpi_scale);
-
-    RECT rect;
-    if (pos_x != CW_USEDEFAULT && pos_y != CW_USEDEFAULT)
+static PanelTab* find_tab_globally(AppShared* shared, u32 window_id, u32 tab_id)
+{
+    for (WindowContext* w = shared->first_window; w; w = w->next)
     {
-        rect.left = pos_x;
-        rect.top = pos_y;
-        rect.right = pos_x + (i32)physical_width;
-        rect.bottom = pos_y + (i32)physical_height;
+        if (window_id && w->id != window_id)
+            continue;
+        PanelTab* t = panel_find_tab_by_id(w->root_panel, tab_id);
+        if (t)
+            return t;
     }
-    else
-        rect = get_screen_center_rect(width, height, dpi);
-
-    DWORD window_style = WS_OVERLAPPEDWINDOW;
-    AdjustWindowRectEx(&rect, window_style, 0, 0);
-    ctx->window =
-        CreateWindowExW(0, L"window class", ctx->title, window_style, rect.left, rect.top, rect.right - rect.left,
-                        rect.bottom - rect.top, NULL, NULL, GetModuleHandleW(NULL), ctx);
-    if (!ctx->window)
-    {
-        free(ctx);
-        return NULL;
-    }
-
-    /* Init UI context */
-    UIRenderFunc render_fn = {
-        .flush_and_present = renderer_flush_and_present,
-        .on_resize = renderer_resize,
-        .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
-        .get_text_width = renderer_get_text_width_for_dpi,
-        .get_text_height = renderer_get_text_height_for_dpi,
-        .draw_rect = renderer_draw_rect,
-        .draw_text = renderer_draw_text,
-    };
-    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, dpi, render_fn);
-    ctx->ui.clipboard_copy = win32_clipboard_copy;
-    ctx->ui.clipboard_paste = win32_clipboard_paste;
-    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
-
-    /* Init per-window renderer */
-    renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
-
-    /* Init per-window switch box check state */
-    ctx->check = False;
-
-    /* Init per-window text edit state */
-    ctx->text_edit_1.base = ctx->text_buf_1;
-    ctx->text_edit_1.size = TEXT_BUFFER_SIZE;
-    ctx->text_edit_2.base = ctx->text_buf_2;
-    ctx->text_edit_2.size = TEXT_BUFFER_SIZE;
-
-    /* Add to window list */
-    window_list_add(shared, ctx);
-
-    /* Init per-window root panel */
-    ctx->root_panel = panel_alloc();
-    ctx->root_panel->pct_of_parent = 1.0f;
-    if (add_default_tab)
-    {
-        u8 name_buf[PANEL_TAB_NAME_MAX];
-        isize name_len;
-        panel_tab_generate_default_name(ctx->root_panel, name_buf, sizeof(name_buf), &name_len);
-        panel_tab_declare(ctx->root_panel, (String){ name_buf, name_len });
-    }
-
-    /* Render first frames to rasterize glyphs, then show */
-    process_frame(ctx);
-    process_frame(ctx);
-    ShowWindow(ctx->window, SW_SHOWDEFAULT);
-
-    return ctx;
+    return NULL;
 }
 
 //
-// Command Handlers
+// Command
 //
-
-/* Forward declarations for global lookup helpers used by handlers */
-static Panel* find_panel_globally(AppShared* shared, u32 window_id, u32 panel_id);
-static PanelTab* find_tab_globally(AppShared* shared, u32 window_id, u32 tab_id);
 
 static void cmd_create_window(void* userdata, String cmd_text)
 {
@@ -614,36 +627,6 @@ static void cmd_close_panel(void* userdata, String cmd_text)
         }
         p->pending_remove = True;
     }
-}
-
-//
-// Global lookup helpers (for text-based command resolution across all windows)
-//
-
-static Panel* find_panel_globally(AppShared* shared, u32 window_id, u32 panel_id)
-{
-    for (WindowContext* w = shared->first_window; w; w = w->next)
-    {
-        if (window_id && w->id != window_id)
-            continue;
-        Panel* p = panel_find_by_id(w->root_panel, panel_id);
-        if (p)
-            return p;
-    }
-    return NULL;
-}
-
-static PanelTab* find_tab_globally(AppShared* shared, u32 window_id, u32 tab_id)
-{
-    for (WindowContext* w = shared->first_window; w; w = w->next)
-    {
-        if (window_id && w->id != window_id)
-            continue;
-        PanelTab* t = panel_find_tab_by_id(w->root_panel, tab_id);
-        if (t)
-            return t;
-    }
-    return NULL;
 }
 
 typedef struct
@@ -822,65 +805,8 @@ static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
 }
 
 //
-// Panel rendering
+// Frame Processing
 //
-
-static void panel_container(WindowContext* ctx, const Rect root_rect);
-
-static void process_frame(WindowContext* ctx)
-{
-    if (IsIconic(ctx->window) || !IsWindowVisible(ctx->window))
-        return;
-
-    AppShared* shared = ctx->shared;
-    UIContext* ui_ctx = &ctx->ui;
-    const Theme* theme = &shared->theme;
-
-    TracyCZone(ctx_frame, 1);
-
-    isize arena_pos_backup = ui_frame_begin(ui_ctx);
-    {
-        ctx->root_panel = panel_process_pending_removes(ctx->root_panel);
-        f32 client_w = (f32)ui_ctx->client_width;
-        f32 client_h = (f32)ui_ctx->client_height;
-        Rect root_rect = { 0, 0, client_w, client_h };
-
-        UIBox* root_box = ui_box_begin(&(BoxConfig){
-            .sizing = { fixed(client_w), fixed(client_h) },
-            .rect_style = { .border_color = theme->fg_disabled, .border_thickness = 1 },
-            .color = theme->bg_base,
-        });
-        {
-            String root_hash = str("###window_bg");
-            UIBoxInteractResult rb = ui_box_interact(root_box, root_hash);
-
-            panel_container(ctx, root_rect);
-
-            /* Unhandled drop on background: create a new window with the dragged tab */
-            if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed &&
-                g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
-            {
-                TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                if (payload->drag_type == DRAG_TYPE_TAB)
-                {
-                    g_ui_ctx->drag_payload_consumed = True;
-
-                    POINT cursor_pt;
-                    GetCursorPos(&cursor_pt);
-                    char buf[128];
-                    i32 len =
-                        snprintf(buf, sizeof(buf), "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
-                                 payload->from_panel_id, payload->from_tab_id, payload->from_window_id,
-                                 (i32)cursor_pt.x, (i32)cursor_pt.y);
-                    cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
-                }
-            }
-        }
-        ui_box_end(root_box);
-    }
-    ui_frame_end(arena_pos_backup);
-    TracyCZoneEnd(ctx_frame);
-}
 
 static void panel_container(WindowContext* ctx, const Rect rect)
 {
@@ -1052,8 +978,63 @@ static void panel_container(WindowContext* ctx, const Rect rect)
     }
 }
 
+static void process_frame(WindowContext* ctx)
+{
+    if (IsIconic(ctx->window) || !IsWindowVisible(ctx->window))
+        return;
+
+    AppShared* shared = ctx->shared;
+    UIContext* ui_ctx = &ctx->ui;
+    const Theme* theme = &shared->theme;
+
+    TracyCZone(ctx_frame, 1);
+
+    isize arena_pos_backup = ui_frame_begin(ui_ctx);
+    {
+        ctx->root_panel = panel_process_pending_removes(ctx->root_panel);
+        f32 client_w = (f32)ui_ctx->client_width;
+        f32 client_h = (f32)ui_ctx->client_height;
+        Rect root_rect = { 0, 0, client_w, client_h };
+
+        UIBox* root_box = ui_box_begin(&(BoxConfig){
+            .sizing = { fixed(client_w), fixed(client_h) },
+            .rect_style = { .border_color = theme->fg_disabled, .border_thickness = 1 },
+            .color = theme->bg_base,
+        });
+        {
+            String root_hash = str("###window_bg");
+            UIBoxInteractResult rb = ui_box_interact(root_box, root_hash);
+
+            panel_container(ctx, root_rect);
+
+            /* Unhandled drop on background: create a new window with the dragged tab */
+            if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed &&
+                g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
+            {
+                TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                if (payload->drag_type == DRAG_TYPE_TAB)
+                {
+                    g_ui_ctx->drag_payload_consumed = True;
+
+                    POINT cursor_pt;
+                    GetCursorPos(&cursor_pt);
+                    char buf[128];
+                    i32 len =
+                        snprintf(buf, sizeof(buf), "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
+                                 payload->from_panel_id, payload->from_tab_id, payload->from_window_id,
+                                 (i32)cursor_pt.x, (i32)cursor_pt.y);
+                    cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
+                }
+            }
+        }
+        ui_box_end(root_box);
+    }
+    ui_frame_end(arena_pos_backup);
+    TracyCZoneEnd(ctx_frame);
+}
+
 //
-// Window procedure
+// Main
 //
 
 static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
@@ -1475,9 +1456,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
-//
-// Main
-//
+static b32 any_window_needs_frames(const AppShared* shared)
+{
+    for (const WindowContext* w = shared->first_window; w; w = w->next)
+        if (w->ui.requested_frames > 0)
+            return True;
+    return False;
+}
 
 #if !defined(NDEBUG) || defined(TRACY_ENABLE)
 i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, i32 nShowCmd)

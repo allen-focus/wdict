@@ -2221,7 +2221,7 @@ void ui_panel_end(PanelContext* pf)
 }
 
 //
-// Widgets
+// Widgets: Simple
 //
 
 #define CHECKBOX_HEIGHT   22
@@ -2349,6 +2349,10 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
 
     return result.flags;
 }
+
+//
+// Widgets: Text Field
+//
 
 static isize scan_codepoint_forward(const byte* base, const isize text_len, isize pos, isize count)
 {
