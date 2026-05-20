@@ -12,6 +12,8 @@ Simply run `build.bat`. The following commands are supported:
 
 **Option 2**: CMake with Ninja (recommended for advanced configuration)
 
+> NOTE: Unlike the batch script, CMake does not automatically initialize the MSVC compilation environment (e.g. `cl.exe`). You need to ensure that the MSVC compiler environment is available in your current session before running CMake.
+
 ```
 cmake -B build -G "Ninja Multi-Config"
 cmake --build build --config release
