@@ -2,6 +2,7 @@
 #include "utils.h"
 
 #include <imm.h>
+#include <math.h>
 #include <windows.h>
 
 #pragma comment(lib, "user32")
@@ -223,4 +224,58 @@ SystemTheme win32_get_system_theme(void)
         RegCloseKey(key);
     }
     return value != 0 ? SYSTEM_THEME_LIGHT : SYSTEM_THEME_DARK;
+}
+
+b32 win32_get_accent_border_color(Color* out_color)
+{
+    HKEY key = NULL;
+    LSTATUS status = RegOpenKeyExW(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Windows\\DWM", 0, KEY_READ, &key);
+    if (status != ERROR_SUCCESS)
+        return False;
+
+    DWORD colorization_color = 0;
+    DWORD size = sizeof(DWORD);
+    status = RegGetValueW(key, NULL, L"ColorizationColor", RRF_RT_REG_DWORD, NULL, &colorization_color, &size);
+    if (status != ERROR_SUCCESS)
+    {
+        RegCloseKey(key);
+        return False;
+    }
+
+    DWORD balance = 0;
+    size = sizeof(DWORD);
+    status = RegGetValueW(key, NULL, L"ColorizationColorBalance", RRF_RT_REG_DWORD, NULL, &balance, &size);
+    if (status != ERROR_SUCCESS)
+    {
+        RegCloseKey(key);
+        return False;
+    }
+
+    DWORD prevalence = 0;
+    size = sizeof(DWORD);
+    status = RegGetValueW(key, NULL, L"ColorPrevalence", RRF_RT_REG_DWORD, NULL, &prevalence, &size);
+
+    RegCloseKey(key);
+
+    if (!prevalence)
+        return False; /* accent colors not enabled for title bars and borders */
+
+    /**
+     * Blend the accent color with fixed color 0xd9d9d9 using the balance ratio.
+     * This matches the exact border color DWM would use. See:
+     * https://handmade.network/forums/articles/t/9073-custom_window_title_bar_and_almost_correctly_drawing_windows_10_borders
+     */
+    f32 factor_a = (f32)balance / 100.0f;
+    f32 factor_b = (f32)(100 - balance) / 100.0f;
+
+    f32 a_r = (f32)((colorization_color >> 16) & 0xff);
+    f32 a_g = (f32)((colorization_color >> 8) & 0xff);
+    f32 a_b = (f32)(colorization_color & 0xff);
+
+    out_color->r = (u8)roundf(a_r * factor_a + 217.0f * factor_b);
+    out_color->g = (u8)roundf(a_g * factor_a + 217.0f * factor_b);
+    out_color->b = (u8)roundf(a_b * factor_a + 217.0f * factor_b);
+    out_color->a = 255;
+
+    return True;
 }

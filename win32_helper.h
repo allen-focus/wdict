@@ -18,3 +18,8 @@ String win32_ime_get_result(HWND window, Arena* arena);
 void win32_ime_update_candidate(HWND window, LONG client_x, LONG client_y, Position* out_screen_pos);
 
 SystemTheme win32_get_system_theme(void);
+
+/* Returns True and fills *out_color if the user enabled accent colors for title bars
+   and window borders. out_color is the exact border color computed from the registry
+   (accent blended with 0xd9d9d9 per ColorizationColorBalance). */
+b32 win32_get_accent_border_color(Color* out_color);

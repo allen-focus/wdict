@@ -13,7 +13,7 @@
  * Colors are 0xRRGGBB — use named TracyColor_* constants below for consistency.
  */
 
-/* subsystem colours (0xRRGGBB) */
+/* subsystem colors (0xRRGGBB) */
 #define TracyColor_Frame       0x4488FF
 #define TracyColor_Layout      0x44CC44
 #define TracyColor_Render      0xFF8844

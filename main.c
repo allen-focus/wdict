@@ -1,6 +1,7 @@
 #pragma comment(lib, "kernel32")
 #pragma comment(lib, "user32")
 #pragma comment(lib, "shcore")
+#pragma comment(lib, "dwmapi")
 
 #include "cmd.h"
 #include "glyph_cache.h"
@@ -13,6 +14,7 @@
 #include "win32_helper.h"
 
 #include <ShellScalingApi.h>
+#include <dwmapi.h>
 #include <math.h>
 #include <stdio.h>
 #include <wchar.h>
@@ -47,6 +49,14 @@ typedef enum
     FONT_INDEX_ICON,
     FONT_CAPACITY
 } FontIndex;
+
+typedef enum
+{
+    TitleBarHot_None,
+    TitleBarHot_Minimize,
+    TitleBarHot_Maximize,
+    TitleBarHot_Close,
+} TitleBarHot;
 
 typedef struct
 {
@@ -116,6 +126,10 @@ typedef struct
 
     /* drag hint popup (heap-allocated — UIContext + Renderer are too large for the stack) */
     DragPopup* drag_popup;
+
+    /* accent border color (registry-derived, updated on WM_DWMCOLORIZATIONCOLORCHANGED) */
+    Color accent_border_color;
+    b32 has_accent_border;
 } AppShared;
 
 struct WindowContext
@@ -139,6 +153,16 @@ struct WindowContext
     u8 text_buf_2[TEXT_BUFFER_SIZE];
     TextEditState text_edit_1;
     TextEditState text_edit_2;
+
+    /* custom title bar */
+    Rect tb_button_minimize;
+    Rect tb_button_maximize;
+    Rect tb_button_close;
+    f32 tb_height;
+    TitleBarHot tb_hovered_button;
+
+    /* guards */
+    b32 in_frame;
 };
 
 static u32 s_window_next_id = 1; /* 0 reserved for none */
@@ -332,6 +356,18 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     {
         free(ctx);
         return NULL;
+    }
+
+    /* Custom title bar needed things */
+    {
+        // Enable immersive dark mode — required to avoid white borders from DwmExtendFrameIntoClientArea.
+        // On Windows 10, without it, there would be no border at all unless user enables accent color.
+        BOOL use_dark = TRUE;
+        DwmSetWindowAttribute(ctx->window, DWMWA_USE_IMMERSIVE_DARK_MODE, &use_dark, sizeof(use_dark));
+
+        // For users with auto-hide taskbar: without this, moving mouse to screen edge won't reveal the taskbar because
+        // maximized window blocks it. This property allows taskbar to overlay this window.
+        SetPropW(ctx->window, L"NonRudeHWND", (HANDLE)TRUE);
     }
 
     /* Init UI context */
@@ -816,6 +852,113 @@ static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
 // Frame Processing
 //
 
+// See:
+//   https://kubyshkin.name/posts/win32-window-custom-title-bar-caption
+//   https://handmade.network/forums/articles/t/9073-custom_window_title_bar_and_almost_correctly_drawing_windows_10_borders
+static f32 title_bar(WindowContext* ctx)
+{
+    AppShared* shared = ctx->shared;
+    UIContext* ui_ctx = &ctx->ui;
+    const Theme* theme = &shared->theme;
+    HWND window = ctx->window;
+
+    f32 client_w = (f32)ui_ctx->client_width;
+    f32 font_size = 12.f;
+    f32 tb_height = font_size * 2.5f + 2.f;
+    f32 button_w = tb_height;
+
+    ctx->tb_height = tb_height;
+
+    b32 is_active = GetActiveWindow() == window;
+    Color tb_bg = theme->bg_overlay;
+    Color tb_fg = is_active ? theme->fg_primary : theme->fg_secondary;
+
+    /* title bar container */
+    UIBox* tb_box = ui_box_begin(&(BoxConfig){
+        .sizing = { fixed(client_w), fixed(tb_height - 1) },
+        .color = tb_bg,
+        .direction = LAYOUT_LEFT_TO_RIGHT,
+        .alignment = { ALIGN_START, ALIGN_CENTER },
+        .padding = { 0, 0, 0, 12 },
+    });
+    {
+        /* spacer */
+        UIBox* spacer = ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(0) } });
+        ui_box_end(spacer);
+
+        /* minimize button */
+        {
+            UIBox* btn = ui_box_begin(&(BoxConfig){
+                .sizing = { fixed(button_w), fixed(tb_height - 1) },
+                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+            });
+            {
+                b32 hot_min = ctx->tb_hovered_button == TitleBarHot_Minimize;
+                UIBoxInteractResult ir = ui_box_interact(btn, str("##tb_minimize"));
+                if (ir.last_box)
+                {
+                    btn->cfg.color = !hot_min ? (Color){ 0, 0, 0, 0 } : theme->accent;
+                    ctx->tb_button_minimize = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
+                                                      ir.last_box->position.x + ir.last_box->size.width,
+                                                      ir.last_box->position.y + ir.last_box->size.height };
+                }
+                ui_text(str(""),
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = tb_fg });
+            }
+            ui_box_end(btn);
+        }
+
+        /* maximize / restore button */
+        {
+            b32 is_maximized = IsZoomed(window);
+            b32 hot_max = ctx->tb_hovered_button == TitleBarHot_Maximize;
+
+            UIBox* btn = ui_box_begin(&(BoxConfig){
+                .sizing = { fixed(button_w), fixed(tb_height - 1) },
+                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+            });
+            {
+                UIBoxInteractResult ir = ui_box_interact(btn, str("##tb_maximize"));
+                if (ir.last_box)
+                {
+                    btn->cfg.color = !hot_max ? (Color){ 0, 0, 0, 0 } : theme->accent;
+                    ctx->tb_button_maximize = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
+                                                      ir.last_box->position.x + ir.last_box->size.width,
+                                                      ir.last_box->position.y + ir.last_box->size.height };
+                }
+                ui_text(is_maximized ? str("") : str(""),
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = tb_fg });
+            }
+            ui_box_end(btn);
+        }
+
+        /* close button */
+        {
+            UIBox* btn = ui_box_begin(&(BoxConfig){
+                .sizing = { fixed(button_w), fixed(tb_height - 1) },
+                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+            });
+            {
+                b32 hot_close = ctx->tb_hovered_button == TitleBarHot_Close;
+                UIBoxInteractResult ir = ui_box_interact(btn, str("##tb_close"));
+                if (ir.last_box)
+                {
+                    btn->cfg.color = !hot_close ? (Color){ 0, 0, 0, 0 } : theme->danger;
+                    ctx->tb_button_close = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
+                                                   ir.last_box->position.x + ir.last_box->size.width,
+                                                   ir.last_box->position.y + ir.last_box->size.height };
+                }
+                ui_text(str(""),
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = tb_fg });
+            }
+            ui_box_end(btn);
+        }
+    }
+    ui_box_end(tb_box);
+
+    return tb_height;
+}
+
 static void panel_container(WindowContext* ctx, const Rect rect)
 {
     TracyCZoneNC(ctx_pc, "PanelContainer", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
@@ -1016,6 +1159,12 @@ static void process_frame(WindowContext* ctx)
     if (IsIconic(ctx->window) || !IsWindowVisible(ctx->window))
         return;
 
+    /* Guard against re-entrant ShowWindow calls (e.g., maximize/restore triggering
+       WM_SIZE -> process_frame), which would corrupt outer frame state. */
+    if (ctx->in_frame)
+        return;
+    ctx->in_frame = True;
+
     AppShared* shared = ctx->shared;
     UIContext* ui_ctx = &ctx->ui;
     const Theme* theme = &shared->theme;
@@ -1027,48 +1176,107 @@ static void process_frame(WindowContext* ctx)
         ctx->root_panel = panel_process_pending_removes(ctx->root_panel);
         f32 client_w = (f32)ui_ctx->client_width;
         f32 client_h = (f32)ui_ctx->client_height;
-        Rect root_rect = { 0, 0, client_w, client_h };
 
-        UIBox* root_box = ui_box_begin(&(BoxConfig){
+        UIBox* root_box_container = ui_box_begin(&(BoxConfig){
             .sizing = { fixed(client_w), fixed(client_h) },
-            .rect_style = { .border_color = theme->fg_disabled, .border_thickness = 1 },
-            .color = theme->bg_base,
+            .direction = LAYOUT_TOP_TO_BOTTOM,
         });
         {
-            String root_hash = str("###window_bg");
-            UIBoxInteractResult rb = ui_box_interact(root_box, root_hash);
-
-            panel_container(ctx, root_rect);
-
-            /* Unhandled drop on background: create a new window with the dragged tab */
-            if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed &&
-                g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
+            if (!IsZoomed(ctx->window))
             {
-                TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                if (payload->drag_type == DRAG_TYPE_TAB)
+                /* 1px top border — rendered outside root_box so it sits at y=0.
+                   Active: uses system accent border color when available,
+                           otherwise a darkened theme-derived line.
+                   Inactive: subtly fades into the title bar background. */
+                Color shadow_color;
+                if (GetActiveWindow() == ctx->window)
                 {
-                    g_ui_ctx->drag_payload_consumed = True;
-
-                    POINT cursor_pt;
-                    GetCursorPos(&cursor_pt);
-                    char buf[128];
-                    i32 len =
-                        snprintf(buf, sizeof(buf), "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
-                                 payload->from_panel_id, payload->from_tab_id, payload->from_window_id,
-                                 (i32)cursor_pt.x, (i32)cursor_pt.y);
-                    cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
+                    if (shared->has_accent_border)
+                        shadow_color = shared->accent_border_color;
+                    else
+                        shadow_color =
+                            (Color){ (u8)((u32)theme->bg_overlay.r * 2 / 5), (u8)((u32)theme->bg_overlay.g * 2 / 5),
+                                     (u8)((u32)theme->bg_overlay.b * 2 / 5), 255 };
                 }
+                else
+                    shadow_color =
+                        (Color){ (u8)((u32)theme->bg_overlay.r * 3 / 4), (u8)((u32)theme->bg_overlay.g * 3 / 4),
+                                 (u8)((u32)theme->bg_overlay.b * 3 / 4), 255 };
+
+                UIBox* shadow = ui_box_begin(&(BoxConfig){
+                    .sizing = { fixed(client_w), fixed(1) },
+                    .color = shadow_color,
+                });
+                ui_box_end(shadow);
             }
+
+            UIBox* root_box = ui_box_begin(&(BoxConfig){
+                .sizing = { fixed(client_w), fixed(client_h - 1) },
+                .direction = LAYOUT_TOP_TO_BOTTOM,
+                .color = theme->bg_base,
+            });
+            {
+                f32 tb_height = title_bar(ctx);
+
+                /* content area below title bar */
+                UIBox* content = ui_box_begin(&(BoxConfig){
+                    .sizing = { fixed(client_w), fixed(client_h - tb_height) },
+                });
+                {
+                    String root_hash = str("###window_bg");
+                    UIBoxInteractResult rb = ui_box_interact(content, root_hash);
+
+                    Rect panel_rect = { 0, 0, client_w, client_h - tb_height };
+                    panel_container(ctx, panel_rect);
+
+                    /* Unhandled drop on background: create a new window with the dragged tab */
+                    if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed &&
+                        g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
+                    {
+                        TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                        if (payload->drag_type == DRAG_TYPE_TAB)
+                        {
+                            g_ui_ctx->drag_payload_consumed = True;
+
+                            POINT cursor_pt;
+                            GetCursorPos(&cursor_pt);
+                            char buf[128];
+                            i32 len = snprintf(buf, sizeof(buf),
+                                               "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
+                                               payload->from_panel_id, payload->from_tab_id, payload->from_window_id,
+                                               (i32)cursor_pt.x, (i32)cursor_pt.y);
+                            cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
+                        }
+                    }
+                }
+                ui_box_end(content);
+            }
+            ui_box_end(root_box);
         }
-        ui_box_end(root_box);
+        ui_box_end(root_box_container);
     }
     ui_frame_end(arena_pos_backup);
+    ctx->in_frame = False;
     TracyCZoneEnd(ctx_frame);
 }
 
 //
 // Main
 //
+
+static TitleBarHot titlebar_hit_test_button(const WindowContext* ctx, f32 logical_x, f32 logical_y)
+{
+    if (logical_x >= ctx->tb_button_close.xmin && logical_x < ctx->tb_button_close.xmax &&
+        logical_y >= ctx->tb_button_close.ymin && logical_y < ctx->tb_button_close.ymax)
+        return TitleBarHot_Close;
+    if (logical_x >= ctx->tb_button_maximize.xmin && logical_x < ctx->tb_button_maximize.xmax &&
+        logical_y >= ctx->tb_button_maximize.ymin && logical_y < ctx->tb_button_maximize.ymax)
+        return TitleBarHot_Maximize;
+    if (logical_x >= ctx->tb_button_minimize.xmin && logical_x < ctx->tb_button_minimize.xmax &&
+        logical_y >= ctx->tb_button_minimize.ymin && logical_y < ctx->tb_button_minimize.ymax)
+        return TitleBarHot_Minimize;
+    return TitleBarHot_None;
+}
 
 static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, const WPARAM wparam, const LPARAM lparam)
 {
@@ -1081,6 +1289,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             CREATESTRUCT* create = (CREATESTRUCT*)(lparam);
             ctx = (WindowContext*)(create->lpCreateParams);
             SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)ctx);
+
+            // Force redrawing with the new client area as we draw a custom title bar
+            SetWindowPos(window, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
         }
         else
         {
@@ -1098,9 +1309,173 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
     // Handle message
     switch (message)
     {
+        // By handling WM_NCCALCSIZE and returning 0, we extend the client area
+        // into the normal title bar region so the title bar can be rendered
+        // entirely by the application.
+        case WM_NCCALCSIZE:
+        {
+            if (!wparam)
+                return DefWindowProcW(window, message, wparam, lparam);
+
+            UINT dpi = GetDpiForWindow(window);
+
+            // Standard resize border thickness provided by Windows.
+            i32 frame_x = GetSystemMetricsForDpi(SM_CXFRAME, dpi);
+            i32 frame_y = GetSystemMetricsForDpi(SM_CYFRAME, dpi);
+
+            // Extra invisible padding added by DWM for resizing/shadows/snap.
+            i32 padding = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+
+            // rc initially represents the full window rect, not the final client rect.
+            NCCALCSIZE_PARAMS* params = (NCCALCSIZE_PARAMS*)lparam;
+            RECT* rc = params->rgrc;
+
+            // NOTE:
+            //   Shrink the client rect on the left/right/bottom so Windows keeps
+            //   its invisible resize borders there.
+            //
+            //   We intentionally do NOT shrink the top edge in normal windowed mode.
+            //   This allows our custom title bar to fully cover the top frame area.
+            //
+            //   At first this may seem wrong because the top resize border is also
+            //   removed from the non-client area. However, top resizing is usually
+            //   restored manually in WM_NCHITTEST by returning HTTOP.
+            //
+            //   When maximized, Windows places part of the frame outside the monitor.
+            //   Without restoring the top inset here, the client area would extend
+            //   off-screen and the top of the UI would be clipped.
+            rc->right -= frame_x + padding;
+            rc->left += frame_x + padding;
+            rc->bottom -= frame_y + padding;
+            if (IsZoomed(window))
+                rc->top += frame_y + padding;
+
+            // Returning 0 tells Windows that we fully handled the non-client size
+            // calculation ourselves, so the default title bar and frame should not
+            // be applied.
+            return 0;
+        }
+
+        // Even though the title bar area was turned into client area in
+        // WM_NCCALCSIZE, Windows still sends WM_NCHITTEST for mouse handling.
+        //
+        // WM_NCHITTEST does not define what is client vs non-client visually.
+        // Instead, it defines how a region should behave when interacted with.
+        //
+        // This allows parts of the client area to behave like system caption
+        // buttons, resize borders, or the title bar itself.
+        case WM_NCHITTEST:
+        {
+            /* let default handle resize edges */
+            LRESULT hit = DefWindowProcW(window, message, wparam, lparam);
+            switch (hit)
+            {
+                case HTNOWHERE:
+                case HTRIGHT:
+                case HTLEFT:
+                case HTTOPLEFT:
+                case HTTOP:
+                case HTTOPRIGHT:
+                case HTBOTTOMRIGHT:
+                case HTBOTTOM:
+                case HTBOTTOMLEFT:
+                    return hit;
+            }
+
+            if (ctx)
+            {
+                UINT dpi = GetDpiForWindow(window);
+                f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+
+                POINT pt;
+                pt.x = GET_X_LPARAM(lparam);
+                pt.y = GET_Y_LPARAM(lparam);
+                ScreenToClient(window, &pt);
+
+                f32 logical_x = pt.x / dpi_scale;
+                f32 logical_y = pt.y / dpi_scale;
+
+                /* unified caption-button hit-test state machine */
+                {
+                    TitleBarHot prev = ctx->tb_hovered_button;
+                    ctx->tb_hovered_button = titlebar_hit_test_button(ctx, logical_x, logical_y);
+                    if (ctx->tb_hovered_button != prev)
+                        ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                }
+
+                if (ctx->tb_hovered_button == TitleBarHot_Maximize)
+                    return HTMAXBUTTON;
+
+                /* top resize zone — only for non-maximized windows */
+                if (!IsZoomed(window))
+                {
+                    i32 frame_y = GetSystemMetricsForDpi(SM_CYFRAME, dpi);
+                    i32 padding = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+                    if (logical_y >= 0 && logical_y < (frame_y + padding) / dpi_scale)
+                        return HTTOP;
+                }
+
+                /* title bar area → HTCAPTION (Windows handles drag / double-click maximize) */
+                /* minimize and close fall through here — they are no longer HTCLIENT */
+                if (logical_y >= 0 && logical_y < ctx->tb_height)
+                    return HTCAPTION;
+            }
+
+            return HTCLIENT;
+        }
+
+        case WM_ACTIVATE:
+        {
+            if (ctx)
+                ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+            return DefWindowProcW(window, message, wparam, lparam);
+        }
+
+        case WM_NCRBUTTONUP:
+        {
+            return 0;
+        }
+
+        case WM_NCLBUTTONDOWN:
+        {
+            if (ctx && ctx->tb_hovered_button != TitleBarHot_None)
+            {
+                ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                return 0;
+            }
+            return DefWindowProcW(window, message, wparam, lparam);
+        }
+
+        case WM_NCLBUTTONUP:
+        {
+            if (ctx)
+            {
+                TitleBarHot hot = ctx->tb_hovered_button;
+                switch (hot)
+                {
+                    case TitleBarHot_Close:
+                        PostMessageW(window, WM_CLOSE, 0, 0);
+                        break;
+                    case TitleBarHot_Maximize:
+                        ShowWindow(window, IsZoomed(window) ? SW_NORMAL : SW_MAXIMIZE);
+                        break;
+                    case TitleBarHot_Minimize:
+                        ShowWindow(window, SW_MINIMIZE);
+                        break;
+                    case TitleBarHot_None:
+                    default:
+                        return DefWindowProcW(window, message, wparam, lparam);
+                }
+                ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                return 0;
+            }
+            return DefWindowProcW(window, message, wparam, lparam);
+        }
+
         case WM_MOUSEMOVE:
         {
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+            ctx->tb_hovered_button = TitleBarHot_None;
 
             f32 dpi_scale = (f32)ui_ctx->dpi / USER_DEFAULT_SCREEN_DPI;
             Position mouse_pos_backup = ui_ctx->mouse_pos;
@@ -1449,6 +1824,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->dpi = GetDpiForWindow(window);
+
             // Per-window atlas recreated; shared raster cache NOT reset — glyphs at
             // old DPI remain available for other windows while new DPI entries accumulate.
             renderer_recreate_glyph_atlas_texture(ui_ctx->renderer);
@@ -1464,6 +1840,14 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             if (lparam && wcscmp((const wchar_t*)lparam, L"ImmersiveColorSet") == 0)
                 shared->theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
+            return 0;
+        }
+
+        case WM_DWMCOLORIZATIONCOLORCHANGED:
+        {
+            if (ctx)
+                ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+            shared->has_accent_border = win32_get_accent_border_color(&shared->accent_border_color);
             return 0;
         }
 
@@ -1507,6 +1891,7 @@ i32 WinMainCRTStartup()
 {
     AppShared shared = { 0 };
     shared.theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
+    shared.has_accent_border = win32_get_accent_border_color(&shared.accent_border_color);
 
     /* Init command infrastructure */
     shared.cfg_arena = arena_new(KB(8));
