@@ -1,3 +1,22 @@
+# TODO:
+#   LTO & PGO  (Release only, opt-in — not yet enabled)
+#
+#   LTO (Link Time Optimization)
+#     Lets the linker optimize across translation units: better inlining,
+#     dead code elimination, constant propagation across .c files.
+#     MSVC: adds /GL (compile) + /LTCG (link). Expect 5-15% runtime gain,
+#     5-10x slower links. Enable with one line:
+#       set_target_properties(${PROJECT_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+#
+#   PGO (Profile Guided Optimization)
+#     Uses real execution data to guide inlining, branch layout, and register
+#     allocation — typically 10-15% on top of LTO. Three-step process:
+#       1. Instrumented build  /GL /LTCG:PGI  — produces a slower binary that
+#          writes .pgc profile files as it runs
+#       2. Run a representative workload  (bad training data = wrong optimizations)
+#       3. Optimized build     /GL /LTCG:PGO  — compiler uses the .pgc data
+#     Not worth doing manually; automate it in CI before enabling.
+
 cmake_minimum_required(VERSION 3.16)
 project(ui C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
