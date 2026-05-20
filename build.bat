@@ -18,6 +18,12 @@ if "%ARGS:release=%" neq "!ARGS!" (
     set IsRelease=0
 )
 
+:: Set build directory and output binary
+for /f %%q in ("%~dp0.") do set BinaryName=%%~nxq
+set BuildDir=build
+set BinaryPath=%BuildDir%\%BinaryName%.exe
+if not exist %BuildDir% (mkdir %BuildDir%)
+
 :: ---------------------------------------------------------
 :: Detect compiler
 :: ---------------------------------------------------------
@@ -55,7 +61,7 @@ where /Q cl.exe || (
 :: NOTE: Comment sanitize flag as it is too slow
 :: set CompilerDebugFlags=/Od /Zi /RTC1 /fsanitize=address
 
-set CommonCompilerFlags=/nologo /W3 /WX /MP /D_CRT_SECURE_NO_WARNINGS
+set CommonCompilerFlags=/nologo /W3 /WX /MP /utf-8 /D_CRT_SECURE_NO_WARNINGS
 set CompilerDebugFlags=/Od /Zi /RTC1
 set CompilerReleaseFlags=/O2 /GS- /DNDEBUG
 
@@ -91,12 +97,6 @@ if exist "shader.hlsl" (
 :: ---------------------------------------------------------
 :: Compile
 :: ---------------------------------------------------------
-
-:: Set build directory and output binary
-for /f %%q in ("%~dp0.") do set BinaryName=%%~nxq
-set BuildDir=build
-set BinaryPath=%BuildDir%\%BinaryName%.exe
-if not exist %BuildDir% (mkdir %BuildDir%)
 
 set CompileCommand=%Compiler% %CompilerFlags% %SourceFiles% /Fe:%BinaryPath% /Fo:%BuildDir%\ /Fd:%BuildDir%\
 if exist "main.manifest" (
