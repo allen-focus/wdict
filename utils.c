@@ -15,6 +15,23 @@ u32 fnv1a_hash(const void* data, isize size)
     return hash;
 }
 
+u64 fnv1a_64(const void* data, isize size)
+{
+    u64 h = 14695981039346656037ULL;
+    const u8* p = (const u8*)data;
+    while (size--)
+        h = (h ^ *p++) * 1099511628211ULL;
+    return h;
+}
+
+u64 fnv1a_64_continue(u64 h, const void* data, isize size)
+{
+    const u8* p = (const u8*)data;
+    while (size--)
+        h = (h ^ *p++) * 1099511628211ULL;
+    return h;
+}
+
 //
 // unicode
 //

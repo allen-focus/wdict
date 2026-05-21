@@ -116,6 +116,8 @@ typedef struct
 //
 
 u32 fnv1a_hash(const void* data, isize size);
+u64 fnv1a_64(const void* data, isize size);
+u64 fnv1a_64_continue(u64 h, const void* data, isize size);
 
 //
 // unicode

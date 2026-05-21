@@ -240,12 +240,6 @@ typedef struct
     f32 half_leading;
 } TextData;
 
-typedef struct
-{
-    u8 str[HASH_STR_MAX_LENGTH];
-    isize len;
-} BoxKey;
-
 typedef enum
 {
     TRANSITION_IDLE,
@@ -282,7 +276,7 @@ struct UIBox
     UIBox* child_last;
 
     /* cached data */
-    BoxKey key;
+    u64 key_hash;
     u64 last_frame_index;
     f64 idle_timer;
 
@@ -450,7 +444,7 @@ struct UIContext
     /* box cache */
     UIBox* root;
     UIBoxCache box_cache;
-    BoxKey focused_box_key;
+    u64 focused_hash;
     Queue(UIBox, BOX_QUEUE_CAPACITY) box_queue;
     Stack(UIBox*, BOX_STACK_CAPACITY) box_stack;
 
@@ -478,7 +472,7 @@ struct UIContext
 
 typedef struct
 {
-    String hash_str;
+    u64 hash;
     Position delta;
     Position max_delta;
     Position thumb_delta;

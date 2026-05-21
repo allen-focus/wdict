@@ -31,25 +31,17 @@ void ui_request_frames(void)
 // Box cache
 //
 
-static b32 is_same_box_key_void_version(const void* a, const void* b, isize size)
+static b32 is_same_u64(const void* a, const void* b, isize size)
 {
-    Assert(size == (sizeof(u8) * HASH_STR_MAX_LENGTH + sizeof(isize)));
-    String str_a = { .data = (u8*)a, .len = *(isize*)((u8*)a + HASH_STR_MAX_LENGTH) };
-    String str_b = { .data = (u8*)b, .len = *(isize*)((u8*)b + HASH_STR_MAX_LENGTH) };
-    return str_compare(str_a, str_b);
-}
-
-static b32 hash_str_matches_box_key(const String hash_str, const BoxKey* box_key)
-{
-    String key_str = { (u8*)box_key->str, box_key->len };
-    return str_compare(key_str, hash_str);
+    (void)size;
+    return *(const u64*)a == *(const u64*)b;
 }
 
 static void box_cache_init(UIBoxCache* box_cache)
 {
     box_cache->arena = arena_new(BOX_CACHE_ARENA_CAPACITY);
     box_cache->lru_cache = lru_cache_create(&box_cache->arena, (BOX_CACHE_CAPACITY >> 1), BOX_CACHE_CAPACITY,
-                                            sizeof(BoxKey), sizeof(UIBox), fnv1a_hash, is_same_box_key_void_version);
+                                            sizeof(u64), sizeof(UIBox), fnv1a_hash, is_same_u64);
 }
 
 static void box_cache_deinit(UIBoxCache* box_cache)
@@ -97,30 +89,22 @@ static TextHash extract_hash_str(const String* text)
     return text_hash;
 }
 
-static void update_box_key(UIBox* box, String hash_str)
+static void update_box_key(UIBox* box, u64 hash)
 {
-    Assert(hash_str.len <= HASH_STR_MAX_LENGTH);
-    memcpy(box->key.str, hash_str.data, hash_str.len);
-    box->key.len = hash_str.len;
+    box->key_hash = hash;
 }
 
-static BoxKey generate_box_key(String hash_str)
+static u64 generate_box_key(String hash_str)
 {
-    Assert(hash_str.len <= HASH_STR_MAX_LENGTH);
-    BoxKey key = { 0 };
-    memcpy(key.str, hash_str.data, hash_str.len);
-    key.len = hash_str.len;
-    return key;
+    return fnv1a_64(hash_str.data, hash_str.len);
 }
 
-static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
+static UIBox* find_or_insert_box_with_hash(u64 hash)
 {
     TracyCZoneNC(ctx_boxfind, "BoxFind", TracyColor_Cache, TRACY_SUBSYSTEMS & TracySys_Cache);
     UIBoxCache* box_cache = &g_ui_ctx->box_cache;
-    BoxKey key = { .len = hash_str.len };
-    memcpy(key.str, hash_str.data, hash_str.len);
 
-    LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&box_cache->lru_cache, &key);
+    LRUCacheFindOrEvictResult lru_result = lru_cache_find_or_evict(&box_cache->lru_cache, &hash);
     UIBox* last_box =
         (UIBox*)((byte*)box_cache->lru_cache.values_buf + lru_result.index * box_cache->lru_cache.value_size);
 
@@ -137,7 +121,7 @@ static UIBox* find_or_insert_box_with_same_hash_str(const String hash_str)
                     Assert(0);
             break;
         case LRU_SIGNAL_TOINSERT:
-            memcpy(&last_box->key, &key, sizeof(key));
+            last_box->key_hash = hash;
             break;
         case LRU_SIGNAL_TOEVICT:
         default:
@@ -702,11 +686,10 @@ static void ui_box_resolve_position(UIBox* box)
         }
     }
 
-    /* Update the box size and position in box cache if the box has a hash string */
-    if (box->key.len)
+    /* Update the box size and position in box cache if the box has a hash */
+    if (box->key_hash)
     {
-        String box_hash_str = { box->key.str, box->key.len };
-        UIBox* last_box = find_or_insert_box_with_same_hash_str(box_hash_str);
+        UIBox* last_box = find_or_insert_box_with_hash(box->key_hash);
         Assert(last_box);
         last_box->size = box->size;
         last_box->position = box->position;
@@ -883,9 +866,10 @@ static void ui_generate_render_commands(const UIBox* box, const Rect clip)
                              .shear = box->cfg.rect_style.shear * dpi_scale };
 
     /* Store clip rect (ancestor restrictions) for interaction culling */
-    if (box->key.len)
+    if (box->key_hash)
     {
-        LRUCacheFindResult find_result = lru_cache_find(&g_ui_ctx->box_cache.lru_cache, &box->key);
+        u64 key = box->key_hash;
+        LRUCacheFindResult find_result = lru_cache_find(&g_ui_ctx->box_cache.lru_cache, &key);
         if (find_result.found)
         {
             UIBox* last_box = (UIBox*)((byte*)g_ui_ctx->box_cache.lru_cache.values_buf +
@@ -1117,10 +1101,11 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
 
 UIBoxInteractResult ui_box_interact(UIBox* box, const String hash_str)
 {
+    u64 hash = fnv1a_64(hash_str.data, hash_str.len);
     UIBoxInteractResult result = { .flags = UI_Signal_Flag_None, .last_box = NULL };
-    result.last_box = find_or_insert_box_with_same_hash_str(hash_str);
+    result.last_box = find_or_insert_box_with_hash(hash);
     update_interaction_flags(result.last_box, &result.flags);
-    update_box_key(box, hash_str);
+    update_box_key(box, hash);
     return result;
 }
 
@@ -1341,14 +1326,12 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
 
     /* Get last bar and thumb box from cache */
     UISignalFlags bar_flags = UI_Signal_Flag_None;
-    String bar_hash_str =
-        str_concat(&g_ui_ctx->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hbar)") : str(" (vbar)"));
-    UIBox* last_bar = find_or_insert_box_with_same_hash_str(bar_hash_str);
+    u64 bar_hash = fnv1a_64_continue(scroll_ctx.hash, is_horizontal ? " (hbar)" : " (vbar)", 7);
+    UIBox* last_bar = find_or_insert_box_with_hash(bar_hash);
 
     UISignalFlags thumb_flags = UI_Signal_Flag_None;
-    String thumb_hash_str =
-        str_concat(&g_ui_ctx->arena, scroll_ctx.hash_str, is_horizontal ? str(" (hthumb)") : str(" (vthumb)"));
-    UIBox* last_thumb = find_or_insert_box_with_same_hash_str(thumb_hash_str);
+    u64 thumb_hash = fnv1a_64_continue(scroll_ctx.hash, is_horizontal ? " (hthumb)" : " (vthumb)", 9);
+    UIBox* last_thumb = find_or_insert_box_with_hash(thumb_hash);
 
     /* [THUMB] Handle interaction and transition */
     if (last_thumb)
@@ -1493,7 +1476,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                     .rect_style = { .corner_radius = thickness / 2 }
                 });
                 ui_box_end(thumb);
-                update_box_key(thumb, thumb_hash_str);
+                update_box_key(thumb, thumb_hash);
                 ui_box_end(thumb_container);
             }
             ui_box_end(track);
@@ -1503,7 +1486,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
         ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = L.padding_end_sizing, .alignment = { ALIGN_END, ALIGN_CENTER } }));
     }
     ui_box_end(bar_container);
-    update_box_key(bar_container, bar_hash_str);
+    update_box_key(bar_container, bar_hash);
     // clang-format on
     TracyCZoneEnd(ctx_sb);
 }
@@ -1525,8 +1508,8 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
     UIBoxInteractResult result = ui_box_interact(scroll_ctx.area, cfg->hash_str);
     scroll_ctx.area_flags = result.flags;
     scroll_ctx.last_area = result.last_box;
-    scroll_ctx.hash_str = (String){ result.last_box->key.str, result.last_box->key.len };
-    String content_hash_str = str_concat(&g_ui_ctx->arena, cfg->hash_str, str(" (content box)"));
+    scroll_ctx.hash = fnv1a_64(cfg->hash_str.data, cfg->hash_str.len);
+    u64 content_hash = fnv1a_64_continue(scroll_ctx.hash, " (content box)", 14);
 
     /* Update scroll delta */
     scroll_ctx.last_area->scroll_delta.x = evaluate_timed_lerp(&scroll_ctx.last_area->scroll_anim_x, now);
@@ -1538,7 +1521,7 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
         ui_request_frames();
 
     /* Prepare content result for _end() */
-    scroll_ctx.last_content = find_or_insert_box_with_same_hash_str(content_hash_str);
+    scroll_ctx.last_content = find_or_insert_box_with_hash(content_hash);
     Assert(scroll_ctx.last_content);
 
     /* Create container & inner container & content box */
@@ -1549,7 +1532,7 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
                                                 .child_gap = cfg->child_gap,
                                                 .direction = cfg->direction,
                                                 .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
-    update_box_key(content, content_hash_str);
+    update_box_key(content, content_hash);
 
     TracyCZoneEnd(ctx_sab);
     return scroll_ctx;
@@ -2566,9 +2549,10 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
 
     /* Handle interaction */
     TextHash text_hash = extract_hash_str(&text_with_hash_str);
-    String content_key = str_concat(&g_ui_ctx->arena, text_hash.hash_str, str(" (content box)"));
+    u64 text_hash_key = fnv1a_64(text_hash.hash_str.data, text_hash.hash_str.len);
+    u64 content_hash = fnv1a_64_continue(text_hash_key, " (content box)", 14);
     isize cursor_before = state->cursor;
-    b32 is_focused = hash_str_matches_box_key(text_hash.hash_str, &g_ui_ctx->focused_box_key);
+    b32 is_focused = text_hash_key == g_ui_ctx->focused_hash;
     if (is_focused)
     {
         /* IME composition: delete previous range, then insert new composition */
@@ -2744,7 +2728,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         if (is_focused && g_ui_ctx->mouse_press && !g_ui_ctx->mouse_lclick && state->text_len > 0 &&
             (g_ui_ctx->mouse_delta.x != 0.f || g_ui_ctx->mouse_delta.y != 0.f))
         {
-            UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
+            UIBox* last_inner_box = find_or_insert_box_with_hash(content_hash);
             if (last_inner_box)
             {
                 f32 click_x = g_ui_ctx->mouse_pos.x - last_inner_box->position.x - padding.left;
@@ -2792,12 +2776,12 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         {
             if (ui_lclicked(result.flags))
             {
-                g_ui_ctx->focused_box_key = generate_box_key(text_hash.hash_str);
+                g_ui_ctx->focused_hash = generate_box_key(text_hash.hash_str);
 
                 /* Position cursor at click point */
                 if (state->text_len > 0)
                 {
-                    UIBox* last_inner_box = find_or_insert_box_with_same_hash_str(content_key);
+                    UIBox* last_inner_box = find_or_insert_box_with_hash(content_hash);
                     if (last_inner_box)
                     {
                         f32 click_x = g_ui_ctx->mouse_pos.x - last_inner_box->position.x - padding.left;
@@ -2992,7 +2976,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     }
                 }
                 ui_box_end(inner);
-                update_box_key(inner, content_key);
+                update_box_key(inner, content_hash);
             }
             ui_scrollable_area_end(scroll_ctx);
         }
