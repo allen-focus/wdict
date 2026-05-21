@@ -2,9 +2,9 @@
 
 #include "glyph_cache.h"
 #include "utils.h"
-#include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_3.h>
+#include <windows.h>
 
 ///
 

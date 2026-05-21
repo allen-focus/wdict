@@ -1136,21 +1136,37 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 //       The current text width calculation is VERY heavy (and probably shouldn't be called so many
                 //       times!). Just tried 10 rounds, and the FPS dropped to ~8 frames per second on my laptop. With
                 //       `.wrap = False`, 10 rounds give ~70 FPS. With 0 rounds, ~110 FPS.
-                for (isize i = 0; i < 0; i++)
+                // clang-format off
+                for (isize i = 0; i < 10; i++)
+                {
                     ui_text(
-                        str("Dream of the Red Chamber has a complicated textual history that scholars have long "
-                            "debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. "
-                            "Cao was a member of a prominent Chinese family that had served the Manchu emperors of the "
-                            "Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 "
-                            "or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, "
-                            "and he may have written drafts of the remaining chapters. These hand-copied manuscripts "
-                            "circulated first among his personal friends and a growing circle of aficionados, then "
-                            "eventually on the open market where they sold for large sums of money."),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
-                                       .font_size = 11,
-                                       .color = theme->fg_primary,
-                                       .line_height = 20,
-                                       .wrap = True });
+                            str("《红楼梦》也称《石头记》，中国古典长篇章回小说，被视为四大小说名著之一。《红楼梦》书内提及"
+                                "的别名，还有《情僧录》、《金玉缘》、《风月宝鉴》、《金陵十二钗》。故事是从女娲补天时所剩下"
+                                "的一块石头讲起，因无才补天而随神瑛侍者入世，幻化为贾宝玉与降世时口衔的美玉（贾宝玉即“假宝"
+                                "玉”）游历世间最后归彼大荒，因此又名《石头记》。乾隆四十九年甲辰（1784年）梦觉主人序本题为"
+                                "《红楼梦》（甲辰梦序抄本）。1791年在第一次活字印刷（程甲本）后，《红楼梦》便取代《石头记》"
+                                "成为通行的书名。"),
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                           .font_size = 11,
+                                           .color = theme->fg_primary,
+                                           .line_height = 20,
+                                           .wrap = True });
+                    ui_text(
+                            str("Dream of the Red Chamber has a complicated textual history that scholars have long "
+                                "debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. "
+                                "Cao was a member of a prominent Chinese family that had served the Manchu emperors of the "
+                                "Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 "
+                                "or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, "
+                                "and he may have written drafts of the remaining chapters. These hand-copied manuscripts "
+                                "circulated first among his personal friends and a growing circle of aficionados, then "
+                                "eventually on the open market where they sold for large sums of money."),
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
+                                           .font_size = 11,
+                                           .color = theme->fg_primary,
+                                           .line_height = 20,
+                                           .wrap = True });
+                }
+                // clang-format on
             }
         }
         ui_panel_end(&panel);

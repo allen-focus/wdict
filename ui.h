@@ -230,6 +230,13 @@ typedef struct
 
 typedef struct
 {
+    isize byte_start;
+    isize byte_end;
+    f32 width;
+} WordBreak;
+
+typedef struct
+{
     const Font* font;
     f32 font_size;
     String content;
@@ -238,6 +245,9 @@ typedef struct
     isize line_count;
     f32 line_height;
     f32 half_leading;
+    Slice(WordBreak) words;
+    f32 space_width;
+    f32 full_text_width;
 } TextData;
 
 typedef enum

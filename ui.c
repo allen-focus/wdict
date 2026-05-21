@@ -280,19 +280,26 @@ UIBox* ui_text(const String text, const TextConfig* text_cfg)
         text_box->data.text.line_count = 1;
         text_box->data.text.line_height = line_height;
         text_box->data.text.half_leading = (line_height - base_line_height) / 2.0f;
+        memset(&text_box->data.text.words, 0, sizeof(text_box->data.text.words));
+        text_box->data.text.space_width = 0;
+        text_box->data.text.full_text_width = fixed_width;
     }
 
-    /* Calculate box->cfg.sizing.width.value.min by finding the width of the longest word in the text. */
+    /* Build word-break array and compute width constraints. */
     f32 min_width = 0;
-    f32 whole_text_width = 0;
+    f32 whole_text_width = fixed_width;
     isize word_count = 0;
     {
         String text = text_box->data.text.content;
         if (text_cfg->wrap)
         {
+            f32 space_w = get_text_width(renderer, raster_cache, str(" "), text_box->data.text.font,
+                                         text_box->data.text.font_size, dpi);
+            text_box->data.text.space_width = space_w;
+
             isize start = 0;
             const byte* ptr = text.data;
-            do
+            while (ptr - text.data < text.len)
             {
                 UnicodeDecode res_current = utf8_decode(ptr);
                 const byte* next = res_current.next_p;
@@ -301,30 +308,38 @@ UIBox* ui_text(const String text, const TextConfig* text_cfg)
                     UnicodeDecode res_start = utf8_decode(&text.data[start]);
                     if (res_start.codepoint != ' ')
                     {
-                        /* For ASCII: measure up to current position (word boundary before delimiter).
-                        For non-ASCII: include this character itself, treating it as a single-word unit. */
                         isize end = res_start.codepoint < 127 ? ptr - text.data : next - text.data;
                         f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, end),
                                                         text_box->data.text.font, text_box->data.text.font_size, dpi);
+
+                        WordBreak* wb = slice_push(&g_ui_ctx->arena, &text_box->data.text.words);
+                        wb->byte_start = start;
+                        wb->byte_end = end;
+                        wb->width = word_width;
+
                         min_width = max(min_width, word_width);
                         word_count++;
                     }
                     start = next - text.data;
                 }
                 ptr = next;
-            } while (ptr - text.data < text.len);
+            }
 
             /* Handle last word */
             if (start < text.len && text.data[start] != ' ')
             {
                 f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, text.len),
                                                 text_box->data.text.font, text_box->data.text.font_size, dpi);
+
+                WordBreak* wb = slice_push(&g_ui_ctx->arena, &text_box->data.text.words);
+                wb->byte_start = start;
+                wb->byte_end = text.len;
+                wb->width = word_width;
+
                 min_width = max(min_width, word_width);
                 word_count++;
             }
         }
-        whole_text_width =
-            get_text_width(renderer, raster_cache, text, text_box->data.text.font, text_box->data.text.font_size, dpi);
         min_width = (min_width != 0) ? min_width : whole_text_width;
     }
     text_box->cfg.sizing.width.min_max.min = min_width;
@@ -706,55 +721,58 @@ static void ui_box_resolve_position(UIBox* box)
 static void perform_text_wrapping(UIBox* text_box)
 {
     TracyCZoneNC(ctx_wp, "TextWrap", TracyColor_Layout, TRACY_SUBSYSTEMS & TracySys_Layout);
-    u32 dpi = g_ui_ctx->dpi;
-    GlyphRasterCache* raster_cache = g_ui_ctx->raster_cache;
-    get_text_width_fn get_text_width = g_ui_ctx->render_fn.get_text_width;
-    struct Renderer* renderer = g_ui_ctx->renderer;
 
-    const Font* font = text_box->data.text.font;
-    f32 font_size = text_box->data.text.font_size;
-    String text = text_box->data.text.content;
+    TextData* td = &text_box->data.text;
+    String text = td->content;
     f32 max_width = text_box->size.width;
 
-    if (get_text_width(renderer, raster_cache, text, font, font_size, dpi) <= max_width)
+    if (td->full_text_width <= max_width || td->words.len == 0)
     {
         TracyCZoneEnd(ctx_wp);
         return;
     }
 
-    isize line_start = 0;
-    isize last_break = 0;
+    WordBreak* words = td->words.data;
+    isize word_count = td->words.len;
+    f32 space_width = td->space_width;
 
-    const byte* ptr = text.data;
-    while (ptr - text.data < text.len)
+    /* Reset wrapped lines (arena-allocated, cleared each frame) */
+    td->wrapped_lines.len = 0;
+
+    f32 line_width = 0;
+    isize line_word_start = 0;
+
+    for (isize i = 0; i < word_count; i++)
     {
-        UnicodeDecode res = utf8_decode(ptr);
-        const byte* next = res.next_p;
-        isize distance = ptr - text.data;
-
-        /* Check width */
-        f32 width = get_text_width(renderer, raster_cache, str_slice(text, line_start, distance), font, font_size, dpi);
-        if (width > max_width && last_break > line_start)
+        f32 w_width = words[i].width;
+        if (i > line_word_start)
         {
-            *slice_push(&g_ui_ctx->arena, &text_box->data.text.wrapped_lines) = str_slice(text, line_start, last_break);
-
-            /* Skip space if needed */
-            line_start = (text.data[last_break] == ' ') ? last_break + 1 : last_break;
-            last_break = line_start;
-            continue;
+            isize gap = words[i].byte_start - words[i - 1].byte_end;
+            w_width += (f32)gap * space_width;
         }
 
-        /* Update break position */
-        if (res.codepoint == ' ' || res.codepoint > 127)
-            last_break = distance;
-
-        ptr = next;
+        if (line_width + w_width > max_width && i > line_word_start)
+        {
+            isize emit_start = words[line_word_start].byte_start;
+            isize emit_end = words[i - 1].byte_end;
+            *slice_push(&g_ui_ctx->arena, &td->wrapped_lines) = str_slice(text, emit_start, emit_end);
+            line_word_start = i;
+            line_width = words[i].width;
+        }
+        else
+        {
+            line_width += w_width;
+        }
     }
 
-    /* Handle last line */
-    *slice_push(&g_ui_ctx->arena, &text_box->data.text.wrapped_lines) = str_slice(text, line_start, text.len);
+    if (line_word_start < word_count)
+    {
+        *slice_push(&g_ui_ctx->arena, &td->wrapped_lines) =
+            str_slice(text, words[line_word_start].byte_start, text.len);
+    }
 
-    text_box->size.height = text_box->data.text.line_height * text_box->data.text.wrapped_lines.len;
+    td->line_count = td->wrapped_lines.len;
+    text_box->size.height = td->line_height * (f32)td->wrapped_lines.len;
     text_box->cfg.sizing.height.min_max.min = text_box->size.height;
     TracyCZoneEnd(ctx_wp);
 }
