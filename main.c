@@ -1338,7 +1338,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             if (!wparam)
                 return DefWindowProcW(window, message, wparam, lparam);
 
-            UINT dpi = GetDpiForWindow(window);
+            u32 dpi = ui_ctx->dpi ? ui_ctx->dpi : GetDpiForWindow(window);
 
             // Standard resize border thickness provided by Windows.
             i32 frame_x = GetSystemMetricsForDpi(SM_CXFRAME, dpi);
@@ -1405,7 +1405,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
             if (ctx)
             {
-                UINT dpi = GetDpiForWindow(window);
+                u32 dpi = ui_ctx->dpi;
                 f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
 
                 POINT pt;
