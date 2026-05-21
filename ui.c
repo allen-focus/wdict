@@ -1812,11 +1812,17 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
     for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next)
         tab->frame_declared = True;
 
-    Rect rect = panel_calc_rect(cfg->panel, cfg->root_rect);
+    /* Use pre-computed panel rect from caller when provided */
+    Rect rect;
+    if (cfg->panel_rect.xmax > cfg->panel_rect.xmin || cfg->panel_rect.ymax > cfg->panel_rect.ymin)
+        rect = cfg->panel_rect;
+    else
+        rect = panel_calc_rect(cfg->panel, cfg->root_rect);
     f32 pad = 1.f;
     Rect inner = { rect.xmin + pad, rect.ymin + pad, rect.xmax - pad, rect.ymax - pad };
     f32 iw = max(0.f, inner.xmax - inner.xmin);
     f32 ih = max(0.f, inner.ymax - inner.ymin);
+    Rect tab_bar_spacer_rect = { 0 };
 
     UIBox* outer_box = ui_box_begin(&(BoxConfig){
         .sizing = { fixed(iw), fixed(ih) },
@@ -1831,8 +1837,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         ui_box_interact(outer_box, key);
     }
 
-    /* tab bar */
-    UIBox* tab_bar = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+    /* tab bar — height matches decoration (min/max/close) buttons */
+    f32 tab_bar_h = cfg->font_size * 2.5f + 2.f - 1;
+    UIBox* tab_bar = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fixed(tab_bar_h) },
                                                 .color = cfg->theme->tab_bar,
                                                 .alignment = { ALIGN_START, ALIGN_CENTER } });
     {
@@ -1848,8 +1855,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             i32 tab_key_len = snprintf((char*)tab_key, sizeof(tab_key), "###tab_%u_%u", cfg->panel->id, tab->id);
             String tab_key_str = { tab_key, tab_key_len };
 
-            UIBox* tab_container =
-                ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+            UIBox* tab_container = ui_box_begin(
+                &(BoxConfig){ .sizing = { fit({}), fixed(tab_bar_h) }, .direction = LAYOUT_TOP_TO_BOTTOM });
             {
                 /* tab interaction */
                 UIBoxInteractResult r = ui_box_interact(tab_container, tab_key_str);
@@ -1883,7 +1890,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                     Color line_c = cfg->theme->tab_drag_target_bg_accent;
                     UIBox* line = ui_box_begin(&(BoxConfig){
-                        .sizing = { fixed(3), fixed(27) },
+                        .sizing = { fixed(3), fixed(tab_bar_h - 1) },
                         .flags = BoxFlag_Float,
                         .float_offset = { line_x, 0 },
                     });
@@ -1905,7 +1912,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                 /* tab title & close button */
                 UIBox* box = ui_box_begin(&(BoxConfig){
-                    .sizing = { fit({}), fit({}) },
+                    .sizing = { fit({}), fixed(tab_bar_h - 1) },
                     .padding = { 5, 10, 5, 10 },
                     .direction = LAYOUT_LEFT_TO_RIGHT,
                     .child_gap = 4,
@@ -2049,7 +2056,18 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                 b32 spacer_drop = ui_drag_over(dr.flags) && g_ui_ctx->drag_payload_size;
                 if (dr.last_box)
+                {
                     update_transition(&dr.last_box->hot_t, 15.f, spacer_drop ? 1.f : 0.f);
+
+                    /* capture spacer absolute rect for HTCAPTION hit-test */
+                    {
+                        f32 sx = dr.last_box->position.x;
+                        f32 sy = dr.last_box->position.y;
+                        f32 sw = dr.last_box->size.width;
+                        f32 sh = dr.last_box->size.height;
+                        tab_bar_spacer_rect = (Rect){ sx, sy, sx + sw, sy + sh };
+                    }
+                }
                 f32 st = dr.last_box ? dr.last_box->hot_t : 0.f;
 
                 /* insertion indicator line at spacer left edge (append position) */
@@ -2115,6 +2133,24 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
         }
         ui_box_end(spacer_container);
+
+        /* inset filler — invisible box that reserves space for decoration buttons.
+           Pushes the spacer leftward by exactly tab_bar_right_inset pixels. */
+        if (cfg->tab_bar_right_inset > 0)
+        {
+            UIBox* inset_container =
+                ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+            {
+                ui_box_end(ui_box_begin(&(BoxConfig){
+                    .sizing = { fixed(cfg->tab_bar_right_inset), grow({}) },
+                }));
+
+                /* underline */
+                ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(cfg->tab_bar_right_inset), fixed(1) },
+                                                      .color = cfg->theme->tab_splitter }));
+            }
+            ui_box_end(inset_container);
+        }
     }
     ui_box_end(tab_bar);
 
@@ -2135,6 +2171,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         .outer_box = outer_box,
                         .panel_w = iw,
                         .panel_h = ih,
+                        .tab_bar_spacer_rect = tab_bar_spacer_rect,
                         .window_id = cfg->window_id,
                         .cmd_queue = cfg->cmd_queue,
                         .theme = cfg->theme,
@@ -2160,7 +2197,7 @@ void ui_panel_end(PanelContext* pf)
         //   |   | Bottom |    |
         //   +---+--------+----+
         //
-        f32 tab_bar_h = 28.f; // TODO: Hard-code it because of lazy (and hard ...)
+        f32 tab_bar_h = pf->font_size * 2.5f + 2.f - 1; // TODO: don't hard-code ...
         f32 usable_w = pf->panel_w;
         f32 usable_h = pf->panel_h - tab_bar_h;
         f32 pad = 12.f;
@@ -2703,6 +2740,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
 
         /* Mouse drag to extend selection (only continue existing press, not new click) */
+        // TODO: Need to capture the mouse even outside the field area while the button is held down
         if (is_focused && g_ui_ctx->mouse_press && !g_ui_ctx->mouse_lclick && state->text_len > 0 &&
             (g_ui_ctx->mouse_delta.x != 0.f || g_ui_ctx->mouse_delta.y != 0.f))
         {
@@ -2723,7 +2761,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
     }
 
-    /* Cursor glide/trail animation */
+    /* Copy and Cursor glide/trail animation */
     update_transition(&state->copy_t, 1.5f, 0.f);
     if (is_focused)
     {

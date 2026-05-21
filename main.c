@@ -35,10 +35,11 @@
 #    define IDLE_WAKE_FRAMES 4
 #endif
 
-#define MAX_TITLE_LENGTH 64
-#define TEXT_BUFFER_SIZE 1024
-#define MAX_WINDOWS      16
-#define CMD_ARENA_SIZE   KB(64)
+#define MAX_TITLE_LENGTH      64
+#define TEXT_BUFFER_SIZE      1024
+#define MAX_WINDOWS           16
+#define MAX_DECORATION_SPACER 16
+#define CMD_ARENA_SIZE        KB(64)
 
 typedef enum
 {
@@ -154,11 +155,13 @@ struct WindowContext
     TextEditState text_edit_1;
     TextEditState text_edit_2;
 
-    /* custom title bar */
-    Rect tb_button_minimize;
-    Rect tb_button_maximize;
-    Rect tb_button_close;
-    f32 tb_height;
+    /* decoration (window-level overlay) */
+    Rect decoration_minimize;
+    Rect decoration_maximize;
+    Rect decoration_close;
+    f32 decoration_buttons_width;
+    Rect decoration_spacer_rects[MAX_DECORATION_SPACER];
+    isize decoration_spacer_count;
     TitleBarHot tb_hovered_button;
 
     /* guards */
@@ -849,115 +852,107 @@ static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
 }
 
 //
-// Frame Processing
+// Decoration overlay — window-level min/max/close buttons rendered as
+// float-positioned boxes at the top-right corner.  Drawn AFTER all panel
+// content so they always appear on top.
 //
-
-// See:
-//   https://kubyshkin.name/posts/win32-window-custom-title-bar-caption
-//   https://handmade.network/forums/articles/t/9073-custom_window_title_bar_and_almost_correctly_drawing_windows_10_borders
-static f32 title_bar(WindowContext* ctx)
+static void decoration_overlay(WindowContext* ctx)
 {
     AppShared* shared = ctx->shared;
     UIContext* ui_ctx = &ctx->ui;
     const Theme* theme = &shared->theme;
     HWND window = ctx->window;
-
     f32 client_w = (f32)ui_ctx->client_width;
-    f32 font_size = 12.f;
-    f32 tb_height = font_size * 2.5f + 2.f;
-    f32 button_w = tb_height;
+    f32 client_h = (f32)ui_ctx->client_height;
 
-    ctx->tb_height = tb_height;
+    f32 font_size = 12.f;
+    f32 button_h = font_size * 2.5f + 2.f - 1;
+    f32 button_w = button_h + 1; /* square-ish */
+    f32 total_w = button_w * 3;
+    f32 start_x = client_w - total_w;
+
+    ctx->decoration_buttons_width = total_w;
 
     b32 is_active = GetActiveWindow() == window;
-    Color tb_bg = theme->bg_overlay;
-    Color tb_fg = is_active ? theme->fg_primary : theme->fg_secondary;
+    b32 is_maximized = IsZoomed(window);
+    Color fg = is_active ? theme->fg_primary : theme->fg_secondary;
 
-    /* title bar container */
-    UIBox* tb_box = ui_box_begin(&(BoxConfig){
-        .sizing = { fixed(client_w), fixed(tb_height - 1) },
-        .color = tb_bg,
-        .direction = LAYOUT_LEFT_TO_RIGHT,
-        .alignment = { ALIGN_START, ALIGN_CENTER },
-        .padding = { 0, 0, 0, 12 },
-    });
+    /* minimize */
     {
-        /* spacer */
-        UIBox* spacer = ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(0) } });
-        ui_box_end(spacer);
-
-        /* minimize button */
+        UIBox* btn = ui_box_begin(&(BoxConfig){
+            .sizing = { fixed(button_w), fixed(button_h) },
+            .flags = BoxFlag_Float,
+            .float_offset = { start_x, -(client_h - 1) },
+            .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+        });
         {
-            UIBox* btn = ui_box_begin(&(BoxConfig){
-                .sizing = { fixed(button_w), fixed(tb_height - 1) },
-                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
-            });
+            b32 hot = (ctx->tb_hovered_button == TitleBarHot_Minimize);
+            UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_minimize"));
+            if (ir.last_box)
             {
-                b32 hot_min = ctx->tb_hovered_button == TitleBarHot_Minimize;
-                UIBoxInteractResult ir = ui_box_interact(btn, str("##tb_minimize"));
-                if (ir.last_box)
-                {
-                    btn->cfg.color = !hot_min ? (Color){ 0, 0, 0, 0 } : theme->accent;
-                    ctx->tb_button_minimize = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
-                                                      ir.last_box->position.x + ir.last_box->size.width,
-                                                      ir.last_box->position.y + ir.last_box->size.height };
-                }
-                ui_text(str(""),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = tb_fg });
-            }
-            ui_box_end(btn);
-        }
-
-        /* maximize / restore button */
-        {
-            b32 is_maximized = IsZoomed(window);
-            b32 hot_max = ctx->tb_hovered_button == TitleBarHot_Maximize;
-
-            UIBox* btn = ui_box_begin(&(BoxConfig){
-                .sizing = { fixed(button_w), fixed(tb_height - 1) },
-                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
-            });
-            {
-                UIBoxInteractResult ir = ui_box_interact(btn, str("##tb_maximize"));
-                if (ir.last_box)
-                {
-                    btn->cfg.color = !hot_max ? (Color){ 0, 0, 0, 0 } : theme->accent;
-                    ctx->tb_button_maximize = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
-                                                      ir.last_box->position.x + ir.last_box->size.width,
-                                                      ir.last_box->position.y + ir.last_box->size.height };
-                }
-                ui_text(is_maximized ? str("") : str(""),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = tb_fg });
-            }
-            ui_box_end(btn);
-        }
-
-        /* close button */
-        {
-            UIBox* btn = ui_box_begin(&(BoxConfig){
-                .sizing = { fixed(button_w), fixed(tb_height - 1) },
-                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
-            });
-            {
-                b32 hot_close = ctx->tb_hovered_button == TitleBarHot_Close;
-                UIBoxInteractResult ir = ui_box_interact(btn, str("##tb_close"));
-                if (ir.last_box)
-                {
-                    btn->cfg.color = !hot_close ? (Color){ 0, 0, 0, 0 } : theme->danger;
-                    ctx->tb_button_close = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
+                btn->cfg.color = hot ? theme->accent : (Color){ 0, 0, 0, 0 };
+                ctx->decoration_minimize = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
                                                    ir.last_box->position.x + ir.last_box->size.width,
                                                    ir.last_box->position.y + ir.last_box->size.height };
-                }
-                ui_text(str(""),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = tb_fg });
             }
-            ui_box_end(btn);
+            ui_text(str("\xEE\xA4\xA1"),
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = fg });
         }
+        ui_box_end(btn);
     }
-    ui_box_end(tb_box);
 
-    return tb_height;
+    /* maximize / restore */
+    {
+        UIBox* btn = ui_box_begin(&(BoxConfig){
+            .sizing = { fixed(button_w), fixed(button_h) },
+            .flags = BoxFlag_Float,
+            .float_offset = { start_x + button_w, -(client_h - 1) },
+            .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+        });
+        {
+            b32 hot = (ctx->tb_hovered_button == TitleBarHot_Maximize);
+            UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_maximize"));
+            if (ir.last_box)
+            {
+                btn->cfg.color = hot ? theme->accent : (Color){ 0, 0, 0, 0 };
+                ctx->decoration_maximize = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
+                                                   ir.last_box->position.x + ir.last_box->size.width,
+                                                   ir.last_box->position.y + ir.last_box->size.height };
+            }
+            ui_text(is_maximized ? str("\xEE\xA4\xA3") : str("\xEE\xA4\xA2"),
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = fg });
+        }
+        ui_box_end(btn);
+    }
+
+    /* close */
+    {
+        UIBox* btn = ui_box_begin(&(BoxConfig){
+            .sizing = { fixed(button_w), fixed(button_h) },
+            .flags = BoxFlag_Float,
+            .float_offset = { start_x + button_w * 2, -(client_h - 1) },
+            .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+        });
+        {
+            b32 hot = (ctx->tb_hovered_button == TitleBarHot_Close);
+            UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_close"));
+            if (ir.last_box)
+            {
+                btn->cfg.color = hot ? theme->danger : (Color){ 0, 0, 0, 0 };
+                ctx->decoration_close = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
+                                                ir.last_box->position.x + ir.last_box->size.width,
+                                                ir.last_box->position.y + ir.last_box->size.height };
+            }
+            ui_text(str("\xEE\xA2\xBB"),
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL], .font_size = 10, .color = fg });
+        }
+        ui_box_end(btn);
+    }
 }
+
+//
+// Frame Processing
+//
 
 static void panel_container(WindowContext* ctx, const Rect rect)
 {
@@ -1004,15 +999,32 @@ static void panel_container(WindowContext* ctx, const Rect rect)
         }
     }
 
+    ctx->decoration_spacer_count = 0;
+    f32 decoration_w = ctx->decoration_buttons_width;
+
     for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
     {
         /* Only handle leaf nodes. Internal nodes are not real UI containers and should be skipped */
         if (p->child_a)
             continue;
 
+        /* Pre-compute panel rect and reserve space for window caption buttons.
+           Only the top-right leaf panel needs the inset, otherwise tabs would
+           render underneath the minimize/maximize/close buttons. */
+        Rect r = panel_calc_rect(p, rect);
+        b32 touches_top = (r.ymin <= rect.ymin + 0.5f);
+        b32 touches_right = (r.xmax >= rect.xmax - 0.5f);
+        f32 inset = 0;
+        {
+            if (touches_top && touches_right)
+                inset = decoration_w;
+        }
+
         PanelContext panel = ui_panel_begin(&(PanelConfig){
             .panel = p,
             .root_rect = rect,
+            .panel_rect = r,
+            .tab_bar_right_inset = inset,
             .theme = &pt,
             .font_ui = &shared->fonts[FONT_INDEX_UI],
             .font_size = 12,
@@ -1142,6 +1154,11 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             }
         }
         ui_panel_end(&panel);
+
+        /* Store spacer rect for HTCAPTION hit-testing (one-frame delay) */
+        if (touches_top && ctx->decoration_spacer_count < 16)
+            ctx->decoration_spacer_rects[ctx->decoration_spacer_count++] = panel.tab_bar_spacer_rect;
+        Assert(ctx->decoration_spacer_count <= ctx->decoration_spacer_count);
     }
 
     /* Clean up tabs not declared this frame */
@@ -1216,17 +1233,15 @@ static void process_frame(WindowContext* ctx)
                 .color = theme->bg_base,
             });
             {
-                f32 tb_height = title_bar(ctx);
-
-                /* content area below title bar */
+                /* content area — full height, panels own the top edge */
                 UIBox* content = ui_box_begin(&(BoxConfig){
-                    .sizing = { fixed(client_w), fixed(client_h - tb_height) },
+                    .sizing = { fixed(client_w), fixed(client_h - 1) },
                 });
                 {
                     String root_hash = str("###window_bg");
                     UIBoxInteractResult rb = ui_box_interact(content, root_hash);
 
-                    Rect panel_rect = { 0, 0, client_w, client_h - tb_height };
+                    Rect panel_rect = { 0, 0, client_w, client_h - 1 };
                     panel_container(ctx, panel_rect);
 
                     /* Unhandled drop on background: create a new window with the dragged tab */
@@ -1250,6 +1265,9 @@ static void process_frame(WindowContext* ctx)
                     }
                 }
                 ui_box_end(content);
+
+                /* decoration buttons float on top of panels at top-right */
+                decoration_overlay(ctx);
             }
             ui_box_end(root_box);
         }
@@ -1266,14 +1284,14 @@ static void process_frame(WindowContext* ctx)
 
 static TitleBarHot titlebar_hit_test_button(const WindowContext* ctx, f32 logical_x, f32 logical_y)
 {
-    if (logical_x >= ctx->tb_button_close.xmin && logical_x < ctx->tb_button_close.xmax &&
-        logical_y >= ctx->tb_button_close.ymin && logical_y < ctx->tb_button_close.ymax)
+    if (logical_x >= ctx->decoration_close.xmin && logical_x < ctx->decoration_close.xmax &&
+        logical_y >= ctx->decoration_close.ymin && logical_y < ctx->decoration_close.ymax)
         return TitleBarHot_Close;
-    if (logical_x >= ctx->tb_button_maximize.xmin && logical_x < ctx->tb_button_maximize.xmax &&
-        logical_y >= ctx->tb_button_maximize.ymin && logical_y < ctx->tb_button_maximize.ymax)
+    if (logical_x >= ctx->decoration_maximize.xmin && logical_x < ctx->decoration_maximize.xmax &&
+        logical_y >= ctx->decoration_maximize.ymin && logical_y < ctx->decoration_maximize.ymax)
         return TitleBarHot_Maximize;
-    if (logical_x >= ctx->tb_button_minimize.xmin && logical_x < ctx->tb_button_minimize.xmax &&
-        logical_y >= ctx->tb_button_minimize.ymin && logical_y < ctx->tb_button_minimize.ymax)
+    if (logical_x >= ctx->decoration_minimize.xmin && logical_x < ctx->decoration_minimize.xmax &&
+        logical_y >= ctx->decoration_minimize.ymin && logical_y < ctx->decoration_minimize.ymax)
         return TitleBarHot_Minimize;
     return TitleBarHot_None;
 }
@@ -1312,6 +1330,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         // By handling WM_NCCALCSIZE and returning 0, we extend the client area
         // into the normal title bar region so the title bar can be rendered
         // entirely by the application.
+        // See:
+        //   https://kubyshkin.name/posts/win32-window-custom-title-bar-caption
+        //   https://handmade.network/forums/articles/t/9073-custom_window_title_bar_and_almost_correctly_drawing_windows_10_borders
         case WM_NCCALCSIZE:
         {
             if (!wparam)
@@ -1406,6 +1427,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 if (ctx->tb_hovered_button == TitleBarHot_Maximize)
                     return HTMAXBUTTON;
 
+                /* minimize / close button rects → HTCAPTION (NC message routing) */
+                if (ctx->tb_hovered_button == TitleBarHot_Minimize || ctx->tb_hovered_button == TitleBarHot_Close)
+                    return HTCAPTION;
+
                 /* top resize zone — only for non-maximized windows */
                 if (!IsZoomed(window))
                 {
@@ -1415,10 +1440,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         return HTTOP;
                 }
 
-                /* title bar area → HTCAPTION (Windows handles drag / double-click maximize) */
-                /* minimize and close fall through here — they are no longer HTCLIENT */
-                if (logical_y >= 0 && logical_y < ctx->tb_height)
-                    return HTCAPTION;
+                /* tab bar spacer areas → HTCAPTION (window drag handle) */
+                for (isize i = 0; i < ctx->decoration_spacer_count; i++)
+                {
+                    Rect* sr = &ctx->decoration_spacer_rects[i];
+                    if (logical_x >= sr->xmin && logical_x < sr->xmax && logical_y >= sr->ymin && logical_y < sr->ymax)
+                        return HTCAPTION;
+                }
             }
 
             return HTCLIENT;
