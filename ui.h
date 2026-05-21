@@ -235,6 +235,20 @@ typedef struct
     f32 width;
 } WordBreak;
 
+typedef Slice(WordBreak) WordBreakSlice;
+
+#define TEXT_MEASURE_CACHE_SIZE 128
+
+typedef struct
+{
+    u64 key;
+    WordBreakSlice words;
+    f32 full_text_width;
+    f32 min_word_width;
+    f32 space_width;
+    isize word_count;
+} TextMeasureSlot;
+
 typedef struct
 {
     const Font* font;
@@ -245,7 +259,7 @@ typedef struct
     isize line_count;
     f32 line_height;
     f32 half_leading;
-    Slice(WordBreak) words;
+    WordBreakSlice words;
     f32 space_width;
     f32 full_text_width;
 } TextData;
@@ -457,6 +471,9 @@ struct UIContext
     u64 focused_hash;
     Queue(UIBox, BOX_QUEUE_CAPACITY) box_queue;
     Stack(UIBox*, BOX_STACK_CAPACITY) box_stack;
+
+    /* text cache */
+    TextMeasureSlot text_measure_cache[TEXT_MEASURE_CACHE_SIZE];
 
     /* render */
     GlyphRasterCache* raster_cache;

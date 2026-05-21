@@ -250,6 +250,52 @@ void ui_box_end(UIBox* box)
     g_ui_ctx->box_stack.items[g_ui_ctx->box_stack.depth--] = NULL;
 }
 
+static u64 text_measure_key(String text, const Font* font, f32 font_size, u32 dpi)
+{
+    u64 h = fnv1a_64(text.data, text.len);
+    u64 font_ptr = (u64)(uintptr_t)font;
+    h = fnv1a_64_continue(h, &font_ptr, sizeof(font_ptr));
+    f32 fs = font_size;
+    h = fnv1a_64_continue(h, &fs, sizeof(fs));
+    u32 d = dpi;
+    h = fnv1a_64_continue(h, &d, sizeof(d));
+    return h;
+}
+
+static TextMeasureSlot* text_measure_cache_find(u64 key)
+{
+    u32 idx = (u32)(key % TEXT_MEASURE_CACHE_SIZE);
+    for (u32 i = 0; i < TEXT_MEASURE_CACHE_SIZE; i++)
+    {
+        u32 probe = (idx + i) % TEXT_MEASURE_CACHE_SIZE;
+        if (g_ui_ctx->text_measure_cache[probe].key == 0)
+            return NULL;
+        if (g_ui_ctx->text_measure_cache[probe].key == key)
+            return &g_ui_ctx->text_measure_cache[probe];
+    }
+    return NULL;
+}
+
+static void text_measure_cache_insert(u64 key, WordBreakSlice words, f32 full_text_width, f32 min_word_width,
+                                      f32 space_width, isize word_count)
+{
+    u32 idx = (u32)(key % TEXT_MEASURE_CACHE_SIZE);
+    for (u32 i = 0; i < TEXT_MEASURE_CACHE_SIZE; i++)
+    {
+        u32 probe = (idx + i) % TEXT_MEASURE_CACHE_SIZE;
+        if (g_ui_ctx->text_measure_cache[probe].key == 0 || g_ui_ctx->text_measure_cache[probe].key == key)
+        {
+            g_ui_ctx->text_measure_cache[probe].key = key;
+            g_ui_ctx->text_measure_cache[probe].words = words;
+            g_ui_ctx->text_measure_cache[probe].full_text_width = full_text_width;
+            g_ui_ctx->text_measure_cache[probe].min_word_width = min_word_width;
+            g_ui_ctx->text_measure_cache[probe].space_width = space_width;
+            g_ui_ctx->text_measure_cache[probe].word_count = word_count;
+            return;
+        }
+    }
+}
+
 UIBox* ui_text(const String text, const TextConfig* text_cfg)
 {
     TracyCZoneNC(ctx_ut, "UIText", TracyColor_Text, TRACY_SUBSYSTEMS & TracySys_Text);
@@ -261,7 +307,89 @@ UIBox* ui_text(const String text, const TextConfig* text_cfg)
 
     f32 base_line_height = get_text_height(renderer, raster_cache, text, text_cfg->font, text_cfg->font_size, dpi);
     f32 line_height = text_cfg->line_height > 0 ? text_cfg->line_height : base_line_height;
-    f32 fixed_width = get_text_width(renderer, raster_cache, text, text_cfg->font, text_cfg->font_size, dpi);
+
+    f32 fixed_width;
+    f32 min_width = 0;
+    f32 whole_text_width;
+    isize word_count = 0;
+    WordBreakSlice local_words = { 0 };
+    f32 space_w = 0;
+    b32 cache_hit = False;
+    u64 cache_key = 0;
+
+    if (text_cfg->wrap)
+    {
+        cache_key = text_measure_key(text, text_cfg->font, text_cfg->font_size, dpi);
+        TextMeasureSlot* slot = text_measure_cache_find(cache_key);
+
+        if (slot)
+        {
+            fixed_width = slot->full_text_width;
+            min_width = slot->min_word_width;
+            word_count = slot->word_count;
+            local_words = slot->words;
+            space_w = slot->space_width;
+            cache_hit = True;
+        }
+        else
+        {
+            fixed_width = get_text_width(renderer, raster_cache, text, text_cfg->font, text_cfg->font_size, dpi);
+            space_w = get_text_width(renderer, raster_cache, str(" "), text_cfg->font, text_cfg->font_size, dpi);
+
+            isize start = 0;
+            const byte* ptr = text.data;
+            while (ptr - text.data < text.len)
+            {
+                UnicodeDecode res_current = utf8_decode(ptr);
+                const byte* next = res_current.next_p;
+                if (res_current.codepoint == ' ' || res_current.codepoint > 127)
+                {
+                    UnicodeDecode res_start = utf8_decode(&text.data[start]);
+                    if (res_start.codepoint != ' ')
+                    {
+                        isize end = res_start.codepoint < 127 ? ptr - text.data : next - text.data;
+                        f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, end),
+                                                        text_cfg->font, text_cfg->font_size, dpi);
+
+                        WordBreak* wb = slice_push(&g_ui_ctx->arena, &local_words);
+                        wb->byte_start = start;
+                        wb->byte_end = end;
+                        wb->width = word_width;
+
+                        min_width = max(min_width, word_width);
+                        word_count++;
+                    }
+                    start = next - text.data;
+                }
+                ptr = next;
+            }
+
+            /* Handle last word */
+            if (start < text.len && text.data[start] != ' ')
+            {
+                f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, text.len),
+                                                text_cfg->font, text_cfg->font_size, dpi);
+
+                WordBreak* wb = slice_push(&g_ui_ctx->arena, &local_words);
+                wb->byte_start = start;
+                wb->byte_end = text.len;
+                wb->width = word_width;
+
+                min_width = max(min_width, word_width);
+                word_count++;
+            }
+        }
+        whole_text_width = fixed_width;
+        min_width = (min_width != 0) ? min_width : whole_text_width;
+    }
+    else
+    {
+        fixed_width = get_text_width(renderer, raster_cache, text, text_cfg->font, text_cfg->font_size, dpi);
+        whole_text_width = fixed_width;
+        min_width = fixed_width;
+        word_count = 1;
+    }
+
     BoxConfig box_cfg = { .sizing = { .width = { { fixed_width, fixed_width }, SIZING_MODE_FIXED },
                                       .height = { { line_height, line_height }, SIZING_MODE_FIXED } } };
 
@@ -280,68 +408,14 @@ UIBox* ui_text(const String text, const TextConfig* text_cfg)
         text_box->data.text.line_count = 1;
         text_box->data.text.line_height = line_height;
         text_box->data.text.half_leading = (line_height - base_line_height) / 2.0f;
-        memset(&text_box->data.text.words, 0, sizeof(text_box->data.text.words));
-        text_box->data.text.space_width = 0;
+        text_box->data.text.words = local_words;
+        text_box->data.text.space_width = space_w;
         text_box->data.text.full_text_width = fixed_width;
+
+        if (text_cfg->wrap && !cache_hit && local_words.len > 0)
+            text_measure_cache_insert(cache_key, local_words, fixed_width, min_width, space_w, word_count);
     }
 
-    /* Build word-break array and compute width constraints. */
-    f32 min_width = 0;
-    f32 whole_text_width = fixed_width;
-    isize word_count = 0;
-    {
-        String text = text_box->data.text.content;
-        if (text_cfg->wrap)
-        {
-            f32 space_w = get_text_width(renderer, raster_cache, str(" "), text_box->data.text.font,
-                                         text_box->data.text.font_size, dpi);
-            text_box->data.text.space_width = space_w;
-
-            isize start = 0;
-            const byte* ptr = text.data;
-            while (ptr - text.data < text.len)
-            {
-                UnicodeDecode res_current = utf8_decode(ptr);
-                const byte* next = res_current.next_p;
-                if (res_current.codepoint == ' ' || res_current.codepoint > 127)
-                {
-                    UnicodeDecode res_start = utf8_decode(&text.data[start]);
-                    if (res_start.codepoint != ' ')
-                    {
-                        isize end = res_start.codepoint < 127 ? ptr - text.data : next - text.data;
-                        f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, end),
-                                                        text_box->data.text.font, text_box->data.text.font_size, dpi);
-
-                        WordBreak* wb = slice_push(&g_ui_ctx->arena, &text_box->data.text.words);
-                        wb->byte_start = start;
-                        wb->byte_end = end;
-                        wb->width = word_width;
-
-                        min_width = max(min_width, word_width);
-                        word_count++;
-                    }
-                    start = next - text.data;
-                }
-                ptr = next;
-            }
-
-            /* Handle last word */
-            if (start < text.len && text.data[start] != ' ')
-            {
-                f32 word_width = get_text_width(renderer, raster_cache, str_slice(text, start, text.len),
-                                                text_box->data.text.font, text_box->data.text.font_size, dpi);
-
-                WordBreak* wb = slice_push(&g_ui_ctx->arena, &text_box->data.text.words);
-                wb->byte_start = start;
-                wb->byte_end = text.len;
-                wb->width = word_width;
-
-                min_width = max(min_width, word_width);
-                word_count++;
-            }
-        }
-        min_width = (min_width != 0) ? min_width : whole_text_width;
-    }
     text_box->cfg.sizing.width.min_max.min = min_width;
     text_box->cfg.sizing.width.min_max.max = whole_text_width;
     text_box->cfg.sizing.height.min_max.min = (f32)text_box->data.text.line_height;
@@ -835,6 +909,7 @@ isize ui_frame_begin(UIContext* ui_ctx)
     g_ui_ctx->frame_delta_time = (f32)(g_ui_ctx->current_time - last_time);
     g_ui_ctx->desired_cursor = UI_CURSOR_ARROW;
     g_ui_ctx->drag_payload_consumed = False;
+    memset(g_ui_ctx->text_measure_cache, 0, sizeof(g_ui_ctx->text_measure_cache));
 
     TracyCZoneEnd(ctx_fb);
     return g_ui_ctx->arena.pos;
