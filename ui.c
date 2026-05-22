@@ -1618,12 +1618,14 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
     Assert(scroll_ctx.last_content);
 
     /* Create container & inner container & content box */
-    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
-    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) } }); // Inner Container
+    ui_box_begin(
+        &(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM }); // Container
+    ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) } }); // Inner Container
     UIBox* content = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit_grow({}) },
                                                 .padding = cfg->padding,
                                                 .child_gap = cfg->child_gap,
                                                 .direction = cfg->direction,
+                                                .alignment = cfg->alignment,
                                                 .child_offset = { -scroll_ctx.delta.x, -scroll_ctx.delta.y } });
     update_box_key(content, content_hash);
 
@@ -1747,7 +1749,7 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
 #define PANEL_PCT_MIN  0.05f
 #define PANEL_PCT_MAX  0.95f
 
-void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme)
+void ui_panel_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme)
 {
     TracyCZoneNC(ctx_pbd, "PanelBounds", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
 
@@ -1915,6 +1917,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
          * Height matches decoration (min/max/close) buttons.
          */
         f32 tab_bar_height = cfg->font_size * 2.5f + 2.f - 1;
+
         UIBox* tab_bar = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fixed(tab_bar_height) },
                                                     .color = cfg->theme->tab_bar,
                                                     .alignment = { ALIGN_START, ALIGN_CENTER } });
@@ -1922,183 +1925,199 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             PanelTab* active = panel_tab_get_active(cfg->panel);
             isize tab_index = 0;
 
-            for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next, tab_index++)
+            ScrollContext tab_bar_scroll_ctx = ui_scrollable_area_begin(&(ScrollableAreaConfig){
+                .hash_str = str_fmt(HASH_STR_MAX_LENGTH, "panel_%u (scroll area)", cfg->panel->id),
+                .sizing = { fit({ .max = rect.xmax - rect.xmin - cfg->tab_bar_right_inset - 1 }), // 1 is boundary width
+                            fixed(tab_bar_height) },
+                .bg_color = cfg->theme->tab_bar,
+                .thumb_color = cfg->theme->scrollbar_thumb,
+                .alignment = { ALIGN_START, ALIGN_CENTER },
+                .fixed_track = True });
             {
-                b32 is_active = (tab == active);
-
-                UIBox* tab_container = ui_box_begin(
-                    &(BoxConfig){ .sizing = { fit({}), fixed(tab_bar_height) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+                for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next, tab_index++)
                 {
-                    /* Tab interaction */
-                    UIBoxInteractResult tab_interact_result = ui_box_interact(
-                        tab_container, str_fmt(HASH_STR_MAX_LENGTH, "tab_%u_%u", cfg->panel->id, tab->id));
+                    b32 is_active = (tab == active);
 
-                    /* Drop-target highlight transition */
-                    if (tab_interact_result.last_box)
-                        update_transition(&tab_interact_result.last_box->hot_t, 15.f,
-                                          ui_drag_over(tab_interact_result.flags) && g_ui_ctx->drag_payload_size ? 1.f
-                                                                                                                 : 0.f);
-                    f32 drop_t = tab_interact_result.last_box ? tab_interact_result.last_box->hot_t : 0.f;
-
-                    /* Insertion indicator line */
-                    if (drop_t > 0.01f)
+                    UIBox* tab_container = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fixed(tab_bar_height) },
+                                                                      .direction = LAYOUT_TOP_TO_BOTTOM });
                     {
-                        b32 indent_left = True;
-                        if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
+                        /* Tab interaction */
+                        UIBoxInteractResult tab_interact_result = ui_box_interact(
+                            tab_container, str_fmt(HASH_STR_MAX_LENGTH, "tab_%u_%u", cfg->panel->id, tab->id));
+
+                        /* Drop-target highlight transition */
+                        if (tab_interact_result.last_box)
+                            update_transition(
+                                &tab_interact_result.last_box->hot_t, 15.f,
+                                ui_drag_over(tab_interact_result.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f);
+                        f32 drop_t = tab_interact_result.last_box ? tab_interact_result.last_box->hot_t : 0.f;
+
+                        /* Insertion indicator line */
+                        if (drop_t > 0.01f)
                         {
-                            TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                            if (peek->drag_type == DRAG_TYPE_TAB && peek->from_panel_id == cfg->panel->id)
+                            b32 indent_left = True;
+                            if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                             {
-                                isize dragged_idx = 0;
-                                for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
-                                    if (t->id == peek->from_tab_id)
-                                        break;
-                                indent_left = (dragged_idx > tab_index);
-                            }
-                        }
-                        f32 line_x = indent_left ? 0.f : (tab_interact_result.last_box->size.width - 3.f);
-
-                        Color line_c = cfg->theme->tab_drag_target_bg_accent;
-                        UIBox* drop_indicator_line = ui_box_begin(&(BoxConfig){
-                            .sizing = { fixed(3), fixed(tab_bar_height - 1) },
-                            .flags = BoxFlag_Float,
-                            .float_offset = { line_x, 0 },
-                        });
-                        {
-                            drop_indicator_line->cfg.color = lerp_color((Color){ 0 }, line_c, drop_t);
-                        }
-                        ui_box_end(drop_indicator_line);
-                    }
-
-                    /* Drag payload */
-                    if (ui_dragging(tab_interact_result.flags))
-                    {
-                        TabDragPayload tab_drag_payload = { DRAG_TYPE_TAB, cfg->panel->id, tab->id, cfg->window_id };
-                        isize copy_len = tab->name_len < 43 ? tab->name_len : 43;
-                        memcpy(tab_drag_payload.title, tab->name, (size_t)copy_len);
-                        tab_drag_payload.title[copy_len] = '\0';
-                        ui_set_drag_payload(&tab_drag_payload, sizeof(tab_drag_payload));
-                        ui_set_desired_cursor(UI_CURSOR_MOVE);
-                    }
-
-                    /* Tab title and close button */
-                    UIBox* tab_title_cell = ui_box_begin(&(BoxConfig){
-                        .sizing = { fit({}), fixed(tab_bar_height - 1) },
-                        .padding = { 5, 10, 5, 10 },
-                        .direction = LAYOUT_LEFT_TO_RIGHT,
-                        .child_gap = 4,
-                        .alignment = { ALIGN_START, ALIGN_CENTER },
-                        .color = lerp_color(ui_dragging(tab_interact_result.flags)
-                                                ? cfg->theme->tab_dragging_bg
-                                                : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg),
-                                            cfg->theme->tab_drag_target_bg, drop_t) });
-                    {
-                        /* Activate tab on click */
-                        if (ui_lclicked(tab_interact_result.flags))
-                            cmd_queue_push(cfg->cmd_queue,
-                                           str_fmt(CMD_STR_MAX_LENGTH, "tab.activate panel=%u tab=%u window=%u",
-                                                   cfg->panel->id, tab->id, cfg->window_id));
-
-                        /* Tab title */
-                        ui_text((String){ tab->name, tab->name_len }, &(TextConfig){ .font = cfg->font_ui,
-                                                                                     .font_size = cfg->font_size,
-                                                                                     .color = cfg->theme->tab_active_fg,
-                                                                                     .line_height = cfg->font_size });
-
-                        /* Close button (hidden while dragging) */
-                        UISignalFlags close_button_flags = ui_button(
-                            str_fmt(HASH_STR_MAX_LENGTH, "×##tc_%u_%u", cfg->panel->id, tab->id), cfg->font_ui, 11,
-                            (Sizing){ fit({}), fit({}) }, (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, // background color
-                            (ui_hovered(tab_interact_result.flags) && !ui_drag_over(tab_interact_result.flags))
-                                ? cfg->theme->tab_active_fg
-                                : (Color){ 0 }, // text color
-                            ui_drag_over(tab_interact_result.flags) ? (Color){ 0 }
-                                                                    : cfg->theme->hover_bg, // hover color
-                            cfg->theme->hover_bg, True);
-                        if (ui_hovered(close_button_flags) && !is_active && !ui_drag_over(tab_interact_result.flags))
-                            tab_title_cell->cfg.color = cfg->theme->tab_bg;
-                        if (ui_lclicked(close_button_flags))
-                            cmd_queue_push(cfg->cmd_queue,
-                                           str_fmt(CMD_STR_MAX_LENGTH, "tab.close panel=%u tab=%u window=%u",
-                                                   cfg->panel->id, tab->id, cfg->window_id));
-
-                        /* Drop: reorder (same panel) or move to panel (cross-panel) */
-                        if (ui_dropped(tab_interact_result.flags) && !g_ui_ctx->drag_payload_consumed &&
-                            g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
-                        {
-                            TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                            if (payload->drag_type == DRAG_TYPE_TAB)
-                            {
-                                g_ui_ctx->drag_payload_consumed = True;
-                                if (payload->from_tab_id != tab->id)
+                                TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                                if (peek->drag_type == DRAG_TYPE_TAB && peek->from_panel_id == cfg->panel->id)
                                 {
-                                    if (payload->from_panel_id == cfg->panel->id)
+                                    isize dragged_idx = 0;
+                                    for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
+                                        if (t->id == peek->from_tab_id)
+                                            break;
+                                    indent_left = (dragged_idx > tab_index);
+                                }
+                            }
+                            f32 line_x = indent_left ? 0.f : (tab_interact_result.last_box->size.width - 3.f);
+
+                            Color line_c = cfg->theme->tab_drag_target_bg_accent;
+                            UIBox* drop_indicator_line = ui_box_begin(&(BoxConfig){
+                                .sizing = { fixed(3), fixed(tab_bar_height - 1) },
+                                .flags = BoxFlag_Float,
+                                .float_offset = { line_x, 0 },
+                            });
+                            {
+                                drop_indicator_line->cfg.color = lerp_color((Color){ 0 }, line_c, drop_t);
+                            }
+                            ui_box_end(drop_indicator_line);
+                        }
+
+                        /* Drag payload */
+                        if (ui_dragging(tab_interact_result.flags))
+                        {
+                            TabDragPayload tab_drag_payload = { DRAG_TYPE_TAB, cfg->panel->id, tab->id,
+                                                                cfg->window_id };
+                            isize copy_len = tab->name_len < 43 ? tab->name_len : 43;
+                            memcpy(tab_drag_payload.title, tab->name, (size_t)copy_len);
+                            tab_drag_payload.title[copy_len] = '\0';
+                            ui_set_drag_payload(&tab_drag_payload, sizeof(tab_drag_payload));
+                            ui_set_desired_cursor(UI_CURSOR_MOVE);
+                        }
+
+                        /* Tab title and close button */
+                        UIBox* tab_title_cell = ui_box_begin(&(BoxConfig){
+                            .sizing = { fit({}), fixed(tab_bar_height - 1) },
+                            .padding = { 5, 10, 5, 10 },
+                            .direction = LAYOUT_LEFT_TO_RIGHT,
+                            .child_gap = 4,
+                            .alignment = { ALIGN_START, ALIGN_CENTER },
+                            .color = lerp_color(ui_dragging(tab_interact_result.flags)
+                                                    ? cfg->theme->tab_dragging_bg
+                                                    : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg),
+                                                cfg->theme->tab_drag_target_bg, drop_t) });
+                        {
+                            /* Activate tab on click */
+                            if (ui_lclicked(tab_interact_result.flags))
+                                cmd_queue_push(cfg->cmd_queue,
+                                               str_fmt(CMD_STR_MAX_LENGTH, "tab.activate panel=%u tab=%u window=%u",
+                                                       cfg->panel->id, tab->id, cfg->window_id));
+
+                            /* Tab title */
+                            ui_text((String){ tab->name, tab->name_len },
+                                    &(TextConfig){ .font = cfg->font_ui,
+                                                   .font_size = cfg->font_size,
+                                                   .color = cfg->theme->tab_active_fg,
+                                                   .line_height = cfg->font_size });
+
+                            /* Close button (hidden while dragging) */
+                            UISignalFlags close_button_flags = ui_button(
+                                str_fmt(HASH_STR_MAX_LENGTH, "×##tc_%u_%u", cfg->panel->id, tab->id), cfg->font_ui, 11,
+                                (Sizing){ fit({}), fit({}) }, (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, // background color
+                                (ui_hovered(tab_interact_result.flags) && !ui_drag_over(tab_interact_result.flags))
+                                    ? cfg->theme->tab_active_fg
+                                    : (Color){ 0 }, // text color
+                                ui_drag_over(tab_interact_result.flags) ? (Color){ 0 }
+                                                                        : cfg->theme->hover_bg, // hover color
+                                cfg->theme->hover_bg, True);
+                            if (ui_hovered(close_button_flags) && !is_active &&
+                                !ui_drag_over(tab_interact_result.flags))
+                                tab_title_cell->cfg.color = cfg->theme->tab_bg;
+                            if (ui_lclicked(close_button_flags))
+                                cmd_queue_push(cfg->cmd_queue,
+                                               str_fmt(CMD_STR_MAX_LENGTH, "tab.close panel=%u tab=%u window=%u",
+                                                       cfg->panel->id, tab->id, cfg->window_id));
+
+                            /* Drop: reorder (same panel) or move to panel (cross-panel) */
+                            if (ui_dropped(tab_interact_result.flags) && !g_ui_ctx->drag_payload_consumed &&
+                                g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
+                            {
+                                TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                                if (payload->drag_type == DRAG_TYPE_TAB)
+                                {
+                                    g_ui_ctx->drag_payload_consumed = True;
+                                    if (payload->from_tab_id != tab->id)
                                     {
-                                        isize dragged_idx = 0;
-                                        for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
-                                            if (t->id == payload->from_tab_id)
-                                                break;
-                                        i32 delta = (i32)(tab_index - dragged_idx);
-                                        cmd_queue_push(
-                                            cfg->cmd_queue,
-                                            str_fmt(CMD_STR_MAX_LENGTH, "tab.move panel=%u tab=%u delta=%+d window=%u",
-                                                    cfg->panel->id, payload->from_tab_id, delta, cfg->window_id));
-                                    }
-                                    else
-                                    {
-                                        cmd_queue_push(
-                                            cfg->cmd_queue,
-                                            str_fmt(CMD_STR_MAX_LENGTH,
-                                                    "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d "
-                                                    "window=%u to_window=%u",
-                                                    payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
-                                                    (i32)tab_index, payload->from_window_id, cfg->window_id));
+                                        if (payload->from_panel_id == cfg->panel->id)
+                                        {
+                                            isize dragged_idx = 0;
+                                            for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
+                                                if (t->id == payload->from_tab_id)
+                                                    break;
+                                            i32 delta = (i32)(tab_index - dragged_idx);
+                                            cmd_queue_push(cfg->cmd_queue,
+                                                           str_fmt(CMD_STR_MAX_LENGTH,
+                                                                   "tab.move panel=%u tab=%u delta=%+d window=%u",
+                                                                   cfg->panel->id, payload->from_tab_id, delta,
+                                                                   cfg->window_id));
+                                        }
+                                        else
+                                        {
+                                            cmd_queue_push(
+                                                cfg->cmd_queue,
+                                                str_fmt(CMD_STR_MAX_LENGTH,
+                                                        "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d "
+                                                        "window=%u to_window=%u",
+                                                        payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
+                                                        (i32)tab_index, payload->from_window_id, cfg->window_id));
+                                        }
                                     }
                                 }
                             }
                         }
+                        ui_box_end(tab_title_cell);
+
+                        /* Underline */
+                        ui_box_end(ui_box_begin(&(BoxConfig){
+                            .sizing = { grow({}), fixed(1) },
+                            .color =
+                                (ui_drag_over(tab_interact_result.flags) && g_ui_ctx->drag_payload_size)
+                                    ? cfg->theme->tab_splitter
+                                    : (ui_dragging(tab_interact_result.flags)
+                                           ? cfg->theme->tab_dragging_bg
+                                           : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_splitter)) }));
                     }
-                    ui_box_end(tab_title_cell);
+                    ui_box_end(tab_container);
+
+                    /* Tab splitter */
+                    ui_box_end(ui_box_begin(
+                        &(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_splitter }));
+                }
+
+                /* New tab button */
+                UIBox* new_button_container =
+                    ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+                {
+                    UIBox* inner_container = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) },
+                                                                        .padding = { 0, 3, 0, 3 },
+                                                                        .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+                    {
+                        UISignalFlags new_tab_button_flags =
+                            ui_button(str_fmt(HASH_STR_MAX_LENGTH, "+##tab_add_%u", cfg->panel->id), cfg->font_ui, 12,
+                                      (Sizing){ fit({}), fit({}) }, (Padding){ 3, 4, 4, 4 }, (Color){ 0 },
+                                      cfg->theme->tab_fg, cfg->theme->hover_bg, cfg->theme->click_bg, False);
+                        if (ui_lclicked(new_tab_button_flags))
+                            cmd_queue_push(cfg->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "tab.new panel=%u window=%u",
+                                                                   cfg->panel->id, cfg->window_id));
+                    }
+                    ui_box_end(inner_container);
 
                     /* Underline */
-                    ui_box_end(ui_box_begin(&(BoxConfig){
-                        .sizing = { grow({}), fixed(1) },
-                        .color = (ui_drag_over(tab_interact_result.flags) && g_ui_ctx->drag_payload_size)
-                                     ? cfg->theme->tab_splitter
-                                     : (ui_dragging(tab_interact_result.flags)
-                                            ? cfg->theme->tab_dragging_bg
-                                            : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_splitter)) }));
+                    ui_box_end(ui_box_begin(
+                        &(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
                 }
-                ui_box_end(tab_container);
-
-                /* Tab splitter */
-                ui_box_end(
-                    ui_box_begin(&(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_splitter }));
+                ui_box_end(new_button_container);
             }
-
-            /* New tab button */
-            UIBox* new_button_container =
-                ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
-            {
-                UIBox* inner_container = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) },
-                                                                    .padding = { 0, 3, 0, 3 },
-                                                                    .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-                {
-                    UISignalFlags new_tab_button_flags =
-                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "+##tab_add_%u", cfg->panel->id), cfg->font_ui, 12,
-                                  (Sizing){ fit({}), fit({}) }, (Padding){ 3, 4, 4, 4 }, (Color){ 0 },
-                                  cfg->theme->tab_fg, cfg->theme->hover_bg, cfg->theme->click_bg, False);
-                    if (ui_lclicked(new_tab_button_flags))
-                        cmd_queue_push(cfg->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "tab.new panel=%u window=%u",
-                                                               cfg->panel->id, cfg->window_id));
-                }
-                ui_box_end(inner_container);
-
-                /* Underline */
-                ui_box_end(
-                    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
-            }
-            ui_box_end(new_button_container);
+            ui_scrollable_area_end(tab_bar_scroll_ctx);
 
             /* Spacer — also serves as tab bar drop target for appending tabs */
             UIBox* spacer_container =
@@ -2210,7 +2229,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         ui_box_end(tab_bar);
 
         /* Scrollable content area */
-        ScrollContext scroll_ctx = ui_scrollable_area_begin(
+        ScrollContext panel_content_scroll_ctx = ui_scrollable_area_begin(
             &(ScrollableAreaConfig){ .hash_str = str_fmt(HASH_STR_MAX_LENGTH, "panel_scroll_%u", cfg->panel->id),
                                      .sizing = { grow({}), grow({}) },
                                      .bg_color = cfg->theme->tab_active_bg,
@@ -2220,7 +2239,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                      .thumb_color = cfg->theme->scrollbar_thumb });
 
         PanelContext panel_ctx = { .panel = cfg->panel,
-                                   .scroll_ctx = scroll_ctx,
+                                   .scroll_ctx = panel_content_scroll_ctx,
                                    .outer_box = container,
                                    .panel_w = inner_w,
                                    .panel_h = inner_h,

@@ -520,6 +520,7 @@ typedef struct
     Sizing sizing;
     Padding padding;
     f32 child_gap;
+    Alignment alignment;
     LayoutDirection direction;
     Color bg_color;
     Color thumb_color;
@@ -620,7 +621,7 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx);
 
 // panel
 
-void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme);
+void ui_panel_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme);
 PanelContext ui_panel_begin(const PanelConfig* cfg);
 void ui_panel_end(PanelContext* pf);
 
