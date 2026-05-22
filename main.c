@@ -1137,7 +1137,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 //       times!). Just tried 10 rounds, and the FPS dropped to ~8 frames per second on my laptop. With
                 //       `.wrap = False`, 10 rounds give ~70 FPS. With 0 rounds, ~110 FPS.
                 // clang-format off
-                for (isize i = 0; i < 10; i++)
+                for (isize i = 0; i < 1; i++)
                 {
                     ui_text(
                             str("《红楼梦》也称《石头记》，中国古典长篇章回小说，被视为四大小说名著之一。《红楼梦》书内提及"
