@@ -41,19 +41,20 @@ typedef enum
     UI_Signal_Flag_Hovered       = (1 << 0),
     UI_Signal_Flag_LClicked      = (1 << 1),
     UI_Signal_Flag_RClicked      = (1 << 2),
-    UI_Signal_Flag_Pressed       = (1 << 3),
-    UI_Signal_Flag_DoubleClicked = (1 << 4),
-    UI_Signal_Flag_Released      = (1 << 5),
-    UI_Signal_Flag_Dragging      = (1 << 6),
-    UI_Signal_Flag_DragOver      = (1 << 7),
-    UI_Signal_Flag_Dropped       = (1 << 8),
+    UI_Signal_Flag_MClicked      = (1 << 3),
+    UI_Signal_Flag_Pressed       = (1 << 4),
+    UI_Signal_Flag_DoubleClicked = (1 << 5),
+    UI_Signal_Flag_Released      = (1 << 6),
+    UI_Signal_Flag_Dragging      = (1 << 7),
+    UI_Signal_Flag_DragOver      = (1 << 8),
+    UI_Signal_Flag_Dropped       = (1 << 9),
     // clang-format on
 } UISignalFlags;
 
 #define ui_hovered(signal_flags)        (signal_flags & UI_Signal_Flag_Hovered)
 #define ui_lclicked(signal_flags)       (signal_flags & UI_Signal_Flag_LClicked)
 #define ui_rclicked(signal_flags)       (signal_flags & UI_Signal_Flag_RClicked)
-#define ui_clicked(signal_flags)        (signal_flags & (UI_Signal_Flag_LClicked | UI_Signal_Flag_RClicked))
+#define ui_mclicked(signal_flags)       (signal_flags & UI_Signal_Flag_MClicked)
 #define ui_pressed(signal_flags)        (signal_flags & UI_Signal_Flag_Pressed)
 #define ui_double_clicked(signal_flags) (signal_flags & UI_Signal_Flag_DoubleClicked)
 #define ui_released(signal_flags)       (signal_flags & UI_Signal_Flag_Released)
@@ -445,6 +446,7 @@ struct UIContext
     Position mouse_scroll_delta;
     b32 mouse_lclick;
     b32 mouse_rclick;
+    b32 mouse_mclick;
     b32 mouse_press;
     b32 mouse_double_click;
     f64 last_lclick_time;

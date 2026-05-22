@@ -1081,6 +1081,7 @@ void ui_frame_end(isize arena_pos_backup)
 
     g_ui_ctx->mouse_lclick = False;
     g_ui_ctx->mouse_rclick = False;
+    g_ui_ctx->mouse_mclick = False;
     g_ui_ctx->mouse_double_click = False;
     g_ui_ctx->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_ctx->mouse_scroll_delta = (Position){ 0.f, 0.f };
@@ -1156,6 +1157,8 @@ static void update_interaction_flags(UIBox* box, UISignalFlags* flags)
                 *flags |= UI_Signal_Flag_LClicked;
             if (g_ui_ctx->mouse_rclick)
                 *flags |= UI_Signal_Flag_RClicked;
+            if (g_ui_ctx->mouse_mclick)
+                *flags |= UI_Signal_Flag_MClicked;
             if (g_ui_ctx->mouse_press)
                 *flags |= UI_Signal_Flag_Pressed;
             if (g_ui_ctx->mouse_double_click)
@@ -2018,6 +2021,12 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                                str_fmt(CMD_STR_MAX_LENGTH, "tab.activate panel=%u tab=%u window=%u",
                                                        cfg->panel->id, tab->id, cfg->window_id));
 
+                            /* Close tab on middle-click */
+                            if (ui_mclicked(tab_interact_result.flags))
+                                cmd_queue_push(cfg->cmd_queue,
+                                               str_fmt(CMD_STR_MAX_LENGTH, "tab.close panel=%u tab=%u window=%u",
+                                                       cfg->panel->id, tab->id, cfg->window_id));
+
                             /* Tab title */
                             ui_text((String){ tab->name, tab->name_len },
                                     &(TextConfig){ .font = cfg->font_ui,
@@ -2417,11 +2426,11 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
     /* Transition */
     if (ui_hovered(result.flags))
         bg_color_transition = bg_color_hover;
-    if (ui_clicked(result.flags) || (result.last_box->active_t > 0))
+    if (ui_lclicked(result.flags) || (result.last_box->active_t > 0))
     {
         if (use_animation)
         {
-            if (ui_clicked(result.flags))
+            if (ui_lclicked(result.flags))
             {
                 result.last_box->anim_state = TRANSITION_FORWARD;
                 result.last_box->active_t = 0.f;

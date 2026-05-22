@@ -1641,6 +1641,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             return 0;
         }
 
+        case WM_MBUTTONDOWN:
+        {
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+            ui_ctx->mouse_mclick = True;
+            return 0;
+        }
+
         case WM_LBUTTONUP:
         {
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
