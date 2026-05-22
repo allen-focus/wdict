@@ -187,3 +187,5 @@ String str_clone(Arena* arena, const String s);
 String str_slice(String s, const isize start, const isize end);
 b32 str_compare(const String a, const String b);
 String str_concat(Arena* arena, const String a, const String b);
+String str_fmt_impl(u8* buf, isize buf_size, const char* fmt, ...);
+#define str_fmt(buf_size, fmt, ...) str_fmt_impl((u8[buf_size]){ 0 }, buf_size, fmt, __VA_ARGS__)

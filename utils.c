@@ -1,4 +1,6 @@
 #include "utils.h"
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include <windows.h>
 
@@ -295,4 +297,14 @@ String str_concat(Arena* arena, const String a, const String b)
     memcpy(c.data, a.data, a.len);
     memcpy(c.data + a.len, b.data, b.len);
     return c;
+}
+
+String str_fmt_impl(u8* buf, isize buf_size, const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    isize len = vsnprintf((char*)buf, buf_size, fmt, args);
+    va_end(args);
+    Assert(len >= 0 && len < buf_size); // Must be `<` there as `vsnprintf` auto insert '\0' at the end
+    return (String){ buf, len };
 }

@@ -4,7 +4,6 @@
 #include "win32_helper.h"
 
 #include <math.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -1748,27 +1747,22 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
 #define PANEL_PCT_MIN  0.05f
 #define PANEL_PCT_MAX  0.95f
 
-String str_fmt_impl(u8* buf, const char* fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-    isize len = vsnprintf((char*)buf, HASH_STR_MAX_LENGTH, fmt, args);
-    va_end(args);
-    return (String){ buf, len };
-}
-
 void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme)
 {
     TracyCZoneNC(ctx_pbd, "PanelBounds", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
+
     for (const Panel* p = root; p; p = panel_iter_next(p))
     {
+        /* Skip leaf panels (no split) */
         if (!p->child_a)
             continue;
+
         Rect panel_rect = panel_calc_rect(p, root_rect);
         Panel* child_a = p->child_a;
         Panel* child_b = p->child_b;
-
         Rect child_a_rect = panel_calc_rect_from_parent(child_a, panel_rect);
+
+        /* Compute boundary position and size along the split axis */
         Position bound_pos;
         f32 bound_w, bound_h;
         if (p->split_axis == Axis2_X)
@@ -1786,6 +1780,7 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
             bound_h = PANEL_BOUNDARY;
         }
 
+        /* Create boundary box and handle interaction */
         UIBox* boundary = ui_box_begin(&(BoxConfig){
             .sizing = { fixed(bound_w), fixed(bound_h) },
             .flags = BoxFlag_Float,
@@ -1793,18 +1788,25 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
             .direction = (p->split_axis == Axis2_X) ? LAYOUT_LEFT_TO_RIGHT : LAYOUT_TOP_TO_BOTTOM,
         });
         {
-            UIBoxInteractResult result = ui_box_interact(boundary, str_fmt("panel_bound_%u", p->id));
+            UIBoxInteractResult result =
+                ui_box_interact(boundary, str_fmt(HASH_STR_MAX_LENGTH, "panel_bound_%u", p->id));
             UISignalFlags flags = result.flags;
+
+            /* Hover → resize cursor */
             if (ui_hovered(flags))
             {
                 Cursor cur = (p->split_axis == Axis2_X) ? UI_CURSOR_HORIZONTAL : UI_CURSOR_VERTICAL;
                 ui_set_desired_cursor(cur);
             }
+
+            /* Click → save initial split ratios for drag */
             if (ui_lclicked(flags))
             {
                 child_a->drag_saved_pct = child_a->pct_of_parent;
                 child_a->drag_saved_partner_pct = child_b->pct_of_parent;
             }
+
+            /* Drag → update split ratio and boundary position */
             if (ui_dragging(flags))
             {
                 Position delta = ui_box_drag_delta(result.last_box);
@@ -1814,20 +1816,21 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
                 child_a->pct_of_parent = clamp(child_a->drag_saved_pct + dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
                 child_b->pct_of_parent = clamp(child_a->drag_saved_partner_pct - dp, PANEL_PCT_MIN, PANEL_PCT_MAX);
 
-                /* Recompute boundary position from updated ratio to eliminate one-frame visual lag */
-                Rect updated_child_a_rect = panel_calc_rect_from_parent(child_a, panel_rect);
+                /* Snap boundary to updated ratio to eliminate one-frame visual lag */
+                Rect r = panel_calc_rect_from_parent(child_a, panel_rect);
                 if (p->split_axis == Axis2_X)
                 {
-                    boundary->cfg.float_offset.x = updated_child_a_rect.xmax - (PANEL_BOUNDARY / 2);
-                    boundary->cfg.float_offset.y = updated_child_a_rect.ymin;
+                    boundary->cfg.float_offset.x = r.xmax - (PANEL_BOUNDARY / 2);
+                    boundary->cfg.float_offset.y = r.ymin;
                 }
                 else
                 {
-                    boundary->cfg.float_offset.x = updated_child_a_rect.xmin;
-                    boundary->cfg.float_offset.y = updated_child_a_rect.ymax - (PANEL_BOUNDARY / 2);
+                    boundary->cfg.float_offset.x = r.xmin;
+                    boundary->cfg.float_offset.y = r.ymax - (PANEL_BOUNDARY / 2);
                 }
             }
 
+            /* Transition and draw splitter line */
             if (result.last_box)
             {
                 update_transition(&result.last_box->hot_t, 20.f,
@@ -1842,11 +1845,9 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
             virtual_line_color = lerp_color(virtual_line_color, theme->splitter_drag, active_t);
             line_color = lerp_color(line_color, theme->splitter_drag, active_t);
 
-            /* Draw splitter line */
             // clang-format off
             if (p->split_axis == Axis2_X)
             {
-
                 UIBox* line_container = ui_box_begin(
                     &(BoxConfig){ .sizing = { grow({}), grow({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
                 {
@@ -1876,9 +1877,7 @@ void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const Pan
 
 PanelContext ui_panel_begin(const PanelConfig* cfg)
 {
-    /* This function only accepts leaf nodes.
-       Internal nodes (those with children in the binary-tree encoding of a multi-tree)
-       are not real UI containers and should never call ui_panel_begin() */
+    /* Only leaf panels (no children) can be UI containers */
     if (cfg->panel->child_a)
         Assert(0);
 
@@ -1888,30 +1887,35 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
     for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next)
         tab->frame_declared = True;
 
-    /* Use pre-computed panel rect from caller when provided */
+    /* Compute panel rect (use pre-computed when provided) */
     Rect rect;
     if (cfg->panel_rect.xmax > cfg->panel_rect.xmin || cfg->panel_rect.ymax > cfg->panel_rect.ymin)
         rect = cfg->panel_rect;
     else
         rect = panel_calc_rect(cfg->panel, cfg->root_rect);
-    f32 pad = 1.f;
-    Rect inner = { rect.xmin + pad, rect.ymin + pad, rect.xmax - pad, rect.ymax - pad };
-    f32 iw = max(0.f, inner.xmax - inner.xmin);
-    f32 ih = max(0.f, inner.ymax - inner.ymin);
+    f32 panel_border_w = 1.f;
+    Rect inner = { rect.xmin + panel_border_w, rect.ymin + panel_border_w, rect.xmax - panel_border_w,
+                   rect.ymax - panel_border_w };
+    f32 inner_w = max(0.f, inner.xmax - inner.xmin);
+    f32 inner_h = max(0.f, inner.ymax - inner.ymin);
     Rect tab_bar_spacer_rect = { 0 };
 
+    /* Create panel container */
     UIBox* container = ui_box_begin(&(BoxConfig){
-        .sizing = { fixed(iw), fixed(ih) },
+        .sizing = { fixed(inner_w), fixed(inner_h) },
         .direction = LAYOUT_TOP_TO_BOTTOM,
         .flags = BoxFlag_Float,
         .float_offset = { inner.xmin, inner.ymin },
     });
     {
-        ui_box_interact(container, str_fmt("panel_%u", cfg->panel->id));
+        ui_box_interact(container, str_fmt(HASH_STR_MAX_LENGTH, "panel_%u", cfg->panel->id));
 
-        /* tab bar — height matches decoration (min/max/close) buttons */
-        f32 tab_bar_h = cfg->font_size * 2.5f + 2.f - 1;
-        UIBox* tab_bar = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fixed(tab_bar_h) },
+        /*
+         * Tab bar
+         * Height matches decoration (min/max/close) buttons.
+         */
+        f32 tab_bar_height = cfg->font_size * 2.5f + 2.f - 1;
+        UIBox* tab_bar = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fixed(tab_bar_height) },
                                                     .color = cfg->theme->tab_bar,
                                                     .alignment = { ALIGN_START, ALIGN_CENTER } });
         {
@@ -1921,27 +1925,24 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             for (PanelTab* tab = cfg->panel->tab_first; tab; tab = tab->next, tab_index++)
             {
                 b32 is_active = (tab == active);
-                f32 font_sz = cfg->font_size;
 
                 UIBox* tab_container = ui_box_begin(
-                    &(BoxConfig){ .sizing = { fit({}), fixed(tab_bar_h) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+                    &(BoxConfig){ .sizing = { fit({}), fixed(tab_bar_height) }, .direction = LAYOUT_TOP_TO_BOTTOM });
                 {
-                    /* tab interaction */
-                    UIBoxInteractResult r =
-                        ui_box_interact(tab_container, str_fmt("tab_%u_%u", cfg->panel->id, tab->id));
+                    /* Tab interaction */
+                    UIBoxInteractResult tab_interact_result = ui_box_interact(
+                        tab_container, str_fmt(HASH_STR_MAX_LENGTH, "tab_%u_%u", cfg->panel->id, tab->id));
 
-                    /* transition for drop-target highlight */
-                    if (r.last_box)
-                        update_transition(&r.last_box->hot_t, 15.f,
-                                          ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f);
-                    f32 drop_t = r.last_box ? r.last_box->hot_t : 0.f;
+                    /* Drop-target highlight transition */
+                    if (tab_interact_result.last_box)
+                        update_transition(&tab_interact_result.last_box->hot_t, 15.f,
+                                          ui_drag_over(tab_interact_result.flags) && g_ui_ctx->drag_payload_size ? 1.f
+                                                                                                                 : 0.f);
+                    f32 drop_t = tab_interact_result.last_box ? tab_interact_result.last_box->hot_t : 0.f;
 
-                    /* insertion indicator line */
+                    /* Insertion indicator line */
                     if (drop_t > 0.01f)
                     {
-                        /* Determine which edge to show the indicator on:
-                           - Cross-panel / source is to the right → left edge (insert before this tab)
-                           - Same panel, source is to the left   → right edge (insert after this tab) */
                         b32 indent_left = True;
                         if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                         {
@@ -1955,76 +1956,74 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                 indent_left = (dragged_idx > tab_index);
                             }
                         }
-                        f32 line_x = indent_left ? 0.f : (r.last_box->size.width - 3.f);
+                        f32 line_x = indent_left ? 0.f : (tab_interact_result.last_box->size.width - 3.f);
 
                         Color line_c = cfg->theme->tab_drag_target_bg_accent;
-                        UIBox* line = ui_box_begin(&(BoxConfig){
-                            .sizing = { fixed(3), fixed(tab_bar_h - 1) },
+                        UIBox* drop_indicator_line = ui_box_begin(&(BoxConfig){
+                            .sizing = { fixed(3), fixed(tab_bar_height - 1) },
                             .flags = BoxFlag_Float,
                             .float_offset = { line_x, 0 },
                         });
                         {
-                            line->cfg.color = lerp_color((Color){ 0 }, line_c, drop_t);
+                            drop_indicator_line->cfg.color = lerp_color((Color){ 0 }, line_c, drop_t);
                         }
-                        ui_box_end(line);
+                        ui_box_end(drop_indicator_line);
                     }
 
-                    if (ui_dragging(r.flags))
+                    /* Drag payload */
+                    if (ui_dragging(tab_interact_result.flags))
                     {
-                        TabDragPayload tdp = { DRAG_TYPE_TAB, cfg->panel->id, tab->id, cfg->window_id };
+                        TabDragPayload tab_drag_payload = { DRAG_TYPE_TAB, cfg->panel->id, tab->id, cfg->window_id };
                         isize copy_len = tab->name_len < 43 ? tab->name_len : 43;
-                        memcpy(tdp.title, tab->name, (size_t)copy_len);
-                        tdp.title[copy_len] = '\0';
-                        ui_set_drag_payload(&tdp, sizeof(tdp));
+                        memcpy(tab_drag_payload.title, tab->name, (size_t)copy_len);
+                        tab_drag_payload.title[copy_len] = '\0';
+                        ui_set_drag_payload(&tab_drag_payload, sizeof(tab_drag_payload));
                         ui_set_desired_cursor(UI_CURSOR_MOVE);
                     }
 
-                    /* tab title & close button */
-                    UIBox* box = ui_box_begin(&(BoxConfig){
-                        .sizing = { fit({}), fixed(tab_bar_h - 1) },
+                    /* Tab title and close button */
+                    UIBox* tab_title_cell = ui_box_begin(&(BoxConfig){
+                        .sizing = { fit({}), fixed(tab_bar_height - 1) },
                         .padding = { 5, 10, 5, 10 },
                         .direction = LAYOUT_LEFT_TO_RIGHT,
                         .child_gap = 4,
                         .alignment = { ALIGN_START, ALIGN_CENTER },
-                        .color = lerp_color(ui_dragging(r.flags)
+                        .color = lerp_color(ui_dragging(tab_interact_result.flags)
                                                 ? cfg->theme->tab_dragging_bg
                                                 : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg),
                                             cfg->theme->tab_drag_target_bg, drop_t) });
                     {
-                        if (ui_lclicked(r.flags))
-                        {
-                            char buf[64];
-                            i32 len = snprintf(buf, sizeof(buf), "tab.activate panel=%u tab=%u window=%u",
-                                               cfg->panel->id, tab->id, cfg->window_id);
-                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
-                        }
+                        /* Activate tab on click */
+                        if (ui_lclicked(tab_interact_result.flags))
+                            cmd_queue_push(cfg->cmd_queue,
+                                           str_fmt(CMD_STR_MAX_LENGTH, "tab.activate panel=%u tab=%u window=%u",
+                                                   cfg->panel->id, tab->id, cfg->window_id));
 
-                        /* tab title */
+                        /* Tab title */
                         ui_text((String){ tab->name, tab->name_len }, &(TextConfig){ .font = cfg->font_ui,
-                                                                                     .font_size = font_sz,
+                                                                                     .font_size = cfg->font_size,
                                                                                      .color = cfg->theme->tab_active_fg,
-                                                                                     .line_height = font_sz });
+                                                                                     .line_height = cfg->font_size });
 
-                        /* close button (hidden while dragging) */
-                        UISignalFlags cf = ui_button(
-                            str_fmt("×##tc_%u_%u", cfg->panel->id, tab->id), cfg->font_ui, 11,
+                        /* Close button (hidden while dragging) */
+                        UISignalFlags close_button_flags = ui_button(
+                            str_fmt(HASH_STR_MAX_LENGTH, "×##tc_%u_%u", cfg->panel->id, tab->id), cfg->font_ui, 11,
                             (Sizing){ fit({}), fit({}) }, (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, // background color
-                            (ui_hovered(r.flags) && !ui_drag_over(r.flags)) ? cfg->theme->tab_active_fg
-                                                                            : (Color){ 0 }, // text color
-                            ui_drag_over(r.flags) ? (Color){ 0 } : cfg->theme->hover_bg, // hover color
+                            (ui_hovered(tab_interact_result.flags) && !ui_drag_over(tab_interact_result.flags))
+                                ? cfg->theme->tab_active_fg
+                                : (Color){ 0 }, // text color
+                            ui_drag_over(tab_interact_result.flags) ? (Color){ 0 }
+                                                                    : cfg->theme->hover_bg, // hover color
                             cfg->theme->hover_bg, True);
-                        if (ui_hovered(cf) && !is_active && !ui_drag_over(r.flags))
-                            box->cfg.color = cfg->theme->tab_bg;
-                        if (ui_lclicked(cf))
-                        {
-                            char buf[64];
-                            i32 len = snprintf(buf, sizeof(buf), "tab.close panel=%u tab=%u window=%u", cfg->panel->id,
-                                               tab->id, cfg->window_id);
-                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
-                        }
+                        if (ui_hovered(close_button_flags) && !is_active && !ui_drag_over(tab_interact_result.flags))
+                            tab_title_cell->cfg.color = cfg->theme->tab_bg;
+                        if (ui_lclicked(close_button_flags))
+                            cmd_queue_push(cfg->cmd_queue,
+                                           str_fmt(CMD_STR_MAX_LENGTH, "tab.close panel=%u tab=%u window=%u",
+                                                   cfg->panel->id, tab->id, cfg->window_id));
 
-                        /* drop: reorder (same panel) or move to panel (cross-panel) */
-                        if (ui_dropped(r.flags) && !g_ui_ctx->drag_payload_consumed &&
+                        /* Drop: reorder (same panel) or move to panel (cross-panel) */
+                        if (ui_dropped(tab_interact_result.flags) && !g_ui_ctx->drag_payload_consumed &&
                             g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                         {
                             TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
@@ -2035,117 +2034,114 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                 {
                                     if (payload->from_panel_id == cfg->panel->id)
                                     {
-                                        /* same panel: reorder */
                                         isize dragged_idx = 0;
                                         for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
                                             if (t->id == payload->from_tab_id)
                                                 break;
                                         i32 delta = (i32)(tab_index - dragged_idx);
-
-                                        char buf[64];
-                                        i32 len =
-                                            snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
-                                                     cfg->panel->id, payload->from_tab_id, delta, cfg->window_id);
-
-                                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                                        cmd_queue_push(
+                                            cfg->cmd_queue,
+                                            str_fmt(CMD_STR_MAX_LENGTH, "tab.move panel=%u tab=%u delta=%+d window=%u",
+                                                    cfg->panel->id, payload->from_tab_id, delta, cfg->window_id));
                                     }
                                     else
                                     {
-                                        /* cross-panel: insert before this tab */
-                                        char buf[128];
-                                        i32 len = snprintf(buf, sizeof(buf),
-                                                           "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d "
-                                                           "window=%u to_window=%u",
-                                                           payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
-                                                           (i32)tab_index, payload->from_window_id, cfg->window_id);
-                                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                                        cmd_queue_push(
+                                            cfg->cmd_queue,
+                                            str_fmt(CMD_STR_MAX_LENGTH,
+                                                    "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=%d "
+                                                    "window=%u to_window=%u",
+                                                    payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
+                                                    (i32)tab_index, payload->from_window_id, cfg->window_id));
                                     }
                                 }
                             }
                         }
                     }
-                    ui_box_end(box);
+                    ui_box_end(tab_title_cell);
 
-                    /* underline */
+                    /* Underline */
                     ui_box_end(ui_box_begin(&(BoxConfig){
                         .sizing = { grow({}), fixed(1) },
-                        .color = (ui_drag_over(r.flags) && g_ui_ctx->drag_payload_size)
+                        .color = (ui_drag_over(tab_interact_result.flags) && g_ui_ctx->drag_payload_size)
                                      ? cfg->theme->tab_splitter
-                                     : (ui_dragging(r.flags)
+                                     : (ui_dragging(tab_interact_result.flags)
                                             ? cfg->theme->tab_dragging_bg
                                             : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_splitter)) }));
                 }
                 ui_box_end(tab_container);
 
-                /* tab splitter */
+                /* Tab splitter */
                 ui_box_end(
                     ui_box_begin(&(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_splitter }));
             }
 
-            /* new tab button */
+            /* New tab button */
             UIBox* new_button_container =
                 ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
             {
-
                 UIBox* inner_container = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) },
                                                                     .padding = { 0, 3, 0, 3 },
                                                                     .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
                 {
-                    UISignalFlags plus_flags =
-                        ui_button(str_fmt("+##tab_add_%u", cfg->panel->id), cfg->font_ui, 12,
+                    UISignalFlags new_tab_button_flags =
+                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "+##tab_add_%u", cfg->panel->id), cfg->font_ui, 12,
                                   (Sizing){ fit({}), fit({}) }, (Padding){ 3, 4, 4, 4 }, (Color){ 0 },
                                   cfg->theme->tab_fg, cfg->theme->hover_bg, cfg->theme->click_bg, False);
-                    if (ui_lclicked(plus_flags))
-                    {
-                        char buf[64];
-                        i32 len =
-                            snprintf(buf, sizeof(buf), "tab.new panel=%u window=%u", cfg->panel->id, cfg->window_id);
-                        cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
-                    }
+                    if (ui_lclicked(new_tab_button_flags))
+                        cmd_queue_push(cfg->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "tab.new panel=%u window=%u",
+                                                               cfg->panel->id, cfg->window_id));
                 }
                 ui_box_end(inner_container);
 
-                /* underline */
+                /* Underline */
                 ui_box_end(
                     ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
             }
             ui_box_end(new_button_container);
 
-            /* spacer (also serves as tab bar drop target for appending tabs) */
+            /* Spacer — also serves as tab bar drop target for appending tabs */
             UIBox* spacer_container =
                 ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
             {
                 UIBox* spacer_inner = ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) } });
                 {
-                    UIBoxInteractResult dr = ui_box_interact(spacer_inner, str_fmt("panel_drop_%u", cfg->panel->id));
-                    b32 spacer_drop = ui_drag_over(dr.flags) && g_ui_ctx->drag_payload_size;
-                    if (dr.last_box)
+                    UIBoxInteractResult spacer_interact_result =
+                        ui_box_interact(spacer_inner, str_fmt(HASH_STR_MAX_LENGTH, "panel_drop_%u", cfg->panel->id));
+                    b32 spacer_is_drop_target =
+                        ui_drag_over(spacer_interact_result.flags) && g_ui_ctx->drag_payload_size;
+                    if (spacer_interact_result.last_box)
                     {
-                        update_transition(&dr.last_box->hot_t, 15.f, spacer_drop ? 1.f : 0.f);
+                        update_transition(&spacer_interact_result.last_box->hot_t, 15.f,
+                                          spacer_is_drop_target ? 1.f : 0.f);
 
-                        /* capture spacer absolute rect for HTCAPTION hit-test */
+                        /* Capture spacer rect for HTCAPTION hit-test */
                         {
-                            f32 sx = dr.last_box->position.x;
-                            f32 sy = dr.last_box->position.y;
-                            f32 sw = dr.last_box->size.width;
-                            f32 sh = dr.last_box->size.height;
+                            f32 sx = spacer_interact_result.last_box->position.x;
+                            f32 sy = spacer_interact_result.last_box->position.y;
+                            f32 sw = spacer_interact_result.last_box->size.width;
+                            f32 sh = spacer_interact_result.last_box->size.height;
                             tab_bar_spacer_rect = (Rect){ sx, sy, sx + sw, sy + sh };
                         }
                     }
-                    f32 st = dr.last_box ? dr.last_box->hot_t : 0.f;
+                    f32 spacer_hot_transition =
+                        spacer_interact_result.last_box ? spacer_interact_result.last_box->hot_t : 0.f;
 
-                    /* insertion indicator line at spacer left edge (append position) */
-                    if (st > 0.01f)
+                    /* Insertion indicator line at spacer left edge (append position) */
+                    if (spacer_hot_transition > 0.01f)
                         ui_box_end(ui_box_begin(&(BoxConfig){
                             .sizing = { fixed(3), fixed(27) },
-                            .color = lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg_accent, st),
+                            .color =
+                                lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg_accent, spacer_hot_transition),
                             .flags = BoxFlag_Float,
                             .float_offset = { 0, 0 },
                         }));
 
-                    spacer_inner->cfg.color = lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg, st);
+                    spacer_inner->cfg.color =
+                        lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg, spacer_hot_transition);
 
-                    if (ui_dropped(dr.flags))
+                    /* Drop handling */
+                    if (ui_dropped(spacer_interact_result.flags))
                     {
                         TabDragPayload* payload = NULL;
                         if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
@@ -2157,12 +2153,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                 payload = p;
                             }
                         }
-                        if (!payload)
+                        if (payload && payload->from_panel_id == cfg->panel->id)
                         {
-                        }
-                        else if (payload->from_panel_id == cfg->panel->id)
-                        {
-                            /* same panel: move to end */
+                            /* Same panel: move to end */
                             isize count = 0;
                             isize dragged_idx = -1;
                             for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, count++)
@@ -2171,35 +2164,33 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                             if (dragged_idx >= 0 && dragged_idx < count - 1)
                             {
                                 i32 delta = (i32)(count - 1 - dragged_idx);
-                                char buf[64];
-                                i32 len = snprintf(buf, sizeof(buf), "tab.move panel=%u tab=%u delta=%+d window=%u",
-                                                   cfg->panel->id, payload->from_tab_id, delta, cfg->window_id);
-                                cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                                cmd_queue_push(cfg->cmd_queue,
+                                               str_fmt(CMD_STR_MAX_LENGTH,
+                                                       "tab.move panel=%u tab=%u delta=%+d window=%u", cfg->panel->id,
+                                                       payload->from_tab_id, delta, cfg->window_id));
                             }
                         }
-                        else
+                        else if (payload)
                         {
-                            /* cross-panel: append to this panel */
-                            char buf[128];
-                            i32 len = snprintf(
-                                buf, sizeof(buf),
-                                "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=-1 window=%u to_window=%u",
-                                payload->from_panel_id, payload->from_tab_id, cfg->panel->id, payload->from_window_id,
-                                cfg->window_id);
-                            cmd_queue_push(cfg->cmd_queue, (String){ (u8*)buf, len });
+                            cmd_queue_push(
+                                cfg->cmd_queue,
+                                str_fmt(
+                                    CMD_STR_MAX_LENGTH,
+                                    "tab.move_to_panel panel=%u tab=%u to_panel=%u to_idx=-1 window=%u to_window=%u",
+                                    payload->from_panel_id, payload->from_tab_id, cfg->panel->id,
+                                    payload->from_window_id, cfg->window_id));
                         }
                     }
                 }
                 ui_box_end(spacer_inner);
 
-                /* underline */
+                /* Underline */
                 ui_box_end(
                     ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
             }
             ui_box_end(spacer_container);
 
-            /* inset filler — invisible box that reserves space for decoration buttons.
-               Pushes the spacer leftward by exactly tab_bar_right_inset pixels. */
+            /* Inset filler — invisible box reserving space for decoration buttons */
             if (cfg->tab_bar_right_inset > 0)
             {
                 UIBox* inset_container =
@@ -2209,7 +2200,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         .sizing = { fixed(cfg->tab_bar_right_inset), grow({}) },
                     }));
 
-                    /* underline */
+                    /* Underline */
                     ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(cfg->tab_bar_right_inset), fixed(1) },
                                                           .color = cfg->theme->tab_splitter }));
                 }
@@ -2218,150 +2209,156 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         }
         ui_box_end(tab_bar);
 
-        /* scrollable content area */
-        ScrollContext scroll_ctx =
-            ui_scrollable_area_begin(&(ScrollableAreaConfig){ .hash_str = str_fmt("panel_scroll_%u", cfg->panel->id),
-                                                              .sizing = { grow({}), grow({}) },
-                                                              .bg_color = cfg->theme->tab_active_bg,
-                                                              .padding = cfg->padding,
-                                                              .child_gap = cfg->child_gap,
-                                                              .direction = cfg->direction,
-                                                              .thumb_color = cfg->theme->scrollbar_thumb });
+        /* Scrollable content area */
+        ScrollContext scroll_ctx = ui_scrollable_area_begin(
+            &(ScrollableAreaConfig){ .hash_str = str_fmt(HASH_STR_MAX_LENGTH, "panel_scroll_%u", cfg->panel->id),
+                                     .sizing = { grow({}), grow({}) },
+                                     .bg_color = cfg->theme->tab_active_bg,
+                                     .padding = cfg->padding,
+                                     .child_gap = cfg->child_gap,
+                                     .direction = cfg->direction,
+                                     .thumb_color = cfg->theme->scrollbar_thumb });
 
-        PanelContext pf = { .panel = cfg->panel,
-                            .scroll_ctx = scroll_ctx,
-                            .outer_box = container,
-                            .panel_w = iw,
-                            .panel_h = ih,
-                            .tab_bar_spacer_rect = tab_bar_spacer_rect,
-                            .window_id = cfg->window_id,
-                            .cmd_queue = cfg->cmd_queue,
-                            .theme = cfg->theme,
-                            .font_size = cfg->font_size };
+        PanelContext panel_ctx = { .panel = cfg->panel,
+                                   .scroll_ctx = scroll_ctx,
+                                   .outer_box = container,
+                                   .panel_w = inner_w,
+                                   .panel_h = inner_h,
+                                   .tab_bar_spacer_rect = tab_bar_spacer_rect,
+                                   .window_id = cfg->window_id,
+                                   .cmd_queue = cfg->cmd_queue,
+                                   .theme = cfg->theme,
+                                   .font_size = cfg->font_size };
 
         TracyCZoneEnd(ctx_pb);
-        return pf;
+        return panel_ctx;
     }
 }
 
-void ui_panel_end(PanelContext* pf)
+void ui_panel_end(PanelContext* panel_ctx)
 {
     TracyCZoneNC(ctx_pe, "PanelEnd", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
-    ui_scrollable_area_end(pf->scroll_ctx);
+    ui_scrollable_area_end(panel_ctx->scroll_ctx);
 
-    /* Edge drop zones for docking tabs at panel edges */
+    //  Edge drop zones for docking tabs at panel edges
+    //
+    //    +----+-------+----+
+    //    |    |  Top  |    |
+    //    |    +-------+    |
+    //    +---+         +---+
+    //    | L |         | R |
+    //    +---+         +---+
+    //    |   +--------+    |
+    //    |   | Bottom |    |
+    //    +---+--------+----+
     {
-        //   +----+-------+----+
-        //   |    |  Top  |    |
-        //   |    +-------+    |
-        //   +---+         +---+
-        //   | L |         | R |
-        //   +---+         +---+
-        //   |   +--------+    |
-        //   |   | Bottom |    |
-        //   +---+--------+----+
-        //
-        f32 tab_bar_h = pf->font_size * 2.5f + 2.f - 1; // TODO: don't hard-code ...
-        f32 usable_w = pf->panel_w;
-        f32 usable_h = pf->panel_h - tab_bar_h;
+        f32 tab_bar_height = panel_ctx->font_size * 2.5f + 2.f - 1; // TODO: don't hard-code ...
+        f32 usable_w = panel_ctx->panel_w;
+        f32 usable_h = panel_ctx->panel_h - tab_bar_height;
         f32 pad = 12.f;
+        f32 usable_w_padded = usable_w - pad * 2;
+        f32 usable_h_padded = usable_h - pad * 2;
 
-        UIBox* container = ui_box_begin(&(BoxConfig){ .sizing = { fixed(pf->panel_w), fixed(pf->panel_h) },
-                                                      .flags = BoxFlag_Float,
-                                                      .float_offset = { 0, -usable_h },
-                                                      .padding = { pad, pad, pad, pad } });
+        /* Layout definitions */
+        const char* dock_zone_suffixes[4] = { "Y_before", "Y_after", "X_before", "X_after" };
+
+        // clang-format off
+        f32 qw = usable_w_padded * 0.25f;
+        f32 qh = usable_h_padded * 0.25f;
+        f32 hw = usable_w_padded * 0.5f;
+        f32 hh = usable_h_padded * 0.5f;
+        Position dock_zone_positions[4]  = {
+            { qw,      0            },  // top
+            { qw,      hh + qh      },  // bottom
+            { 0,       qh           },  // left
+            { hw + qw, qh           },  // right
+        };
+        Sizing dock_zone_sizings[4] = {
+            { fixed(hw), fixed(qh) },  // top
+            { fixed(hw), fixed(qh) },  // bottom
+            { fixed(qw), fixed(hh) },  // left
+            { fixed(qw), fixed(hh) },  // right
+        };
+        // clang-format on
+
+        UIBox* dock_overlay_container =
+            ui_box_begin(&(BoxConfig){ .sizing = { fixed(panel_ctx->panel_w), fixed(panel_ctx->panel_h) },
+                                       .flags = BoxFlag_Float,
+                                       .float_offset = { 0, -usable_h },
+                                       .padding = { pad, pad, pad, pad } });
         {
-            usable_w -= pad * 2;
-            usable_h -= pad * 2;
-
-            f32 quad_w = usable_w * 0.25f;
-            f32 quad_h = usable_h * 0.25f;
-
-            f32 half_w = usable_w * 0.5f;
-            f32 half_h = usable_h * 0.5f;
-
-            const char* sides[4] = { "Y_before", "Y_after", "X_before", "X_after" };
-
-            // clang-format off
-            Position positions[4]  = {
-                { quad_w,          0          },  // top
-                { quad_w,          half_h + quad_h    },  // bottom
-                { 0,               quad_h },  // left
-                { half_w + quad_w, quad_h },  // right
-            };
-            Sizing sizings[4] = {
-                { fixed(half_w), fixed(quad_h) },  // top
-                { fixed(half_w), fixed(quad_h) },  // bottom
-                { fixed(quad_w), fixed(half_h) },  // left
-                { fixed(quad_w), fixed(half_h) },  // right
-            };
-            // clang-format on
-
-            /* Skip zones entirely: dragging the last tab of this panel onto itself */
-            b32 skip_zone = False;
+            /* Skip zones when dragging the last tab of this panel onto itself */
+            b32 skip_dock_zones = False;
             if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
             {
                 TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                if (peek->drag_type == DRAG_TYPE_TAB && peek->from_panel_id == pf->panel->id &&
-                    panel_tab_count(pf->panel) == 1)
-                    skip_zone = True;
+                if (peek->drag_type == DRAG_TYPE_TAB && peek->from_panel_id == panel_ctx->panel->id &&
+                    panel_tab_count(panel_ctx->panel) == 1)
+                    skip_dock_zones = True;
             }
 
-            if (!skip_zone)
-                for (i32 zi = 0; zi < 4; zi++)
+            if (!skip_dock_zones)
+                for (i32 zone_index = 0; zone_index < 4; zone_index++)
                 {
-                    UIBox* zone = ui_box_begin(&(BoxConfig){
-                        .sizing = sizings[zi],
+                    UIBox* dock_zone = ui_box_begin(&(BoxConfig){
+                        .sizing = dock_zone_sizings[zone_index],
                         .rect_style = { .corner_radius = 12 },
                         .flags = BoxFlag_Float,
-                        .float_offset = positions[zi],
+                        .float_offset = dock_zone_positions[zone_index],
                     });
                     {
-                        UIBoxInteractResult zr = ui_box_interact(zone, str_fmt("dock_%s_%u", sides[zi], pf->panel->id));
+                        UIBoxInteractResult zone_interact_result =
+                            ui_box_interact(dock_zone, str_fmt(HASH_STR_MAX_LENGTH, "dock_%s_%u",
+                                                               dock_zone_suffixes[zone_index], panel_ctx->panel->id));
 
-                        /* color transition — fade in/out with DragOver accent */
+                        /* Color transition with DragOver accent */
                         {
-                            b32 drag_present = g_ui_ctx->drag_active && g_ui_ctx->drag_payload_size;
-                            b32 zone_hovered = ui_drag_over(zr.flags) && drag_present;
+                            b32 has_active_drag = g_ui_ctx->drag_active && g_ui_ctx->drag_payload_size;
+                            b32 is_zone_hovered = ui_drag_over(zone_interact_result.flags) && has_active_drag;
 
-                            if (zr.last_box)
+                            if (zone_interact_result.last_box)
                             {
-                                update_transition(&zr.last_box->hot_t, 12.f, drag_present ? 1.f : 0.f);
-                                update_transition(&zr.last_box->active_t, 12.f, zone_hovered ? 1.f : 0.f);
+                                update_transition(&zone_interact_result.last_box->hot_t, 12.f,
+                                                  has_active_drag ? 1.f : 0.f);
+                                update_transition(&zone_interact_result.last_box->active_t, 12.f,
+                                                  is_zone_hovered ? 1.f : 0.f);
                             }
 
-                            f32 ht = zr.last_box ? zr.last_box->hot_t : 0.f;
-                            f32 at = zr.last_box ? zr.last_box->active_t : 0.f;
-                            Color bg_tint = lerp_color((Color){ 0 }, pf->theme->tab_drag_target_bg, ht);
-                            zone->cfg.color = lerp_color(bg_tint, pf->theme->tab_drag_target_bg_accent, at);
+                            f32 hot_transition =
+                                zone_interact_result.last_box ? zone_interact_result.last_box->hot_t : 0.f;
+                            f32 active_transition =
+                                zone_interact_result.last_box ? zone_interact_result.last_box->active_t : 0.f;
+                            Color bg_tint =
+                                lerp_color((Color){ 0 }, panel_ctx->theme->tab_drag_target_bg, hot_transition);
+                            dock_zone->cfg.color =
+                                lerp_color(bg_tint, panel_ctx->theme->tab_drag_target_bg_accent, active_transition);
                         }
 
-                        /* dropped */
-                        if (ui_dropped(zr.flags) && !g_ui_ctx->drag_payload_consumed &&
+                        /* Handle drop: create new panel from dragged tab */
+                        if (ui_dropped(zone_interact_result.flags) && !g_ui_ctx->drag_payload_consumed &&
                             g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                         {
-                            TabDragPayload* pld = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                            if (pld->drag_type == DRAG_TYPE_TAB)
+                            TabDragPayload* dock_payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                            if (dock_payload->drag_type == DRAG_TYPE_TAB)
                             {
                                 g_ui_ctx->drag_payload_consumed = True;
-
-                                char buf[128];
-                                i32 len = snprintf(buf, sizeof(buf),
-                                                   "tab.to_new_panel panel=%u tab=%u to_panel=%u axis=%s side=%s "
-                                                   "window=%u to_window=%u",
-                                                   pld->from_panel_id, pld->from_tab_id, pf->panel->id,
-                                                   (zi < 2) ? "Y" : "X", (zi == 0 || zi == 2) ? "before" : "after",
-                                                   pld->from_window_id, pf->window_id);
-                                cmd_queue_push(pf->cmd_queue, (String){ (u8*)buf, len });
+                                cmd_queue_push(panel_ctx->cmd_queue,
+                                               str_fmt(CMD_STR_MAX_LENGTH,
+                                                       "tab.to_new_panel panel=%u tab=%u to_panel=%u axis=%s side=%s "
+                                                       "window=%u to_window=%u",
+                                                       dock_payload->from_panel_id, dock_payload->from_tab_id,
+                                                       panel_ctx->panel->id, (zone_index < 2) ? "Y" : "X",
+                                                       (zone_index == 0 || zone_index == 2) ? "before" : "after",
+                                                       dock_payload->from_window_id, panel_ctx->window_id));
                             }
                         }
                     }
-                    ui_box_end(zone);
+                    ui_box_end(dock_zone);
                 }
         }
-        ui_box_end(container);
+        ui_box_end(dock_overlay_container);
     }
-    ui_box_end(pf->outer_box);
+    ui_box_end(panel_ctx->outer_box);
     TracyCZoneEnd(ctx_pe);
 }
 

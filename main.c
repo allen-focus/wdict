@@ -1080,7 +1080,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 {
                     /* Button: create window */
                     UISignalFlags cw_button_flags =
-                        ui_button(panel_str("New Window##panel_cw_button", p->id), &shared->fonts[FONT_INDEX_UI], 12,
+                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "New Window##panel_cw_button_%u", p->id), &shared->fonts[FONT_INDEX_UI], 12,
                                   (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
                                   theme->accent_hover, theme->accent_press, True);
                     if (ui_lclicked(cw_button_flags))
@@ -1088,27 +1088,19 @@ static void panel_container(WindowContext* ctx, const Rect rect)
 
                     /* Button: split horizontally */
                     UISignalFlags sph_button_flags =
-                        ui_button(panel_str("Split Horizontally##panel_sph_button", p->id),
+                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Horizontally##panel_sph_button_%u", p->id),
                                   &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
                                   theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press, True);
                     if (ui_lclicked(sph_button_flags))
-                    {
-                        char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "panel.split_h panel=%u", p->id);
-                        cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
-                    }
+                        cmd_queue_push(&shared->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "panel.split_h panel=%u", p->id));
 
-                    /* Button: split vertically */
-                    UISignalFlags spv_button_flags =
-                        ui_button(panel_str("Split Vertically##panel_spv_button", p->id), &shared->fonts[FONT_INDEX_UI],
-                                  12, (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
-                                  theme->accent_hover, theme->accent_press, True);
-                    if (ui_lclicked(spv_button_flags))
-                    {
-                        char buf[64];
-                        i32 len = snprintf(buf, sizeof(buf), "panel.split_v panel=%u", p->id);
-                        cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
-                    }
+                     /* Button: split vertically */
+                     UISignalFlags spv_button_flags =
+                         ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Vertically##panel_spv_button_%u", p->id), &shared->fonts[FONT_INDEX_UI],
+                                   12, (Sizing){ fit({}), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
+                                   theme->accent_hover, theme->accent_press, True);
+                     if (ui_lclicked(spv_button_flags))
+                         cmd_queue_push(&shared->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "panel.split_v panel=%u", p->id));
                 }
                 ui_box_end(box);
 
@@ -1116,15 +1108,15 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                                          .child_gap = s_child_gap_big,
                                                          .alignment = { ALIGN_START, ALIGN_CENTER } });
                 {
-                    ui_button(panel_str("nothing##world", p->id), &shared->fonts[FONT_INDEX_MONO], 11,
+                    ui_button(str_fmt(HASH_STR_MAX_LENGTH, "nothing##world_%u", p->id), &shared->fonts[FONT_INDEX_MONO], 11,
                               (Sizing){ fixed(80), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
                               theme->accent_hover, theme->accent_press, True);
-                    ui_text_field(&ctx->text_edit_1, panel_str("placeholder##text_field", p->id),
+                    ui_text_field(&ctx->text_edit_1, str_fmt(HASH_STR_MAX_LENGTH, "placeholder##text_field_%u", p->id),
                                   &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_small,
                                   theme->bg_overlay, theme->border_focus, theme->fg_primary, theme->scrollbar_thumb,
                                   theme->cursor_trail, theme->cursor, theme->selection, theme->selection_flash);
                     UISignalFlags flags =
-                        ui_switchbox(panel_str("switch box", p->id), &shared->fonts[FONT_INDEX_ICON], &ctx->check,
+                        ui_switchbox(str_fmt(HASH_STR_MAX_LENGTH, "switch box_%u", p->id), &shared->fonts[FONT_INDEX_ICON], &ctx->check,
                                      theme->border_normal, theme->accent_fg, theme->shadow, theme->accent);
                     if (ui_lclicked(flags))
                         ctx->check = !ctx->check;
@@ -1271,12 +1263,10 @@ static void process_frame(WindowContext* ctx)
 
                             POINT cursor_pt;
                             GetCursorPos(&cursor_pt);
-                            char buf[128];
-                            i32 len = snprintf(buf, sizeof(buf),
-                                               "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
-                                               payload->from_panel_id, payload->from_tab_id, payload->from_window_id,
-                                               (i32)cursor_pt.x, (i32)cursor_pt.y);
-                            cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
+                            cmd_queue_push(&shared->cmd_queue,
+                                           str_fmt(CMD_STR_MAX_LENGTH, "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
+                                                   payload->from_panel_id, payload->from_tab_id,
+                                                   payload->from_window_id, (i32)cursor_pt.x, (i32)cursor_pt.y));
                         }
                     }
                 }
@@ -1751,16 +1741,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     }
 
                     if (panel_id)
-                    {
-                        char buf[128];
-                        i32 len = snprintf(buf, sizeof(buf), "%.*s panel=%u tab=%u to_panel=%u window=%u",
-                                           (i32)cmd_text.len, cmd_text.data, panel_id, tab_id, to_panel_id, window_id);
-                        cmd_queue_push(&shared->cmd_queue, (String){ (u8*)buf, len });
-                    }
+                         cmd_queue_push(&shared->cmd_queue,
+                                        str_fmt(CMD_STR_MAX_LENGTH, "%.*s panel=%u tab=%u to_panel=%u window=%u", (i32)cmd_text.len,
+                                               cmd_text.data, panel_id, tab_id, to_panel_id, window_id));
                     else
-                    {
                         cmd_queue_push(&shared->cmd_queue, cmd_text);
-                    }
                     return 0;
                 }
             }
@@ -2188,12 +2173,10 @@ i32 WinMainCRTStartup()
                             TabDragPayload* pld = (TabDragPayload*)shared.cross_drag_payload_buf;
                             POINT cursor_pt;
                             GetCursorPos(&cursor_pt);
-                            char buf[128];
-                            i32 len = snprintf(buf, sizeof(buf),
-                                               "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
-                                               pld->from_panel_id, pld->from_tab_id, pld->from_window_id,
-                                               (i32)cursor_pt.x, (i32)cursor_pt.y);
-                            cmd_queue_push(&shared.cmd_queue, (String){ (u8*)buf, len });
+                            cmd_queue_push(&shared.cmd_queue,
+                                           str_fmt(CMD_STR_MAX_LENGTH, "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
+                                                   pld->from_panel_id, pld->from_tab_id, pld->from_window_id,
+                                                   (i32)cursor_pt.x, (i32)cursor_pt.y));
                         }
                     }
 

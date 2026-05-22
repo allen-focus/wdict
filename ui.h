@@ -619,9 +619,6 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg);
 void ui_scrollable_area_end(ScrollContext scroll_ctx);
 
 // panel
-String str_fmt_impl(u8* buf, const char* fmt, ...);
-#define str_fmt(fmt, ...) str_fmt_impl((u8[HASH_STR_MAX_LENGTH]){ 0 }, fmt, __VA_ARGS__)
-#define panel_str(fmt, id) str_fmt(fmt "_%u", id)
 
 void ui_panel_draw_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme);
 PanelContext ui_panel_begin(const PanelConfig* cfg);

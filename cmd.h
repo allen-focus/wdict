@@ -2,6 +2,8 @@
 
 #include "utils.h"
 
+#define CMD_STR_MAX_LENGTH 256
+
 typedef void (*CmdFn)(void* userdata, String cmd_text);
 
 //
