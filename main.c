@@ -15,6 +15,7 @@
 
 #include <ShellScalingApi.h>
 #include <dwmapi.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <wchar.h>
@@ -166,6 +167,7 @@ struct WindowContext
 
     /* guards */
     b32 in_frame;
+    b32 mouse_tracked;
 };
 
 static u32 s_window_next_id = 1; /* 0 reserved for none */
@@ -1546,6 +1548,41 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     }
                 }
 
+            if (!ctx->mouse_tracked)
+            {
+                TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, window, 0 };
+                TrackMouseEvent(&tme);
+                ctx->mouse_tracked = True;
+            }
+
+            return 0;
+        }
+
+        case WM_MOUSELEAVE:
+        {
+            ctx->mouse_tracked = False;
+            ui_ctx->mouse_pos.x = -FLT_MAX;
+            ui_ctx->mouse_pos.y = -FLT_MAX;
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+            return 0;
+        }
+        case WM_NCMOUSEMOVE:
+        {
+            ui_ctx->mouse_pos.x = -FLT_MAX;
+            ui_ctx->mouse_pos.y = -FLT_MAX;
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+
+            TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE | TME_NONCLIENT, window, 0 };
+            TrackMouseEvent(&tme);
+
+            return 0;
+        }
+        case WM_NCMOUSELEAVE:
+        {
+            ctx->tb_hovered_button = TitleBarHot_None;
+            ui_ctx->mouse_pos.x = -FLT_MAX;
+            ui_ctx->mouse_pos.y = -FLT_MAX;
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             return 0;
         }
 
