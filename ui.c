@@ -1088,11 +1088,15 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_ctx->text_action_queue_count = 0;
 
     /* drag-drop */
-    if (!g_ui_ctx->mouse_press && g_ui_ctx->drag_active)
+    if (!g_ui_ctx->mouse_press)
     {
-        g_ui_ctx->drag_active = False;
-        g_ui_ctx->drag_payload_size = 0;
-        g_ui_ctx->drag_source_box = NULL;
+        if (g_ui_ctx->drag_active)
+        {
+            g_ui_ctx->drag_active = False;
+            g_ui_ctx->drag_payload_size = 0;
+            g_ui_ctx->drag_source_box = NULL;
+        }
+        g_ui_ctx->mouse_captured_by_hash = 0;
     }
 
     g_ui_ctx->frame_index++;
@@ -1441,6 +1445,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                 last_thumb->anim_state = TRANSITION_FORWARD;
                 last_thumb->hot_t = SCROLLBAR_THUMB_OPACITY_HOVER;
                 *area_drag_scroll_anchor = *scroll_delta;
+                g_ui_ctx->mouse_captured_by_hash = scroll_ctx.hash;
             }
             if (ui_dragging(thumb_flags) || last_thumb->anim_state == TRANSITION_FORWARD)
             {
@@ -1518,6 +1523,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                 f32 last_thumb_size = is_horizontal ? last_thumb->size.width : last_thumb->size.height;
                 f32 target = (mouse_pos - last_bar_position - last_thumb_size / 2) * thumb_delta_scale;
                 start_timed_lerp(scroll_anim, *scroll_delta, target, g_ui_ctx->current_time, SCROLL_ANIM_DURATION);
+                g_ui_ctx->mouse_captured_by_hash = scroll_ctx.hash;
             }
         }
         else
@@ -1983,7 +1989,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         }
 
                         /* Drag payload */
-                        if (ui_dragging(tab_interact_result.flags))
+                        if (ui_dragging(tab_interact_result.flags) && !g_ui_ctx->mouse_captured_by_hash)
                         {
                             TabDragPayload tab_drag_payload = { DRAG_TYPE_TAB, cfg->panel->id, tab->id,
                                                                 cfg->window_id };
@@ -2819,9 +2825,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
         }
 
         /* Mouse drag to extend selection (only continue existing press, not new click) */
-        // TODO: Need to capture the mouse even outside the field area while the button is held down
-        if (is_focused && g_ui_ctx->mouse_press && !g_ui_ctx->mouse_lclick && state->text_len > 0 &&
-            (g_ui_ctx->mouse_delta.x != 0.f || g_ui_ctx->mouse_delta.y != 0.f))
+        if (!g_ui_ctx->mouse_captured_by_hash && is_focused && g_ui_ctx->mouse_press && !g_ui_ctx->mouse_lclick &&
+            state->text_len > 0 && (g_ui_ctx->mouse_delta.x != 0.f || g_ui_ctx->mouse_delta.y != 0.f))
         {
             UIBox* last_inner_box = find_or_insert_box_with_hash(content_hash);
             if (last_inner_box)

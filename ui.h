@@ -461,6 +461,7 @@ struct UIContext
     b32 drag_active;
     UIBox* drag_source_box;
     b32 drag_payload_consumed;
+    u64 mouse_captured_by_hash;
 
     /* idle */
     i32 requested_frames;
