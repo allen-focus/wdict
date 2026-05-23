@@ -1603,8 +1603,7 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
     scroll_ctx.cursor_content_x = -1.f;
 
     /* Create area box */
-    scroll_ctx.area =
-        ui_box_begin(&(BoxConfig){ .sizing = cfg->sizing, .color = cfg->bg_color, .flags = BoxFlag_Clip });
+    scroll_ctx.area = ui_box_begin(&(BoxConfig){ .sizing = cfg->sizing, .color = cfg->bg, .flags = BoxFlag_Clip });
 
     /* Handle interaction and animation */
     UIBoxInteractResult result = ui_box_interact(scroll_ctx.area, cfg->hash_str);
@@ -1851,10 +1850,10 @@ void ui_panel_boundaries(const Panel* root, const Rect root_rect, const PanelThe
             }
             f32 hot_t = result.last_box ? result.last_box->hot_t : 0.f;
             f32 active_t = result.last_box ? result.last_box->active_t : 0.f;
-            Color virtual_line_color = lerp_color((Color){ 0 }, theme->splitter_hover, hot_t);
-            Color line_color = lerp_color(theme->splitter_idle, theme->splitter_hover, hot_t);
-            virtual_line_color = lerp_color(virtual_line_color, theme->splitter_drag, active_t);
-            line_color = lerp_color(line_color, theme->splitter_drag, active_t);
+            Color virtual_line_color = lerp_color((Color){ 0 }, theme->tab_accent_weak, hot_t);
+            Color line_color = lerp_color(theme->tab_border, theme->tab_accent_weak, hot_t);
+            virtual_line_color = lerp_color(virtual_line_color, theme->tab_accent, active_t);
+            line_color = lerp_color(line_color, theme->tab_accent, active_t);
 
             // clang-format off
             if (p->split_axis == Axis2_X)
@@ -1904,19 +1903,17 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         rect = cfg->panel_rect;
     else
         rect = panel_calc_rect(cfg->panel, cfg->root_rect);
-    f32 panel_border_w = 1.f;
-    Rect inner = { rect.xmin + panel_border_w, rect.ymin + panel_border_w, rect.xmax - panel_border_w,
-                   rect.ymax - panel_border_w };
-    f32 inner_w = max(0.f, inner.xmax - inner.xmin);
-    f32 inner_h = max(0.f, inner.ymax - inner.ymin);
+    f32 rect_w = max(0.f, rect.xmax - rect.xmin);
+    f32 rect_h = max(0.f, rect.ymax - rect.ymin);
+
     Rect tab_bar_spacer_rect = { 0 };
 
     /* Create panel container */
     UIBox* container = ui_box_begin(&(BoxConfig){
-        .sizing = { fixed(inner_w), fixed(inner_h) },
+        .sizing = { fixed(rect_w), fixed(rect_h) },
         .direction = LAYOUT_TOP_TO_BOTTOM,
         .flags = BoxFlag_Float,
-        .float_offset = { inner.xmin, inner.ymin },
+        .float_offset = { rect.xmin, rect.ymin },
     });
     {
         ui_box_interact(container, str_fmt(HASH_STR_MAX_LENGTH, "panel_%u", cfg->panel->id));
@@ -1928,7 +1925,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         f32 tab_bar_height = cfg->font_size * 2.5f + 2.f - 1;
 
         UIBox* tab_bar = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fixed(tab_bar_height) },
-                                                    .color = cfg->theme->tab_bar,
+                                                    .color = cfg->theme->tab_bg,
                                                     .alignment = { ALIGN_START, ALIGN_CENTER } });
         {
             PanelTab* active = panel_tab_get_active(cfg->panel);
@@ -1938,7 +1935,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                 .hash_str = str_fmt(HASH_STR_MAX_LENGTH, "panel_%u (scroll area)", cfg->panel->id),
                 .sizing = { fit({ .max = rect.xmax - rect.xmin - cfg->tab_bar_right_inset - 1 }), // 1 is boundary width
                             fixed(tab_bar_height) },
-                .bg_color = cfg->theme->tab_bar,
+                .bg = cfg->theme->tab_bg,
                 .thumb_color = cfg->theme->scrollbar_thumb,
                 .alignment = { ALIGN_START, ALIGN_CENTER },
                 .fixed_track = True });
@@ -1951,48 +1948,18 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                                                       .direction = LAYOUT_TOP_TO_BOTTOM });
                     {
                         /* Tab interaction */
-                        UIBoxInteractResult tab_interact_result = ui_box_interact(
+                        UIBoxInteractResult tab_interact_res = ui_box_interact(
                             tab_container, str_fmt(HASH_STR_MAX_LENGTH, "tab_%u_%u", cfg->panel->id, tab->id));
 
                         /* Drop-target highlight transition */
-                        if (tab_interact_result.last_box)
+                        if (tab_interact_res.last_box)
                             update_transition(
-                                &tab_interact_result.last_box->hot_t, 15.f,
-                                ui_drag_over(tab_interact_result.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f);
-                        f32 drop_t = tab_interact_result.last_box ? tab_interact_result.last_box->hot_t : 0.f;
-
-                        /* Insertion indicator line */
-                        if (drop_t > 0.01f)
-                        {
-                            b32 indent_left = True;
-                            if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
-                            {
-                                TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
-                                if (peek->drag_type == DRAG_TYPE_TAB && peek->from_panel_id == cfg->panel->id)
-                                {
-                                    isize dragged_idx = 0;
-                                    for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
-                                        if (t->id == peek->from_tab_id)
-                                            break;
-                                    indent_left = (dragged_idx > tab_index);
-                                }
-                            }
-                            f32 line_x = indent_left ? 0.f : (tab_interact_result.last_box->size.width - 3.f);
-
-                            Color line_c = cfg->theme->tab_drag_target_bg_accent;
-                            UIBox* drop_indicator_line = ui_box_begin(&(BoxConfig){
-                                .sizing = { fixed(3), fixed(tab_bar_height - 1) },
-                                .flags = BoxFlag_Float,
-                                .float_offset = { line_x, 0 },
-                            });
-                            {
-                                drop_indicator_line->cfg.color = lerp_color((Color){ 0 }, line_c, drop_t);
-                            }
-                            ui_box_end(drop_indicator_line);
-                        }
+                                &tab_interact_res.last_box->hot_t, 15.f,
+                                ui_drag_over(tab_interact_res.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f);
+                        f32 drop_t = tab_interact_res.last_box ? tab_interact_res.last_box->hot_t : 0.f;
 
                         /* Drag payload */
-                        if (ui_dragging(tab_interact_result.flags) && !g_ui_ctx->mouse_captured_by_hash)
+                        if (ui_dragging(tab_interact_res.flags) && !g_ui_ctx->mouse_captured_by_hash)
                         {
                             TabDragPayload tab_drag_payload = { DRAG_TYPE_TAB, cfg->panel->id, tab->id,
                                                                 cfg->window_id };
@@ -2010,19 +1977,19 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                             .direction = LAYOUT_LEFT_TO_RIGHT,
                             .child_gap = 4,
                             .alignment = { ALIGN_START, ALIGN_CENTER },
-                            .color = lerp_color(ui_dragging(tab_interact_result.flags)
-                                                    ? cfg->theme->tab_dragging_bg
+                            .color = lerp_color(ui_dragging(tab_interact_res.flags)
+                                                    ? cfg->theme->tab_accent
                                                     : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_bg),
-                                                cfg->theme->tab_drag_target_bg, drop_t) });
+                                                cfg->theme->tab_accent_weak, drop_t) });
                         {
                             /* Activate tab on click */
-                            if (ui_lclicked(tab_interact_result.flags))
+                            if (ui_lclicked(tab_interact_res.flags))
                                 cmd_queue_push(cfg->cmd_queue,
                                                str_fmt(CMD_STR_MAX_LENGTH, "tab.activate panel=%u tab=%u window=%u",
                                                        cfg->panel->id, tab->id, cfg->window_id));
 
                             /* Close tab on middle-click */
-                            if (ui_mclicked(tab_interact_result.flags))
+                            if (ui_mclicked(tab_interact_res.flags))
                                 cmd_queue_push(cfg->cmd_queue,
                                                str_fmt(CMD_STR_MAX_LENGTH, "tab.close panel=%u tab=%u window=%u",
                                                        cfg->panel->id, tab->id, cfg->window_id));
@@ -2038,14 +2005,13 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                             UISignalFlags close_button_flags = ui_button(
                                 str_fmt(HASH_STR_MAX_LENGTH, "×##tc_%u_%u", cfg->panel->id, tab->id), cfg->font_ui, 11,
                                 (Sizing){ fit({}), fit({}) }, (Padding){ 3, 3, 3, 3 }, (Color){ 0 }, // background color
-                                (ui_hovered(tab_interact_result.flags) && !ui_drag_over(tab_interact_result.flags))
+                                (ui_hovered(tab_interact_res.flags) && !ui_drag_over(tab_interact_res.flags))
                                     ? cfg->theme->tab_active_fg
                                     : (Color){ 0 }, // text color
-                                ui_drag_over(tab_interact_result.flags) ? (Color){ 0 }
-                                                                        : cfg->theme->hover_bg, // hover color
-                                cfg->theme->hover_bg, True);
-                            if (ui_hovered(close_button_flags) && !is_active &&
-                                !ui_drag_over(tab_interact_result.flags))
+                                ui_drag_over(tab_interact_res.flags) ? (Color){ 0 }
+                                                                     : cfg->theme->hover_bg // hover color
+                            );
+                            if (ui_hovered(close_button_flags) && !is_active && !ui_drag_over(tab_interact_res.flags))
                                 tab_title_cell->cfg.color = cfg->theme->tab_bg;
                             if (ui_lclicked(close_button_flags))
                                 cmd_queue_push(cfg->cmd_queue,
@@ -2053,7 +2019,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                                        cfg->panel->id, tab->id, cfg->window_id));
 
                             /* Drop: reorder (same panel) or move to panel (cross-panel) */
-                            if (ui_dropped(tab_interact_result.flags) && !g_ui_ctx->drag_payload_consumed &&
+                            if (ui_dropped(tab_interact_res.flags) && !g_ui_ctx->drag_payload_consumed &&
                                 g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                             {
                                 TabDragPayload* payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
@@ -2091,21 +2057,46 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         }
                         ui_box_end(tab_title_cell);
 
+                        /* Insertion indicator line */
+                        if (drop_t > 0.01f)
+                        {
+                            b32 indent_left = True;
+                            if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
+                            {
+                                TabDragPayload* peek = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
+                                if (peek->drag_type == DRAG_TYPE_TAB && peek->from_panel_id == cfg->panel->id)
+                                {
+                                    isize dragged_idx = 0;
+                                    for (PanelTab* t = cfg->panel->tab_first; t; t = t->next, dragged_idx++)
+                                        if (t->id == peek->from_tab_id)
+                                            break;
+                                    indent_left = (dragged_idx > tab_index);
+                                }
+                            }
+                            f32 line_x = indent_left ? 0 : (tab_interact_res.last_box->size.width - 3.f);
+
+                            ui_box_end(ui_box_begin(&(BoxConfig){
+                                .sizing = { fixed(3), fixed(tab_bar_height - 1) },
+                                .color = lerp_color((Color){ 0 }, cfg->theme->tab_accent, drop_t),
+                                .flags = BoxFlag_Float,
+                                .float_offset = { line_x, -(tab_bar_height - 1) },
+                            }));
+                        }
+
                         /* Underline */
                         ui_box_end(ui_box_begin(&(BoxConfig){
                             .sizing = { grow({}), fixed(1) },
-                            .color =
-                                (ui_drag_over(tab_interact_result.flags) && g_ui_ctx->drag_payload_size)
-                                    ? cfg->theme->tab_splitter
-                                    : (ui_dragging(tab_interact_result.flags)
-                                           ? cfg->theme->tab_dragging_bg
-                                           : (is_active ? cfg->theme->tab_active_bg : cfg->theme->tab_splitter)) }));
+                            .color = (ui_drag_over(tab_interact_res.flags) && g_ui_ctx->drag_payload_size)
+                                         ? cfg->theme->tab_border
+                                         : (ui_dragging(tab_interact_res.flags)
+                                                ? cfg->theme->tab_accent
+                                                : (is_active ? cfg->theme->panel_bg : cfg->theme->tab_border)) }));
                     }
                     ui_box_end(tab_container);
 
                     /* Tab splitter */
                     ui_box_end(ui_box_begin(
-                        &(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_splitter }));
+                        &(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_border }));
                 }
 
                 /* New tab button */
@@ -2119,7 +2110,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         UISignalFlags new_tab_button_flags =
                             ui_button(str_fmt(HASH_STR_MAX_LENGTH, "+##tab_add_%u", cfg->panel->id), cfg->font_ui, 12,
                                       (Sizing){ fit({}), fit({}) }, (Padding){ 3, 4, 4, 4 }, (Color){ 0 },
-                                      cfg->theme->tab_fg, cfg->theme->hover_bg, cfg->theme->click_bg, False);
+                                      cfg->theme->tab_fg, cfg->theme->hover_bg);
                         if (ui_lclicked(new_tab_button_flags))
                             cmd_queue_push(cfg->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "tab.new panel=%u window=%u",
                                                                    cfg->panel->id, cfg->window_id));
@@ -2128,7 +2119,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                     /* Underline */
                     ui_box_end(ui_box_begin(
-                        &(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+                        &(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_border }));
                 }
                 ui_box_end(new_button_container);
             }
@@ -2140,42 +2131,40 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             {
                 UIBox* spacer_inner = ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) } });
                 {
-                    UIBoxInteractResult spacer_interact_result =
+                    UIBoxInteractResult spacer_interact_res =
                         ui_box_interact(spacer_inner, str_fmt(HASH_STR_MAX_LENGTH, "panel_drop_%u", cfg->panel->id));
-                    b32 spacer_is_drop_target =
-                        ui_drag_over(spacer_interact_result.flags) && g_ui_ctx->drag_payload_size;
-                    if (spacer_interact_result.last_box)
+                    b32 spacer_is_drop_target = ui_drag_over(spacer_interact_res.flags) && g_ui_ctx->drag_payload_size;
+                    if (spacer_interact_res.last_box)
                     {
-                        update_transition(&spacer_interact_result.last_box->hot_t, 15.f,
+                        update_transition(&spacer_interact_res.last_box->hot_t, 15.f,
                                           spacer_is_drop_target ? 1.f : 0.f);
 
                         /* Capture spacer rect for HTCAPTION hit-test */
                         {
-                            f32 sx = spacer_interact_result.last_box->position.x;
-                            f32 sy = spacer_interact_result.last_box->position.y;
-                            f32 sw = spacer_interact_result.last_box->size.width;
-                            f32 sh = spacer_interact_result.last_box->size.height;
+                            f32 sx = spacer_interact_res.last_box->position.x;
+                            f32 sy = spacer_interact_res.last_box->position.y;
+                            f32 sw = spacer_interact_res.last_box->size.width;
+                            f32 sh = spacer_interact_res.last_box->size.height;
                             tab_bar_spacer_rect = (Rect){ sx, sy, sx + sw, sy + sh };
                         }
                     }
                     f32 spacer_hot_transition =
-                        spacer_interact_result.last_box ? spacer_interact_result.last_box->hot_t : 0.f;
+                        spacer_interact_res.last_box ? spacer_interact_res.last_box->hot_t : 0.f;
 
                     /* Insertion indicator line at spacer left edge (append position) */
                     if (spacer_hot_transition > 0.01f)
                         ui_box_end(ui_box_begin(&(BoxConfig){
-                            .sizing = { fixed(3), fixed(27) },
-                            .color =
-                                lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg_accent, spacer_hot_transition),
+                            .sizing = { fixed(3), fixed(tab_bar_height - 1) },
+                            .color = lerp_color((Color){ 0 }, cfg->theme->tab_accent, spacer_hot_transition),
                             .flags = BoxFlag_Float,
                             .float_offset = { 0, 0 },
                         }));
 
                     spacer_inner->cfg.color =
-                        lerp_color((Color){ 0 }, cfg->theme->tab_drag_target_bg, spacer_hot_transition);
+                        lerp_color((Color){ 0 }, cfg->theme->tab_accent_weak, spacer_hot_transition);
 
                     /* Drop handling */
-                    if (ui_dropped(spacer_interact_result.flags))
+                    if (ui_dropped(spacer_interact_res.flags))
                     {
                         TabDragPayload* payload = NULL;
                         if (g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
@@ -2220,7 +2209,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                 /* Underline */
                 ui_box_end(
-                    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_splitter }));
+                    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = cfg->theme->tab_border }));
             }
             ui_box_end(spacer_container);
 
@@ -2236,7 +2225,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 
                     /* Underline */
                     ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(cfg->tab_bar_right_inset), fixed(1) },
-                                                          .color = cfg->theme->tab_splitter }));
+                                                          .color = cfg->theme->tab_border }));
                 }
                 ui_box_end(inset_container);
             }
@@ -2247,7 +2236,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         ScrollContext panel_content_scroll_ctx = ui_scrollable_area_begin(
             &(ScrollableAreaConfig){ .hash_str = str_fmt(HASH_STR_MAX_LENGTH, "panel_scroll_%u", cfg->panel->id),
                                      .sizing = { grow({}), grow({}) },
-                                     .bg_color = cfg->theme->tab_active_bg,
+                                     .bg = cfg->theme->tab_active_bg,
                                      .padding = cfg->padding,
                                      .child_gap = cfg->child_gap,
                                      .direction = cfg->direction,
@@ -2256,8 +2245,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         PanelContext panel_ctx = { .panel = cfg->panel,
                                    .scroll_ctx = panel_content_scroll_ctx,
                                    .outer_box = container,
-                                   .panel_w = inner_w,
-                                   .panel_h = inner_h,
+                                   .panel_w = rect_w,
+                                   .panel_h = rect_h,
                                    .tab_bar_spacer_rect = tab_bar_spacer_rect,
                                    .window_id = cfg->window_id,
                                    .cmd_queue = cfg->cmd_queue,
@@ -2332,44 +2321,46 @@ void ui_panel_end(PanelContext* panel_ctx)
             }
 
             if (!skip_dock_zones)
-                for (i32 zone_index = 0; zone_index < 4; zone_index++)
+                for (i32 zone_idx = 0; zone_idx < 4; zone_idx++)
                 {
                     UIBox* dock_zone = ui_box_begin(&(BoxConfig){
-                        .sizing = dock_zone_sizings[zone_index],
+                        .sizing = dock_zone_sizings[zone_idx],
                         .rect_style = { .corner_radius = 12 },
                         .flags = BoxFlag_Float,
-                        .float_offset = dock_zone_positions[zone_index],
+                        .float_offset = dock_zone_positions[zone_idx],
                     });
                     {
-                        UIBoxInteractResult zone_interact_result =
+                        UIBoxInteractResult zone_interact_res =
                             ui_box_interact(dock_zone, str_fmt(HASH_STR_MAX_LENGTH, "dock_%s_%u",
-                                                               dock_zone_suffixes[zone_index], panel_ctx->panel->id));
+                                                               dock_zone_suffixes[zone_idx], panel_ctx->panel->id));
 
                         /* Color transition with DragOver accent */
                         {
                             b32 has_active_drag = g_ui_ctx->drag_active && g_ui_ctx->drag_payload_size;
-                            b32 is_zone_hovered = ui_drag_over(zone_interact_result.flags) && has_active_drag;
+                            b32 is_zone_hovered = ui_drag_over(zone_interact_res.flags) && has_active_drag;
 
-                            if (zone_interact_result.last_box)
+                            if (zone_interact_res.last_box)
                             {
-                                update_transition(&zone_interact_result.last_box->hot_t, 12.f,
+                                update_transition(&zone_interact_res.last_box->hot_t, 12.f,
                                                   has_active_drag ? 1.f : 0.f);
-                                update_transition(&zone_interact_result.last_box->active_t, 12.f,
+                                update_transition(&zone_interact_res.last_box->active_t, 12.f,
                                                   is_zone_hovered ? 1.f : 0.f);
                             }
 
-                            f32 hot_transition =
-                                zone_interact_result.last_box ? zone_interact_result.last_box->hot_t : 0.f;
-                            f32 active_transition =
-                                zone_interact_result.last_box ? zone_interact_result.last_box->active_t : 0.f;
-                            Color bg_tint =
-                                lerp_color((Color){ 0 }, panel_ctx->theme->tab_drag_target_bg, hot_transition);
-                            dock_zone->cfg.color =
-                                lerp_color(bg_tint, panel_ctx->theme->tab_drag_target_bg_accent, active_transition);
+                            f32 hot_t = zone_interact_res.last_box ? zone_interact_res.last_box->hot_t : 0.f;
+                            f32 active_t = zone_interact_res.last_box ? zone_interact_res.last_box->active_t : 0.f;
+
+                            Color dock_zone_inactive = panel_ctx->theme->tab_accent;
+                            dock_zone_inactive.a = (u8)(255 * 0.3f);
+                            Color dock_zone_active = panel_ctx->theme->tab_accent;
+                            dock_zone_active.a = (u8)(255 * 0.6f);
+
+                            Color dock_zone_inactive_now = lerp_color((Color){ 0 }, dock_zone_inactive, hot_t);
+                            dock_zone->cfg.color = lerp_color(dock_zone_inactive_now, dock_zone_active, active_t);
                         }
 
                         /* Handle drop: create new panel from dragged tab */
-                        if (ui_dropped(zone_interact_result.flags) && !g_ui_ctx->drag_payload_consumed &&
+                        if (ui_dropped(zone_interact_res.flags) && !g_ui_ctx->drag_payload_consumed &&
                             g_ui_ctx->drag_payload_size >= (isize)sizeof(TabDragPayload))
                         {
                             TabDragPayload* dock_payload = (TabDragPayload*)g_ui_ctx->drag_payload_buf;
@@ -2381,8 +2372,8 @@ void ui_panel_end(PanelContext* panel_ctx)
                                                        "tab.to_new_panel panel=%u tab=%u to_panel=%u axis=%s side=%s "
                                                        "window=%u to_window=%u",
                                                        dock_payload->from_panel_id, dock_payload->from_tab_id,
-                                                       panel_ctx->panel->id, (zone_index < 2) ? "Y" : "X",
-                                                       (zone_index == 0 || zone_index == 2) ? "before" : "after",
+                                                       panel_ctx->panel->id, (zone_idx < 2) ? "Y" : "X",
+                                                       (zone_idx == 0 || zone_idx == 2) ? "before" : "after",
                                                        dock_payload->from_window_id, panel_ctx->window_id));
                             }
                         }
@@ -2405,14 +2396,10 @@ void ui_panel_end(PanelContext* panel_ctx)
 #define CURSORBAR_PADDING 7
 #define IME_OFFSET_TOP    (-12)
 
-UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
-                        const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
-                        const Color bg_color_press, const b32 use_animation)
+UISignalFlags ui_button(const String text_with_hash_str, const Font* font, f32 font_size, Sizing sizing,
+                        Padding padding, Color bg, Color fg, Color hover_bg)
 {
     TracyCZoneNC(ctx_btn, "Button", TracyColor_Widget, TRACY_SUBSYSTEMS & TracySys_Widget);
-    Color bg_color_transition = bg_color;
-
-    TextHash text_hash = extract_hash_str(&text_with_hash_str);
 
     /* Create button box */
     UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = sizing,
@@ -2420,56 +2407,31 @@ UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const
                                             .padding = padding,
                                             .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
 
-    /* Handle interaction and transition */
+    /* Handle interaction */
+    TextHash text_hash = extract_hash_str(&text_with_hash_str);
     UIBoxInteractResult result = ui_box_interact(box, text_hash.hash_str);
-
-    /* Transition */
     if (ui_hovered(result.flags))
-        bg_color_transition = bg_color_hover;
-    if (ui_lclicked(result.flags) || (result.last_box->active_t > 0))
-    {
-        if (use_animation)
-        {
-            if (ui_lclicked(result.flags))
-            {
-                result.last_box->anim_state = TRANSITION_FORWARD;
-                result.last_box->active_t = 0.f;
-            }
-            if (result.last_box->anim_state == TRANSITION_IDLE || result.last_box->anim_state == TRANSITION_FORWARD)
-            {
-                if (update_transition(&result.last_box->active_t, 30.f, 1.f))
-                    result.last_box->anim_state = TRANSITION_REVERSE;
-            }
-            else
-            {
-                if (update_transition(&result.last_box->active_t, 24.f, 0.f))
-                    result.last_box->anim_state = TRANSITION_IDLE;
-            }
-            bg_color_transition = lerp_color(ui_hovered(result.flags) ? bg_color_hover : bg_color, bg_color_press,
-                                             result.last_box->active_t);
-        }
-        else
-            bg_color_transition = bg_color_press;
-    }
+        bg = hover_bg;
+    box->cfg.color = bg;
 
-    box->cfg.color = bg_color_transition;
-    ui_text(text_hash.display_str,
-            &(TextConfig){
-                .font = font, .font_size = font_size, .color = text_color, .line_height = font_size, .wrap = False });
+    ui_text(
+        text_hash.display_str,
+        &(TextConfig){ .font = font, .font_size = font_size, .color = fg, .line_height = font_size, .wrap = False });
     ui_box_end(box);
 
     TracyCZoneEnd(ctx_btn);
     return result.flags;
 }
 
-UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
-                           const Color switch_button_color, const Color shadow_color, const Color bg_color_active)
+UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg, const Color active_bg,
+                           const Color fg, const Color shadow_color)
 {
     TracyCZoneNC(ctx_sw, "Switchbox", TracyColor_Widget, TRACY_SUBSYSTEMS & TracySys_Widget);
+
     /* Transition-related variables */
-    Color bg_color_transition = bg_color;
-    Color status_color_ok = switch_button_color;
-    Color status_color_cancel = switch_button_color;
+    Color bg_color_transition = bg;
+    Color status_color_ok = fg;
+    Color status_color_cancel = fg;
     f32 pad_width = 0.f;
     f32 shadow_offset_x = 0.f;
 
@@ -2492,7 +2454,7 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
                                   result.last_box->anim_state == TRANSITION_REVERSE ? 0.f : 1.f))
                 result.last_box->anim_state = TRANSITION_IDLE;
     }
-    bg_color_transition = lerp_color(bg_color_transition, bg_color_active, result.last_box->active_t);
+    bg_color_transition = lerp_color(bg_color_transition, active_bg, result.last_box->active_t);
     status_color_ok.a = lerp_u8(0, 255, result.last_box->active_t);
     status_color_cancel.a = lerp_u8(255, 0, result.last_box->active_t);
     pad_width = lerp_f32(0.f, CHECKBOX_HEIGHT, result.last_box->active_t);
@@ -2510,7 +2472,7 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
         /* switch button */
         f32 switch_button_width = CHECKBOX_HEIGHT - CHECKBOX_PAD * 2;
         ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(switch_button_width), fixed(switch_button_width) },
-                                              .color = switch_button_color,
+                                              .color = fg,
                                               .rect_style = { .corner_radius = switch_button_width / 2,
                                                               .shadow_color = shadow_color,
                                                               .shadow_offset = { shadow_offset_x, 0.5f },
@@ -2638,9 +2600,9 @@ static void cursor_bar(const f32 parent_height, const Padding parent_padding, co
 }
 
 UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_str, const Font* font,
-                            const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg_color,
-                            const Color border_color, const Color text_color, const Color thumb_color,
-                            const Color cursor_trail_color, const Color cursor_bar_color, const Color selection_color,
+                            const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg,
+                            const Color border_color, const Color fg, const Color thumb_color,
+                            const Color cursor_bar_color, const Color cursor_trail_color, const Color selection_color,
                             const Color selection_flash_color)
 {
     TracyCZoneNC(ctx_tf, "TextField", TracyColor_Widget, TRACY_SUBSYSTEMS & TracySys_Widget);
@@ -2650,7 +2612,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     struct Renderer* renderer = g_ui_ctx->renderer;
     f32 text_height = get_text_height(renderer, g_ui_ctx->raster_cache, text_with_hash_str, font, font_size, g_ui_ctx->dpi);
     SizingAxis text_container_height = fixed(text_height + padding.top + padding.bottom);
-    Color placeholder_color = { text_color.r, text_color.g, text_color.b, text_color.a / 2 };
+    Color placeholder_color = { fg.r, fg.g, fg.b, fg.a / 2 };
     TextConfig text_cfg = { .font = font, .font_size = font_size, .line_height = font_size, .wrap = False };
     // clang-format on
 
@@ -2873,7 +2835,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     UIBox* box = ui_box_begin(&(BoxConfig){
         .sizing = { sizing_x, text_container_height },
         .rect_style = { .corner_radius = 4, .border_thickness = 2 },
-        .color = bg_color,
+        .color = bg,
         .flags = BoxFlag_Clip,
     });
     {
@@ -3016,7 +2978,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             f32 underline_y = font_size;
                             ui_box_end(ui_box_begin(&(BoxConfig){
                                 .sizing = { fixed(comp_w), fixed(1) },
-                                .color = text_color,
+                                .color = fg,
                                 .flags = BoxFlag_Float,
                                 .float_offset = { comp_x, underline_y },
                             }));
@@ -3029,7 +2991,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         if (sel_start > 0)
                         {
                             String pre_text = { state->base, sel_start };
-                            text_cfg.color = text_color;
+                            text_cfg.color = fg;
                             ui_text(pre_text, &text_cfg);
                         }
 
@@ -3059,7 +3021,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         if (sel_start < sel_end)
                         {
                             String sel_text = { state->base + sel_start, sel_end - sel_start };
-                            text_cfg.color = text_color;
+                            text_cfg.color = fg;
                             ui_text(sel_text, &text_cfg);
                         }
 
@@ -3071,7 +3033,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                         if (sel_end < state->text_len)
                         {
                             String post_text = { state->base + sel_end, state->text_len - sel_end };
-                            text_cfg.color = text_color;
+                            text_cfg.color = fg;
                             ui_text(post_text, &text_cfg);
                         }
                     }

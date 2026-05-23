@@ -525,7 +525,7 @@ typedef struct
     f32 child_gap;
     Alignment alignment;
     LayoutDirection direction;
-    Color bg_color;
+    Color bg;
     Color thumb_color;
     b32 fixed_track;
 } ScrollableAreaConfig;
@@ -536,27 +536,20 @@ typedef struct
 
 typedef struct
 {
+    Color hover_bg;
+    Color scrollbar_thumb;
+
     Color panel_bg;
     Color panel_border;
 
-    Color tab_splitter;
-    Color tab_bar;
     Color tab_bg;
     Color tab_fg;
     Color tab_active_bg;
     Color tab_active_fg;
-    Color tab_dragging_bg;
-    Color tab_drag_target_bg;
-    Color tab_drag_target_bg_accent;
-
-    Color hover_bg;
-    Color click_bg;
-
-    Color splitter_idle;
-    Color splitter_hover;
-    Color splitter_drag;
-
-    Color scrollbar_thumb;
+    Color tab_border;
+    Color tab_accent;
+    Color tab_accent_subtle;
+    Color tab_accent_weak;
 } PanelTheme;
 
 typedef struct
@@ -629,15 +622,14 @@ PanelContext ui_panel_begin(const PanelConfig* cfg);
 void ui_panel_end(PanelContext* pf);
 
 // widget
-UISignalFlags ui_button(const String text_with_hash_str, const Font* font, const f32 font_size, const Sizing sizing,
-                        const Padding padding, const Color bg_color, const Color text_color, const Color bg_color_hover,
-                        const Color bg_color_press, const b32 use_animation);
-UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg_color,
-                           const Color switch_button_color, const Color shadow_color, const Color bg_color_active);
+UISignalFlags ui_button(const String text_with_hash_str, const Font* font, f32 font_size, Sizing sizing,
+                        Padding padding, Color bg, Color fg, Color hover_bg);
+UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg, const Color active_bg,
+                           const Color fg, const Color shadow_color);
 UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_str, const Font* font,
-                            const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg_color,
-                            const Color border_color, const Color text_color, const Color thumb_color,
-                            const Color cursor_trail_color, const Color cursor_bar_color, const Color selection_color,
+                            const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg,
+                            const Color border_color, const Color fg, const Color thumb_color,
+                            const Color cursor_bar_color, const Color cursor_trail_color, const Color selection_color,
                             const Color selection_flash_color);
 
 //

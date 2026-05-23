@@ -5,7 +5,6 @@
 
 #include "cmd.h"
 #include "glyph_cache.h"
-#include "palette.h"
 #include "panel.h"
 #include "renderer.h"
 #include "shortcut.h"
@@ -62,37 +61,47 @@ typedef enum
 
 typedef struct
 {
-    Color bg_base;
-    Color bg_surface;
-    Color bg_overlay;
-
-    Color fg_primary;
-    Color fg_secondary;
-    Color fg_disabled;
-
-    Color border_normal;
-    Color border_focus;
-    Color border_press;
-
-    Color accent;
-    Color accent_hover;
-    Color accent_press;
+    /* general */
+    Color accent_bg;
     Color accent_fg;
+    Color accent_subtle_bg;
+    Color accent_subtle_fg;
+    Color accent_weak_bg;
+    Color accent_weak_fg;
 
-    Color danger;
-    Color success;
-    Color warning;
+    Color hover_bg;
+    Color hover_fg;
+    Color active_bg;
+    Color active_fg;
+    Color press_bg;
+    Color press_fg;
 
-    Color cursor;
-    Color selection_preview;
-    Color selection;
-    Color selection_flash;
-    Color cursor_trail;
+    Color destructive_bg;
+    Color destructive_fg;
+    Color success_bg;
+    Color success_fg;
+    Color warning_bg;
+    Color warning_fg;
 
+    Color border;
     Color scrollbar_thumb;
     Color scrollbar_track;
-
     Color shadow;
+
+    /* spacific */
+    Color bar_bg;
+    Color bar_fg;
+
+    Color panel_bg;
+    Color panel_fg;
+
+    Color palette_bg;
+    Color palette_fg;
+
+    Color cursor_bar;
+    Color cursor_trail;
+    Color selection;
+    Color selection_flash;
 } Theme;
 
 typedef struct WindowContext WindowContext;
@@ -179,71 +188,91 @@ static u16 s_utf16_pending_high = 0;
 
 // clang-format off
 static const Theme s_theme_light = {
-    .bg_base           = { LIGHT_1,  255 },
-    .bg_surface        = { LIGHT_2,  255 },
-    .bg_overlay        = { LIGHT_3,  255 },
+    /* general */
+    .accent_bg        = rgba(53,  132, 228, 255),
+    .accent_fg        = rgba(255, 255, 255, 255),
+    .accent_subtle_bg = rgba(98,  160, 234, 255),
+    .accent_subtle_fg = rgba(255, 255, 255, 255),
+    .accent_weak_bg   = rgba(153, 193, 241, 255),
+    .accent_weak_fg   = rgba(255, 255, 255, 255),
 
-    .fg_primary        = { DARK_5,   255 },
-    .fg_secondary      = { DARK_1,   255 },
-    .fg_disabled       = { LIGHT_5,  255 },
+    .hover_bg         = rgba(222, 222, 224, 255),
+    .hover_fg         = rgba(61,  61,  61,  255),
+    .active_bg        = rgba(216, 216, 219, 255),
+    .active_fg        = rgba(34,  34,  34,  255),
+    .press_bg         = rgba(205, 205, 207, 255),
+    .press_fg         = rgba(0,   0,   0,   255),
 
-    .border_normal     = { LIGHT_4,  255 },
-    .border_focus      = { BLUE_3,   255 },
-    .border_press      = { BLUE_5,   255 },
+    .destructive_bg   = rgba(224, 27,  36,  255),
+    .destructive_fg   = rgba(255, 255, 255, 255),
+    .success_bg       = rgba(46,  194, 126, 255),
+    .success_fg       = rgba(255, 255, 255, 255),
+    .warning_bg       = rgba(229, 165, 10,  255),
+    .warning_fg       = rgba(0,   0,   0,   255),
 
-    .accent            = { BLUE_2,   255 },
-    .accent_hover      = { BLUE_3,   255 },
-    .accent_press      = { BLUE_4,   255 },
-    .accent_fg         = { LIGHT_1,  255 },
+    .border           = rgba(192, 191, 188, 255),
+    .scrollbar_thumb  = rgba(94,  92,  100, 80 ),
+    .scrollbar_track  = rgba(192, 191, 188, 80 ),
+    .shadow           = rgba(0,   0,   0,   255),
 
-    .danger            = { RED_3,    255 },
-    .success           = { GREEN_4,  255 },
-    .warning           = { ORANGE_3, 255 },
+    /* specific */
+    .bar_bg           = rgba(222, 221, 218, 255),
+    .bar_fg           = rgba(0,   0,   0,   255),
 
-    .cursor            = { DARK_5,   255 },
-    .selection_preview = { BLUE_3,   64  },
-    .selection         = { BLUE_3,   128 },
-    .selection_flash   = { YELLOW_3, 255 },
-    .cursor_trail      = { DARK_5,   110 },
+    .panel_bg         = rgba(255, 255, 255, 255),
+    .panel_fg         = rgba(0,   0,   0,   255),
 
-    .scrollbar_thumb   = { DARK_1,   240 },
-    .scrollbar_track   = { DARK_1,   96  },
+    .palette_bg       = rgba(246, 245, 244, 255),
+    .palette_fg       = rgba(0,   0,   0,   255),
 
-    .shadow            = { DARK_5,   255 },
+    .cursor_bar       = rgba(34,  34,  38,  255),
+    .cursor_trail     = rgba(46,  46,  46,  255),
+    .selection        = rgba(192, 191, 188, 255),
+    .selection_flash  = rgba(144, 83,  0,   255),
 };
 
 static const Theme s_theme_dark = {
-    .bg_base           = { DARK_4,   255 },
-    .bg_surface        = { DARK_3,   255 },
-    .bg_overlay        = { DARK_2,   255 },
+    /* general */
+    .accent_bg        = rgba(53,  132, 228, 255),
+    .accent_fg        = rgba(255, 255, 255, 255),
+    .accent_subtle_bg = rgba(98,  160, 234, 255),
+    .accent_subtle_fg = rgba(255, 255, 255, 255),
+    .accent_weak_bg   = rgba(153, 193, 241, 255),
+    .accent_weak_fg   = rgba(255, 255, 255, 255),
 
-    .fg_primary        = { LIGHT_1,  255 },
-    .fg_secondary      = { LIGHT_5,  255 },
-    .fg_disabled       = { DARK_1,   255 },
+    .hover_bg         = rgba(61,  61,  64,  255),
+    .hover_fg         = rgba(222, 221, 218, 255),
+    .active_bg        = rgba(67,  67,  70,  255),
+    .active_fg        = rgba(246, 245, 244, 255),
+    .press_bg         = rgba(79,  79,  83,  255),
+    .press_fg         = rgba(255, 255, 255, 255),
 
-    .border_normal     = { DARK_2,   255 },
-    .border_focus      = { BLUE_2,   255 },
-    .border_press      = { BLUE_4,   255 },
+    .destructive_bg   = rgba(192, 28,  40,  255),
+    .destructive_fg   = rgba(255, 255, 255, 255),
+    .success_bg       = rgba(38,  162, 105, 255),
+    .success_fg       = rgba(255, 255, 255, 255),
+    .warning_bg       = rgba(205, 147, 9,   255),
+    .warning_fg       = rgba(0,   0,   0,   255),
 
-    .accent            = { BLUE_2,   255 },
-    .accent_hover      = { BLUE_3,   255 },
-    .accent_press      = { BLUE_4,   255 },
-    .accent_fg         = { LIGHT_2,  255 },
+    .border           = rgba(94,  92,  100, 255),
+    .scrollbar_thumb  = rgba(192, 191, 188, 80 ),
+    .scrollbar_track  = rgba(94,  92,  100, 80 ),
+    .shadow           = rgba(0,   0,   0,   255),
 
-    .danger            = { RED_1,    255 },
-    .success           = { GREEN_2,  255 },
-    .warning           = { ORANGE_1, 255 },
+    /* specific */
+    .bar_bg           = rgba(61,  61,  61,  255),
+    .bar_fg           = rgba(255, 255, 255, 255),
 
-    .cursor            = { LIGHT_1,  255 },
-    .selection_preview = { BLUE_2,   64  },
-    .selection         = { BLUE_2,   128 },
-    .selection_flash   = { YELLOW_2, 255 },
-    .cursor_trail      = { LIGHT_1,  110 },
+    .panel_bg         = rgba(34,  34,  34,  255),
+    .panel_fg         = rgba(255, 255, 255, 255),
 
-    .scrollbar_thumb   = { LIGHT_5,  240 },
-    .scrollbar_track   = { LIGHT_5,  96  },
+    .palette_bg       = rgba(46,  46,  50,  255),
+    .palette_fg       = rgba(255, 255, 255, 255),
 
-    .shadow            = { DARK_5,   255 },
+    .cursor_bar       = rgba(255, 255, 255, 255),
+    .cursor_trail     = rgba(246, 245, 244, 255),
+    .selection        = rgba(255, 192, 87,  255),
+    .selection_flash  = rgba(255, 192, 87,  255),
 };
 
 static Padding s_padding_medium = { 20, 20, 20, 20 };
@@ -470,8 +499,8 @@ static void drag_popup_render(AppShared* shared)
 
         UIBox* box = ui_box_begin(&(BoxConfig){
             .sizing = { fixed(cw), fixed(ch) },
-            .color = shared->theme.bg_base,
-            .rect_style = { .border_color = shared->theme.border_normal, .border_thickness = 1 },
+            .color = shared->theme.panel_bg,
+            .rect_style = { .border_color = shared->theme.border, .border_thickness = 1 },
             .alignment = { ALIGN_CENTER, ALIGN_CENTER },
         });
         {
@@ -479,7 +508,7 @@ static void drag_popup_render(AppShared* shared)
                 ui_text(title, &(TextConfig){
                                    .font = &shared->fonts[FONT_INDEX_UI],
                                    .font_size = 12.f,
-                                   .color = shared->theme.fg_primary,
+                                   .color = shared->theme.panel_fg,
                                    .line_height = ch,
                                });
         }
@@ -636,7 +665,7 @@ static void cmd_toggle_theme(void* userdata, String cmd_text)
 {
     (void)cmd_text;
     AppShared* shared = (AppShared*)userdata;
-    shared->theme = (shared->theme.bg_base.r == s_theme_dark.bg_base.r) ? s_theme_light : s_theme_dark;
+    shared->theme = (shared->theme.border.r == s_theme_dark.border.r) ? s_theme_light : s_theme_dark;
 }
 
 static void cmd_split_panel_h(void* userdata, String cmd_text)
@@ -877,7 +906,7 @@ static void decoration_overlay(WindowContext* ctx)
 
     b32 is_active = GetActiveWindow() == window;
     b32 is_maximized = IsZoomed(window);
-    Color fg = is_active ? theme->fg_primary : theme->fg_secondary;
+    Color fg = is_active ? theme->hover_fg : theme->active_fg;
 
     /* minimize */
     {
@@ -888,11 +917,11 @@ static void decoration_overlay(WindowContext* ctx)
             .alignment = { ALIGN_CENTER, ALIGN_CENTER },
         });
         {
-            b32 hot = (ctx->tb_hovered_button == TitleBarHot_Minimize);
+            b32 is_hovered = (ctx->tb_hovered_button == TitleBarHot_Minimize);
             UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_minimize"));
             if (ir.last_box)
             {
-                btn->cfg.color = hot ? theme->accent : (Color){ 0, 0, 0, 0 };
+                btn->cfg.color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
                 ctx->decoration_minimize = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
                                                    ir.last_box->position.x + ir.last_box->size.width,
                                                    ir.last_box->position.y + ir.last_box->size.height };
@@ -912,11 +941,11 @@ static void decoration_overlay(WindowContext* ctx)
             .alignment = { ALIGN_CENTER, ALIGN_CENTER },
         });
         {
-            b32 hot = (ctx->tb_hovered_button == TitleBarHot_Maximize);
+            b32 is_hovered = (ctx->tb_hovered_button == TitleBarHot_Maximize);
             UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_maximize"));
             if (ir.last_box)
             {
-                btn->cfg.color = hot ? theme->accent : (Color){ 0, 0, 0, 0 };
+                btn->cfg.color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
                 ctx->decoration_maximize = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
                                                    ir.last_box->position.x + ir.last_box->size.width,
                                                    ir.last_box->position.y + ir.last_box->size.height };
@@ -936,11 +965,11 @@ static void decoration_overlay(WindowContext* ctx)
             .alignment = { ALIGN_CENTER, ALIGN_CENTER },
         });
         {
-            b32 hot = (ctx->tb_hovered_button == TitleBarHot_Close);
+            b32 is_hovered = (ctx->tb_hovered_button == TitleBarHot_Close);
             UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_close"));
             if (ir.last_box)
             {
-                btn->cfg.color = hot ? theme->danger : (Color){ 0, 0, 0, 0 };
+                btn->cfg.color = is_hovered ? theme->destructive_bg : (Color){ 0, 0, 0, 0 };
                 ctx->decoration_close = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
                                                 ir.last_box->position.x + ir.last_box->size.width,
                                                 ir.last_box->position.y + ir.last_box->size.height };
@@ -964,23 +993,20 @@ static void panel_container(WindowContext* ctx, const Rect rect)
 
     // clang-format off
     PanelTheme pt = {
-        .panel_bg                  = theme->bg_surface,
-        .panel_border              = theme->fg_disabled,
-        .tab_splitter              = theme->fg_disabled,
-        .tab_bar                   = theme->bg_surface,
-        .tab_bg                    = theme->bg_surface,
-        .tab_fg                    = theme->fg_secondary,
-        .tab_active_bg             = theme->bg_base,
-        .tab_active_fg             = theme->fg_primary,
-        .tab_dragging_bg           = theme->accent,
-        .tab_drag_target_bg        = theme->selection_preview,
-        .tab_drag_target_bg_accent = theme->selection,
-        .hover_bg                  = theme->bg_overlay,
-        .click_bg                  = theme->bg_overlay,
-        .splitter_idle             = theme->fg_disabled,
-        .splitter_hover            = theme->border_focus,
-        .splitter_drag             = theme->border_press,
-        .scrollbar_thumb           = theme->scrollbar_thumb,
+        .hover_bg          = theme->press_bg,
+        .scrollbar_thumb   = theme->scrollbar_thumb,
+
+        .panel_bg          = theme->panel_bg,
+        .panel_border      = theme->border,
+
+        .tab_border        = theme->border,
+        .tab_bg            = theme->bar_bg,
+        .tab_fg            = theme->bar_fg,
+        .tab_active_bg     = theme->panel_bg,
+        .tab_active_fg     = theme->panel_fg,
+        .tab_accent        = theme->accent_bg,
+        .tab_accent_subtle = theme->accent_subtle_bg,
+        .tab_accent_weak   = theme->accent_weak_bg,
     };
     // clang-format on
 
@@ -1041,37 +1067,37 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 String tab_label = { active->name, active->name_len };
                 ui_text(tab_label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                                   .font_size = 14,
-                                                  .color = theme->accent,
+                                                  .color = theme->accent_bg,
                                                   .line_height = 20 });
 
                 ui_text(str("   "), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL],
                                                                .font_size = 11,
-                                                               .color = theme->fg_primary,
+                                                               .color = theme->panel_fg,
                                                                .line_height = 16 });
                 ui_text(str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
                         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                        .font_size = 11,
-                                       .color = theme->fg_primary,
+                                       .color = theme->panel_fg,
                                        .line_height = 16 });
                 ui_text(str("Ctrl+T new tab. Ctrl+W close tab. F11 toggle theme."),
                         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                        .font_size = 11,
-                                       .color = theme->fg_primary,
+                                       .color = theme->panel_fg,
                                        .line_height = 16 });
                 ui_text(str("Ctrl+Shift+Left/Right to reorder tabs."),
                         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                        .font_size = 11,
-                                       .color = theme->fg_primary,
+                                       .color = theme->panel_fg,
                                        .line_height = 16 });
                 ui_text(str("Ctrl+Shift+N moves tab to next panel."),
                         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                        .font_size = 11,
-                                       .color = theme->fg_primary,
+                                       .color = theme->panel_fg,
                                        .line_height = 16 });
                 ui_text(str("Ctrl+Shift+F/G to detach tab as new panel (H/V)."),
                         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                        .font_size = 11,
-                                       .color = theme->fg_primary,
+                                       .color = theme->panel_fg,
                                        .line_height = 16 });
 
                 UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
@@ -1082,7 +1108,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                     UISignalFlags cw_button_flags =
                         ui_button(str_fmt(HASH_STR_MAX_LENGTH, "New Window##panel_cw_button_%u", p->id),
                                   &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                  theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press, True);
+                                  (Color){ 0 }, theme->hover_fg, theme->hover_bg);
                     if (ui_lclicked(cw_button_flags))
                         cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"));
 
@@ -1090,7 +1116,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                     UISignalFlags sph_button_flags =
                         ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Horizontally##panel_sph_button_%u", p->id),
                                   &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                  theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press, True);
+                                  (Color){ 0 }, theme->hover_fg, theme->hover_bg);
                     if (ui_lclicked(sph_button_flags))
                         cmd_queue_push(&shared->cmd_queue,
                                        str_fmt(CMD_STR_MAX_LENGTH, "panel.split_h panel=%u", p->id));
@@ -1099,7 +1125,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                     UISignalFlags spv_button_flags =
                         ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Vertically##panel_spv_button_%u", p->id),
                                   &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                  theme->accent, theme->accent_fg, theme->accent_hover, theme->accent_press, True);
+                                  (Color){ 0 }, theme->hover_fg, theme->hover_bg);
                     if (ui_lclicked(spv_button_flags))
                         cmd_queue_push(&shared->cmd_queue,
                                        str_fmt(CMD_STR_MAX_LENGTH, "panel.split_v panel=%u", p->id));
@@ -1111,15 +1137,15 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                                          .alignment = { ALIGN_START, ALIGN_CENTER } });
                 {
                     ui_button(str_fmt(HASH_STR_MAX_LENGTH, "nothing##world_%u", p->id), &shared->fonts[FONT_INDEX_MONO],
-                              11, (Sizing){ fixed(80), fit({}) }, s_padding_small, theme->accent, theme->accent_fg,
-                              theme->accent_hover, theme->accent_press, True);
+                              11, (Sizing){ fixed(80), fit({}) }, s_padding_small, (Color){ 0 }, theme->hover_fg,
+                              theme->hover_bg);
                     ui_text_field(&ctx->text_edit_1, str_fmt(HASH_STR_MAX_LENGTH, "placeholder##text_field_%u", p->id),
                                   &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_small,
-                                  theme->bg_overlay, theme->border_focus, theme->fg_primary, theme->scrollbar_thumb,
-                                  theme->cursor_trail, theme->cursor, theme->selection, theme->selection_flash);
-                    UISignalFlags flags = ui_switchbox(
-                        str_fmt(HASH_STR_MAX_LENGTH, "switch box_%u", p->id), &shared->fonts[FONT_INDEX_ICON],
-                        &ctx->check, theme->border_normal, theme->accent_fg, theme->shadow, theme->accent);
+                                  theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
+                                  theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash);
+                    UISignalFlags flags = ui_switchbox(str_fmt(HASH_STR_MAX_LENGTH, "switch box_%u", p->id),
+                                                       &shared->fonts[FONT_INDEX_ICON], &ctx->check, theme->hover_bg,
+                                                       theme->accent_bg, theme->accent_fg, theme->shadow);
                     if (ui_lclicked(flags))
                         ctx->check = !ctx->check;
                 }
@@ -1142,7 +1168,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                 "成为通行的书名。"),
                             &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
                                            .font_size = 11,
-                                           .color = theme->fg_primary,
+                                           .color = theme->panel_fg,
                                            .line_height = 20,
                                            .wrap = True });
                     ui_text(
@@ -1156,7 +1182,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                 "eventually on the open market where they sold for large sums of money."),
                             &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
                                            .font_size = 11,
-                                           .color = theme->fg_primary,
+                                           .color = theme->panel_fg,
                                            .line_height = 20,
                                            .wrap = True });
                 }
@@ -1218,32 +1244,30 @@ static void process_frame(WindowContext* ctx)
                    Active: uses system accent border color when available,
                            otherwise a darkened theme-derived line.
                    Inactive: subtly fades into the title bar background. */
-                Color shadow_color;
+                Color top_border_color;
                 if (GetActiveWindow() == ctx->window)
                 {
                     if (shared->has_accent_border)
-                        shadow_color = shared->accent_border_color;
+                        top_border_color = shared->accent_border_color;
                     else
-                        shadow_color =
-                            (Color){ (u8)((u32)theme->bg_overlay.r * 2 / 5), (u8)((u32)theme->bg_overlay.g * 2 / 5),
-                                     (u8)((u32)theme->bg_overlay.b * 2 / 5), 255 };
+                        top_border_color =
+                            (Color){ (u8)((u32)theme->border.r * 2 / 5), (u8)((u32)theme->border.g * 2 / 5),
+                                     (u8)((u32)theme->border.b * 2 / 5), 255 };
                 }
                 else
-                    shadow_color =
-                        (Color){ (u8)((u32)theme->bg_overlay.r * 3 / 4), (u8)((u32)theme->bg_overlay.g * 3 / 4),
-                                 (u8)((u32)theme->bg_overlay.b * 3 / 4), 255 };
+                    top_border_color = (Color){ (u8)((u32)theme->border.r * 3 / 4), (u8)((u32)theme->border.g * 3 / 4),
+                                                (u8)((u32)theme->border.b * 3 / 4), 255 };
 
-                UIBox* shadow = ui_box_begin(&(BoxConfig){
+                UIBox* top_border = ui_box_begin(&(BoxConfig){
                     .sizing = { fixed(client_w), fixed(1) },
-                    .color = shadow_color,
+                    .color = top_border_color,
                 });
-                ui_box_end(shadow);
+                ui_box_end(top_border);
             }
 
             UIBox* root_box = ui_box_begin(&(BoxConfig){
                 .sizing = { fixed(client_w), fixed(client_h - 1) },
                 .direction = LAYOUT_TOP_TO_BOTTOM,
-                .color = theme->bg_base,
             });
             {
                 /* content area — full height, panels own the top edge */
