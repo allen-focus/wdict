@@ -759,7 +759,7 @@ static void cmd_split_panel_h(void* userdata, String cmd_text)
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
     u32 panel_id = cmd_parse_u32(cmd_text, str("panel"), 0);
     Panel* p = find_panel_globally(shared, window_id, panel_id);
-    if (p && panel_split(p, Axis2_X, True))
+    if (p && panel_split(p, Axis2_Y, True))
     {
         /* The split panel is now an internal node — redirect any window
            that had it focused to child_a (which inherited the original tabs). */
@@ -775,7 +775,7 @@ static void cmd_split_panel_v(void* userdata, String cmd_text)
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
     u32 panel_id = cmd_parse_u32(cmd_text, str("panel"), 0);
     Panel* p = find_panel_globally(shared, window_id, panel_id);
-    if (p && panel_split(p, Axis2_Y, True))
+    if (p && panel_split(p, Axis2_X, True))
     {
         for (WindowContext* w = shared->first_window; w; w = w->next)
             if (w->focused_panel == p)
@@ -2266,6 +2266,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             return 0;
         }
 
+        case WM_SYSCHAR:
+        {
+            // Prevent Alt-based shortcuts from triggering the system menu beep.
+            return 0;
+        }
+
+        case WM_SYSKEYDOWN:
         case WM_KEYDOWN:
         {
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
@@ -2387,6 +2394,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     if (ctrl) action.flags |= TextActionFlag_Paste; 
                     else return DefWindowProcW(window, message, wparam, lparam); break;
                 default: 
+                    if (message == WM_SYSKEYDOWN)
+                        return 0;
                     return DefWindowProcW(window, message, wparam, lparam);
             }
             ui_ctx->text_action_queue[ui_ctx->text_action_queue_count++] = action;
@@ -2543,22 +2552,22 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_right"),     str("Focus Panel Right"),        str(""), cmd_panel_focus_right,      &shared });
 
         /* Bind shortcuts */
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },      str("tab.new"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'W' },      str("tab.close"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'H' },      str("panel.split_h"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'V' },      str("panel.split_v"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_LEFT },  str("tab.move delta=-1"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_RIGHT }, str("tab.move delta=+1"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },      str("tab.move_to_panel"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },      str("tab.to_new_panel axis=X"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },      str("tab.to_new_panel axis=Y"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      VK_TAB },   str("panel.focus_next"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_TAB },   str("panel.focus_prev"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'H' },      str("panel.focus_left"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'J' },      str("panel.focus_down"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'K' },      str("panel.focus_up"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'L' },      str("panel.focus_right"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                      VK_F11 },  str("app.toggle_theme"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },          str("tab.new"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'W' },          str("tab.close"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  VK_OEM_MINUS }, str("panel.split_h"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  VK_OEM_PLUS },  str("panel.split_v"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_LEFT },      str("tab.move delta=-1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_RIGHT },     str("tab.move delta=+1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },          str("tab.move_to_panel"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },          str("tab.to_new_panel axis=X"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },          str("tab.to_new_panel axis=Y"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      VK_TAB },       str("panel.focus_next"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_TAB },       str("panel.focus_prev"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'H' },          str("panel.focus_left"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'J' },          str("panel.focus_down"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'K' },          str("panel.focus_up"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'L' },          str("panel.focus_right"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                      VK_F11 },       str("app.toggle_theme"));
         Assert(!shortcut_detect_conflicts(&shared.shortcuts));
 
         /* Load cursors */
