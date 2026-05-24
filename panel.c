@@ -1,6 +1,7 @@
 #include "panel.h"
 #include "utils.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 #include "tracy_config.h" // IWYU pragma: keep
 
 #define PANEL_STACK_CAPACITY 16
+#define AFFECTED_MAX         256
 
 static u32 s_panel_next_id = 1; /* 0 reserved for none */
 static u32 s_tab_next_id = 1; /* 0 reserved for none */
@@ -597,6 +599,10 @@ Panel* panel_process_pending_removes(Panel* root)
     return root;
 }
 
+//
+// Panel navigation
+//
+
 Panel* panel_find_first_leaf(Panel* root)
 {
     if (!root)
@@ -732,4 +738,252 @@ Panel* panel_find_spatial(Panel* root, Panel* current, Rect root_rect, PanelSpat
     }
 
     return best;
+}
+
+//
+// Pixel-level panel resize
+//
+
+//
+// Top-down layout pass: converts pct_of_parent (source of truth) into
+// temporary absolute-pixel computed_rect for every node in the tree.
+// Called before any pixel-level resize operation.
+//
+void panel_compute_rects(Panel* root, Rect root_rect)
+{
+    root->computed_rect = root_rect;
+
+    if (!root->child_a)
+        return;
+
+    f32 total_dim =
+        (root->split_axis == Axis2_X) ? (root_rect.xmax - root_rect.xmin) : (root_rect.ymax - root_rect.ymin);
+
+    f32 child_a_dim = root->child_a->pct_of_parent * total_dim;
+
+    Rect a_rect = root_rect;
+    Rect b_rect = root_rect;
+
+    if (root->split_axis == Axis2_X)
+    {
+        a_rect.xmax = a_rect.xmin + child_a_dim;
+        b_rect.xmin = a_rect.xmax;
+    }
+    else
+    {
+        a_rect.ymax = a_rect.ymin + child_a_dim;
+        b_rect.ymin = a_rect.ymax;
+    }
+
+    panel_compute_rects(root->child_a, a_rect);
+    panel_compute_rects(root->child_b, b_rect);
+}
+
+//
+// Bottom-up (post-order) pass: after leaf pixel rects have been mutated
+// by a resize, rebuilds pct_of_parent for every internal node from its
+// children's current computed_rect dimensions.
+//
+// This guarantees the percentage tree stays a faithful source of truth
+// for future layout passes — unaffected panels keep their exact pixel
+// sizes because pct * new_parent_dim = old_child_dim.
+//
+static void panel_sync_percentages_from_rects(Panel* node)
+{
+    if (!node->child_a)
+        return;
+
+    panel_sync_percentages_from_rects(node->child_a);
+    panel_sync_percentages_from_rects(node->child_b);
+
+    Rect* a = &node->child_a->computed_rect;
+    Rect* b = &node->child_b->computed_rect;
+
+    if (node->split_axis == Axis2_X)
+    {
+        f32 a_w = a->xmax - a->xmin;
+        f32 b_w = b->xmax - b->xmin;
+        f32 total = a_w + b_w;
+        if (total > 0.f)
+        {
+            node->child_a->pct_of_parent = a_w / total;
+            node->child_b->pct_of_parent = b_w / total;
+        }
+
+        node->computed_rect.xmin = a->xmin;
+        node->computed_rect.xmax = b->xmax;
+        node->computed_rect.ymin = a->ymin;
+        node->computed_rect.ymax = a->ymax;
+    }
+    else
+    {
+        f32 a_h = a->ymax - a->ymin;
+        f32 b_h = b->ymax - b->ymin;
+        f32 total = a_h + b_h;
+        if (total > 0.f)
+        {
+            node->child_a->pct_of_parent = a_h / total;
+            node->child_b->pct_of_parent = b_h / total;
+        }
+
+        node->computed_rect.xmin = a->xmin;
+        node->computed_rect.xmax = a->xmax;
+        node->computed_rect.ymin = a->ymin;
+        node->computed_rect.ymax = b->ymax;
+    }
+}
+
+typedef struct
+{
+    Panel* leaf;
+    Rect new_rect;
+} AffectedEntry;
+
+//
+// Recursively walks a subtree and collects every leaf whose pixel edge
+// aligns with current_line (within 0.1f epsilon).  Matching edges snap
+// to target_line directly — no branching on direction.
+//
+// Scoped to the qualifying ancestor's subtree so panels in unrelated
+// branches that happen to share the same pixel coordinate are never
+// falsely affected.
+//
+static void collect_affected_in_subtree(Panel* node, f32 current_line, f32 target_line, b32 want_x,
+                                        AffectedEntry affected[], i32* count)
+{
+    if (!node->child_a)
+    {
+        Rect* r = &node->computed_rect;
+        b32 touched = False;
+        Rect new_r = *r;
+
+        if (want_x)
+        {
+            if (fabsf(r->xmax - current_line) < 0.1f)
+            {
+                touched = True;
+                new_r.xmax = target_line;
+            }
+            if (fabsf(r->xmin - current_line) < 0.1f)
+            {
+                touched = True;
+                new_r.xmin = target_line;
+            }
+        }
+        else
+        {
+            if (fabsf(r->ymax - current_line) < 0.1f)
+            {
+                touched = True;
+                new_r.ymax = target_line;
+            }
+            if (fabsf(r->ymin - current_line) < 0.1f)
+            {
+                touched = True;
+                new_r.ymin = target_line;
+            }
+        }
+
+        if (touched)
+        {
+            Assert(*count < AFFECTED_MAX);
+            affected[*count].leaf = node;
+            affected[*count].new_rect = new_r;
+            (*count)++;
+        }
+        return;
+    }
+
+    collect_affected_in_subtree(node->child_a, current_line, target_line, want_x, affected, count);
+    collect_affected_in_subtree(node->child_b, current_line, target_line, want_x, affected, count);
+}
+
+// Pipeline (transactional — aborts entirely if any leaf drops below
+// MIN_PANEL_PIXELS):
+//
+//   1. panel_compute_rects         → absolute pixel layout
+//   2. Two-pass ancestor search    → topology-based boundary selection
+//      · Pass 1: right/bottom border  (focused leaf in child_a subtree)
+//      · Pass 2: left/top border      (fallback — panel is at screen edge)
+//   3. delta = ±pixel_step          → direction = boundary movement vector
+//   4. collect_affected_in_subtree  → only leaves touching this boundary
+//   5. MIN_PANEL_PIXELS validation  → commit or abort
+//   6. panel_sync_percentages       → back-propagate pixel sizes into pct_of_parent
+//
+// Total window dimensions never change — the boundary moves between two
+// adjacent subtrees: one side gains exactly what the other loses.
+//
+void panel_resize_pixel(Panel* root, Rect root_rect, Panel* focused_leaf, PanelSpatial direction, f32 pixel_step)
+{
+    if (!root || !focused_leaf || pixel_step <= 0.f)
+        return;
+
+    /* Phase 1: transient pixel layout */
+    panel_compute_rects(root, root_rect);
+
+    b32 want_x = (direction == PanelSpatial_Left || direction == PanelSpatial_Right);
+
+    /* Phase 2: topology-based ancestor selection */
+    Panel* ancestor = NULL;
+
+    /* Pass 1 — right/bottom border (focused leaf is inside child_a) */
+    for (Panel* node = focused_leaf; node && node->parent; node = node->parent)
+    {
+        if (want_x != (node->parent->split_axis == Axis2_X))
+            continue;
+        if (node == node->parent->child_a)
+        {
+            ancestor = node->parent;
+            break;
+        }
+    }
+
+    /* Pass 2 — left/top border (fallback: no right/bottom border exists) */
+    if (!ancestor)
+    {
+        for (Panel* node = focused_leaf; node && node->parent; node = node->parent)
+        {
+            if (want_x != (node->parent->split_axis == Axis2_X))
+                continue;
+            if (node == node->parent->child_b)
+            {
+                ancestor = node->parent;
+                break;
+            }
+        }
+    }
+
+    if (!ancestor)
+        return;
+
+    /* Phase 3: compute boundary movement */
+    f32 current_line = want_x ? ancestor->child_a->computed_rect.xmax : ancestor->child_a->computed_rect.ymax;
+
+    f32 delta = (direction == PanelSpatial_Right || direction == PanelSpatial_Down) ? pixel_step : -pixel_step;
+    f32 target_line = current_line + delta;
+
+    /* Phase 4: collect leaves touching the boundary, scoped to ancestor */
+    AffectedEntry affected[AFFECTED_MAX];
+    i32 affected_count = 0;
+
+    collect_affected_in_subtree(ancestor, current_line, target_line, want_x, affected, &affected_count);
+
+    if (affected_count == 0)
+        return;
+
+    /* Phase 5: validate minimum pixel size */
+    for (i32 i = 0; i < affected_count; i++)
+    {
+        f32 new_w = affected[i].new_rect.xmax - affected[i].new_rect.xmin;
+        f32 new_h = affected[i].new_rect.ymax - affected[i].new_rect.ymin;
+        if (new_w < MIN_PANEL_PIXELS || new_h < MIN_PANEL_PIXELS)
+            return;
+    }
+
+    /* Phase 6: commit rect mutations */
+    for (i32 i = 0; i < affected_count; i++)
+        affected[i].leaf->computed_rect = affected[i].new_rect;
+
+    /* Phase 7: back-propagate pixel sizes into pct_of_parent */
+    panel_sync_percentages_from_rects(root);
 }

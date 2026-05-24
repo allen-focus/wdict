@@ -1739,8 +1739,6 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
 //
 
 #define PANEL_BOUNDARY 6.0f
-#define PANEL_PCT_MIN  0.05f
-#define PANEL_PCT_MAX  0.95f
 
 void ui_panel_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme)
 {

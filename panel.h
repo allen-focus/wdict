@@ -24,6 +24,9 @@ typedef enum
 } PanelSpatial;
 
 #define PANEL_TAB_NAME_MAX 64
+#define PANEL_PCT_MIN       0.05f
+#define PANEL_PCT_MAX       0.95f
+#define MIN_PANEL_PIXELS    40.f
 
 typedef enum
 {
@@ -63,6 +66,7 @@ struct Panel
     Axis2 split_axis;
     f32 drag_saved_pct;
     f32 drag_saved_partner_pct;
+    Rect computed_rect;
 
     b32 pending_remove;
 
@@ -97,3 +101,5 @@ Panel* panel_find_first_leaf(Panel* root);
 Panel* panel_find_next_leaf(Panel* root, Panel* current);
 Panel* panel_find_prev_leaf(Panel* root, Panel* current);
 Panel* panel_find_spatial(Panel* root, Panel* current, Rect root_rect, PanelSpatial direction);
+void panel_compute_rects(Panel* root, Rect root_rect);
+void panel_resize_pixel(Panel* root, Rect root_rect, Panel* focused_leaf, PanelSpatial direction, f32 pixel_step);

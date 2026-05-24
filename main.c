@@ -1067,6 +1067,58 @@ static void cmd_panel_focus_right(void* userdata, String cmd_text)
         w->focused_panel = next;
 }
 
+static void cmd_panel_resize_left(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->focused_panel)
+        return;
+    f32 step = (f32)cmd_parse_i32(cmd_text, str("step"), 20);
+    step = clamp(step, 1.f, 500.f);
+    Rect root_rect = { 0, 0, (f32)w->ui.client_width, (f32)w->ui.client_height - 1 };
+    panel_resize_pixel(w->root_panel, root_rect, w->focused_panel, PanelSpatial_Left, step);
+}
+
+static void cmd_panel_resize_down(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->focused_panel)
+        return;
+    f32 step = (f32)cmd_parse_i32(cmd_text, str("step"), 20);
+    step = clamp(step, 1.f, 500.f);
+    Rect root_rect = { 0, 0, (f32)w->ui.client_width, (f32)w->ui.client_height - 1 };
+    panel_resize_pixel(w->root_panel, root_rect, w->focused_panel, PanelSpatial_Down, step);
+}
+
+static void cmd_panel_resize_up(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->focused_panel)
+        return;
+    f32 step = (f32)cmd_parse_i32(cmd_text, str("step"), 20);
+    step = clamp(step, 1.f, 500.f);
+    Rect root_rect = { 0, 0, (f32)w->ui.client_width, (f32)w->ui.client_height - 1 };
+    panel_resize_pixel(w->root_panel, root_rect, w->focused_panel, PanelSpatial_Up, step);
+}
+
+static void cmd_panel_resize_right(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->focused_panel)
+        return;
+    f32 step = (f32)cmd_parse_i32(cmd_text, str("step"), 20);
+    step = clamp(step, 1.f, 500.f);
+    Rect root_rect = { 0, 0, (f32)w->ui.client_width, (f32)w->ui.client_height - 1 };
+    panel_resize_pixel(w->root_panel, root_rect, w->focused_panel, PanelSpatial_Right, step);
+}
+
 //
 // Decoration overlay — window-level min/max/close buttons rendered as
 // float-positioned boxes at the top-right corner.  Drawn AFTER all panel
@@ -2550,6 +2602,10 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_down"),      str("Focus Panel Down"),         str(""), cmd_panel_focus_down,       &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_up"),        str("Focus Panel Up"),           str(""), cmd_panel_focus_up,         &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_right"),     str("Focus Panel Right"),        str(""), cmd_panel_focus_right,      &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_left"),     str("Resize Panel Left"),        str(""), cmd_panel_resize_left,      &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_down"),     str("Resize Panel Down"),        str(""), cmd_panel_resize_down,      &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_up"),       str("Resize Panel Up"),          str(""), cmd_panel_resize_up,        &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_right"),    str("Resize Panel Right"),       str(""), cmd_panel_resize_right,     &shared });
 
         /* Bind shortcuts */
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },          str("tab.new"));
@@ -2567,6 +2623,10 @@ i32 WinMainCRTStartup()
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'J' },          str("panel.focus_down"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'K' },          str("panel.focus_up"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'L' },          str("panel.focus_right"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'H' },          str("panel.resize_left"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'J' },          str("panel.resize_down"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'K' },          str("panel.resize_up"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'L' },          str("panel.resize_right"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                      VK_F11 },       str("app.toggle_theme"));
         Assert(!shortcut_detect_conflicts(&shared.shortcuts));
 
