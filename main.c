@@ -7,6 +7,7 @@
 #include "glyph_cache.h"
 #include "panel.h"
 #include "renderer.h"
+#include "search.h"
 #include "shortcut.h"
 #include "ui.h"
 #include "utils.h"
@@ -147,6 +148,9 @@ typedef struct
     /* drag hint popup (heap-allocated — UIContext + Renderer are too large for the stack) */
     DragPopup* drag_popup;
 
+    /* word search engine (corpus owned by this compilation unit) */
+    SearchState word_search;
+
     /* accent border color (registry-derived, updated on WM_DWMCOLORIZATIONCOLORCHANGED) */
     Color accent_border_color;
     b32 has_accent_border;
@@ -173,6 +177,10 @@ struct WindowContext
     u8 text_buf_2[TEXT_BUFFER_SIZE];
     TextEditState text_edit_1;
     TextEditState text_edit_2;
+
+    u8 search_text_buf[SEARCH_QUERY_BUF];
+    TextEditState search_text_edit;
+    i32 search_selected_index;
 
     /* decoration (window-level overlay) */
     Rect decoration_minimize;
@@ -297,6 +305,63 @@ static Padding s_padding_small  = { 10, 10, 10, 10 };
 static f32 s_child_gap_big    = 20;
 static f32 s_child_gap_medium = 10;
 // clang-format on
+
+//
+// Dictionary search corpus
+//
+
+typedef struct
+{
+    const char* word;
+    const char* definition;
+    const char* example;
+} DictionaryEntry;
+
+static DictionaryEntry s_dictionary[] = {
+    { "abandon", "To give up completely", "They had to abandon the sinking ship." },
+    { "brilliant", "Exceptionally clever or talented", "She had a brilliant idea for the project." },
+    { "capture", "To take into one's possession or control", "The photograph captured the sunset perfectly." },
+    { "deliberate", "Done consciously and intentionally", "It was a deliberate decision to wait." },
+    { "emerge", "To come forth into view or notice", "New details began to emerge from the investigation." },
+    { "flourish", "To grow or develop in a healthy way", "The arts began to flourish in the city." },
+    { "genuine", "Truly what something is said to be; authentic", "Her smile was warm and genuine." },
+    { "hesitate", "To pause before doing something", "Don't hesitate to ask for help." },
+    { "illuminate", "To light up or make clear", "The lamp illuminated the dark room." },
+    { "jubilant", "Feeling or expressing great happiness", "The crowd was jubilant after the victory." },
+    { "keen", "Eager or enthusiastic", "He has a keen interest in music." },
+    { "luminous", "Full of or shedding light; bright", "The luminous stars filled the night sky." },
+    { "meticulous", "Showing great attention to detail", "She was meticulous in her research." },
+    { "neglect", "To fail to care for properly", "The old building had been neglected for years." },
+    { "obstacle", "A thing that blocks one's way", "Lack of funding was the main obstacle." },
+    { "profound", "Very great or intense", "The book had a profound impact on readers." },
+    { "quaint", "Attractively unusual or old-fashioned", "They stayed in a quaint village cottage." },
+    { "resilient", "Able to recover quickly from difficulties", "Children are often more resilient than adults." },
+    { "subtle", "So delicate as to be difficult to notice", "There was a subtle change in her tone." },
+    { "tangible", "Perceptible by touch; clear and definite", "We need tangible evidence to proceed." },
+    { "undermine", "To weaken gradually or insidiously", "Constant criticism can undermine confidence." },
+    { "vivid", "Producing powerful feelings or strong images", "He gave a vivid description of the event." },
+    { "warrant", "To justify or necessitate", "The situation does not warrant such concern." },
+    { "yield", "To produce or provide", "The investment is expected to yield good returns." },
+    { "zealous", "Having great energy or enthusiasm", "She was a zealous supporter of the cause." },
+    { "ambiguous", "Open to more than one interpretation", "The contract language was deliberately ambiguous." },
+    { "benevolent", "Well-meaning and kindly", "The benevolent donor funded the entire project." },
+    { "concise", "Giving much information clearly in few words", "Please keep your report concise and focused." },
+    { "diligent", "Having or showing careful persistent effort",
+      "The diligent student always completed her work early." },
+    { "eloquent", "Fluent or persuasive in speaking or writing", "He gave an eloquent speech at the ceremony." },
+};
+
+static const i32 s_dictionary_size = countof(s_dictionary);
+
+static String s_word_extract(const void* entry)
+{
+    const DictionaryEntry* e = (const DictionaryEntry*)entry;
+    return (String){ (u8*)e->word, (isize)strlen(e->word) };
+}
+
+static FieldDef s_word_fields[] = {
+    { "word", s_word_extract, 1.0f },
+};
 
 //
 // Window Creation
@@ -446,6 +511,9 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     ctx->text_edit_1.size = TEXT_BUFFER_SIZE;
     ctx->text_edit_2.base = ctx->text_buf_2;
     ctx->text_edit_2.size = TEXT_BUFFER_SIZE;
+    ctx->search_text_edit.base = ctx->search_text_buf;
+    ctx->search_text_edit.size = SEARCH_QUERY_BUF;
+    ctx->search_selected_index = -1;
 
     /* Add to window list */
     window_list_add(shared, ctx);
@@ -1026,19 +1094,54 @@ static void decoration_overlay(WindowContext* ctx)
         ui_box_end(popup);
     }
 
-    /* search popup (context-menu-like panel below the search button) */
+    /* search popup with fuzzy word search */
     if (ctx->search_popup.open)
     {
-        f32 popup_w = 200;
-        f32 popup_h = 150;
-        f32 gap = 4;
+        f32 popup_w = 280.f;
+        f32 popup_h = 350.f;
+        f32 gap = 4.f;
+        f32 pad = 8.f;
+        f32 font_size = 13.f;
+        f32 row_h = font_size * 1.8f;
         f32 popup_x = ctx->decoration_search.xmin;
         f32 popup_y = ctx->decoration_search.ymax + gap;
+
+#define SEARCH_DISPLAY_MAX 100
+
+        /* build query from text edit state and run search */
+        String query = { ctx->search_text_buf, ctx->search_text_edit.text_len };
+
+        SearchResult sr[SEARCH_DISPLAY_MAX];
+        i32 sr_count = 0;
+        if (query.len > 0)
+        {
+            search_set_query(&shared->word_search, query);
+            sr_count = search_get_results(&shared->word_search, sr, SEARCH_DISPLAY_MAX);
+        }
+        else
+        {
+            /* empty query: show all words */
+            i32 n = s_dictionary_size < SEARCH_DISPLAY_MAX ? s_dictionary_size : SEARCH_DISPLAY_MAX;
+            for (i32 i = 0; i < n; i++)
+            {
+                sr[i].entry = &s_dictionary[i];
+                sr[i].key = (String){ (u8*)s_dictionary[i].word, (isize)strlen(s_dictionary[i].word) };
+                sr[i].text = sr[i].key;
+                sr[i].score = 0.f;
+                sr[i].range_count = 0;
+            }
+            sr_count = n;
+        }
+
+        /* clamp selected index */
+        if (ctx->search_selected_index >= sr_count)
+            ctx->search_selected_index = sr_count > 0 ? sr_count - 1 : -1;
 
         UIBox* popup = ui_box_begin(&(BoxConfig){
             .sizing = { fixed(popup_w), fixed(popup_h) },
             .flags = BoxFlag_Float,
             .float_offset = { popup_x, -(client_h - 1) + popup_y },
+            .padding = { pad, pad, pad, pad },
             .color = theme->palette_bg,
             .rect_style = {
                 .corner_radius = 8,
@@ -1060,9 +1163,117 @@ static void decoration_overlay(WindowContext* ctx)
                     ir.last_box->position.y + ir.last_box->size.height,
                 };
             }
-            /* TODO: popup content goes here */
+
+            UIBox* vbox = ui_box_begin(&(BoxConfig){
+                .sizing = { fixed(popup_w - pad * 2.f), fixed(popup_h - pad * 2.f) },
+                .direction = LAYOUT_TOP_TO_BOTTOM,
+                .child_gap = gap,
+            });
+            {
+                /* text input field */
+                ui_text_field(&ctx->search_text_edit, str("Search word##search_input"), &shared->fonts[FONT_INDEX_UI],
+                              font_size, (SizingAxis)fixed(popup_w - pad * 2.f), s_padding_small, theme->palette_bg,
+                              theme->border, theme->panel_fg, theme->scrollbar_thumb, theme->cursor_bar,
+                              theme->cursor_trail, theme->selection, theme->selection_flash);
+
+                /* results area */
+                if (sr_count > 0)
+                {
+                    b32 result_clicked = False;
+
+                    ScrollContext scroll = ui_scrollable_area_begin(&(ScrollableAreaConfig){
+                        .hash_str = str("##search_results"),
+                        .sizing = { fixed(popup_w - pad * 2.f), grow({}) },
+                        .bg = theme->palette_bg,
+                        .thumb_color = theme->scrollbar_thumb,
+                        .direction = LAYOUT_TOP_TO_BOTTOM,
+                    });
+                    {
+                        for (i32 i = 0; i < sr_count; i++)
+                        {
+                            String word_text = sr[i].text;
+
+                            UIBox* row = ui_box_begin(&(BoxConfig){
+                                .sizing = { fit_grow({}), fixed(row_h) },
+                                .direction = LAYOUT_LEFT_TO_RIGHT,
+                                .alignment = { ALIGN_START, ALIGN_CENTER },
+                                .color = (Color){ 0, 0, 0, 0 },
+                                .rect_style = { .corner_radius = 4 },
+                            });
+                            {
+                                UIBoxInteractResult rir = ui_box_interact(
+                                    row, str_fmt(HASH_STR_MAX_LENGTH, "search_result_%u_%d", ctx->id, i));
+
+                                if (ui_hovered(rir.flags))
+                                    row->cfg.color = theme->hover_bg;
+
+                                if (ui_lclicked(rir.flags))
+                                    result_clicked = True;
+
+                                /* render word with fuzzy-match highlighting */
+                                TextConfig normal_cfg = {
+                                    .font = &shared->fonts[FONT_INDEX_UI],
+                                    .font_size = font_size,
+                                    .color = theme->panel_fg,
+                                };
+                                TextConfig highlight_cfg = {
+                                    .font = &shared->fonts[FONT_INDEX_UI],
+                                    .font_size = font_size,
+                                    .color = theme->accent_bg,
+                                };
+
+                                if (sr[i].range_count == 0)
+                                {
+                                    ui_text(word_text, &normal_cfg);
+                                }
+                                else
+                                {
+                                    isize prev = 0;
+                                    for (i32 r = 0; r < sr[i].range_count; r++)
+                                    {
+                                        /* normal text */
+                                        if (sr[i].ranges[r].start > (i32)prev)
+                                        {
+                                            String seg = {
+                                                word_text.data + prev,
+                                                sr[i].ranges[r].start - (i32)prev,
+                                            };
+                                            ui_text(seg, &normal_cfg);
+                                        }
+
+                                        /* matched text */
+                                        {
+                                            String seg = {
+                                                word_text.data + sr[i].ranges[r].start,
+                                                sr[i].ranges[r].end - sr[i].ranges[r].start,
+                                            };
+                                            ui_text(seg, &highlight_cfg);
+                                        }
+
+                                        prev = sr[i].ranges[r].end;
+                                    }
+                                    if (prev < word_text.len)
+                                    {
+                                        String seg = { word_text.data + prev, word_text.len - prev };
+                                        ui_text(seg, &normal_cfg);
+                                    }
+                                }
+                            }
+                            ui_box_end(row);
+                        }
+                    }
+                    ui_scrollable_area_end(scroll);
+
+                    /* close popup only if the click wasn't consumed by the scrollbar */
+                    if (result_clicked && ui_ctx->mouse_captured_by_hash != scroll.hash)
+                        ctx->search_popup.open = False;
+                }
+            }
+            ui_box_end(vbox);
         }
         ui_box_end(popup);
+
+#undef SEARCH_DISPLAY_MAX
     }
 
     /* minimize */
@@ -2244,6 +2455,11 @@ i32 WinMainCRTStartup()
     }
     // clang-format on
 
+    /* Initialize and start word search worker */
+    search_init(&shared.word_search, s_dictionary, s_dictionary_size, sizeof(DictionaryEntry), s_word_fields,
+                countof(s_word_fields), s_word_extract);
+    search_start(&shared.word_search);
+
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -2487,6 +2703,9 @@ i32 WinMainCRTStartup()
         free(popup);
         shared.drag_popup = NULL;
     }
+
+    /* Stop word search worker */
+    search_stop(&shared.word_search);
 
     font_unregister(&shared.fonts[FONT_INDEX_UI]);
     font_unregister(&shared.fonts[FONT_INDEX_ZH]);
