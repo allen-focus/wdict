@@ -1434,6 +1434,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             .padding = s_padding_medium,
             .child_gap = s_child_gap_medium,
             .direction = LAYOUT_TOP_TO_BOTTOM,
+            .show_bottom_bar = (p == ctx->hovered_panel),
         });
         {
             PanelTab* active = panel_tab_get_active(p);

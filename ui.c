@@ -2258,7 +2258,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                    .window_id = cfg->window_id,
                                    .cmd_queue = cfg->cmd_queue,
                                    .theme = cfg->theme,
-                                   .font_size = cfg->font_size };
+                                   .font_ui = cfg->font_ui,
+                                   .font_size = cfg->font_size,
+                                   .show_bottom_bar = cfg->show_bottom_bar };
 
         TracyCZoneEnd(ctx_pb);
         return panel_ctx;
@@ -2269,6 +2271,44 @@ void ui_panel_end(PanelContext* panel_ctx)
 {
     TracyCZoneNC(ctx_pe, "PanelEnd", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
     ui_scrollable_area_end(panel_ctx->scroll_ctx);
+
+    /* Bottom transition bar on hovered panel */
+    {
+        UIBox* bottom_bar = ui_box_begin(&(BoxConfig){
+            .sizing = { grow({}), fixed(0) },
+            .direction = LAYOUT_LEFT_TO_RIGHT,
+            .padding = { 0, 10, 0, 10 },
+            .alignment = { ALIGN_START, ALIGN_CENTER },
+        });
+
+        UIBoxInteractResult res =
+            ui_box_interact(bottom_bar, str_fmt(HASH_STR_MAX_LENGTH, "bottom_bar_%u", panel_ctx->panel->id));
+
+        if (res.last_box)
+            update_transition(&res.last_box->hot_t, panel_ctx->show_bottom_bar ? 1.f : 0.f, 18.f);
+
+        f32 t = res.last_box ? res.last_box->hot_t : 0.f;
+        f32 bh = t * 30;
+
+        bottom_bar->cfg.sizing.height = (SizingAxis){ { bh, bh }, SIZING_MODE_FIXED };
+        bottom_bar->size.height = bh;
+        bottom_bar->cfg.color = lerp_color(panel_ctx->theme->hover_bg, panel_ctx->theme->tab_bg, t);
+
+        if (t > 0.3f)
+        {
+            Color tc = panel_ctx->theme->tab_fg;
+            f32 text_alpha = clamp((t - 0.3f) / 0.7f, 0.f, 1.f);
+            tc.a = (u8)((f32)tc.a * text_alpha);
+            ui_text(str("This panel is focused"), &(TextConfig){
+                                                      .font = panel_ctx->font_ui,
+                                                      .font_size = 12,
+                                                      .color = tc,
+                                                      .line_height = 30,
+                                                  });
+        }
+
+        ui_box_end(bottom_bar);
+    }
 
     //  Edge drop zones for docking tabs at panel edges
     //

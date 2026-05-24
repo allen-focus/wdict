@@ -569,6 +569,7 @@ typedef struct
     Padding padding;
     f32 child_gap;
     LayoutDirection direction;
+    b32 show_bottom_bar; // draw bottom accent bar when this panel is hovered
 } PanelConfig;
 
 typedef struct
@@ -582,7 +583,9 @@ typedef struct
     u32 window_id;
     CmdQueue* cmd_queue;
     const PanelTheme* theme;
+    const Font* font_ui;
     f32 font_size;
+    b32 show_bottom_bar;
 } PanelContext;
 
 //
