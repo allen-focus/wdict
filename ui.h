@@ -569,7 +569,7 @@ typedef struct
     Padding padding;
     f32 child_gap;
     LayoutDirection direction;
-    b32 show_bottom_bar; // draw bottom accent bar when this panel is hovered
+    b32 show_bottom_bar; // draw bottom accent bar when this panel is focused
 } PanelConfig;
 
 typedef struct

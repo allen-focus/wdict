@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cmd.h"
+#include "cmd.h" // IWYU pragma: keep
 #include "utils.h"
 
 typedef enum
@@ -14,6 +14,14 @@ typedef enum
     PanelDockSide_Before,
     PanelDockSide_After,
 } PanelDockSide;
+
+typedef enum
+{
+    PanelSpatial_Left,
+    PanelSpatial_Down,
+    PanelSpatial_Up,
+    PanelSpatial_Right,
+} PanelSpatial;
 
 #define PANEL_TAB_NAME_MAX 64
 
@@ -84,3 +92,8 @@ Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, Axis2 a
 void panel_tabs_cleanup(Panel* panel);
 void panel_tab_generate_default_name(const Panel* panel, u8* buf, isize buf_size, isize* out_len);
 Panel* panel_process_pending_removes(Panel* root);
+
+Panel* panel_find_first_leaf(Panel* root);
+Panel* panel_find_next_leaf(Panel* root, Panel* current);
+Panel* panel_find_prev_leaf(Panel* root, Panel* current);
+Panel* panel_find_spatial(Panel* root, Panel* current, Rect root_rect, PanelSpatial direction);

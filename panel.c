@@ -399,17 +399,15 @@ Panel* panel_tab_to_new_panel(Panel* from, PanelTab* tab, Panel* anchor, const A
 
         return child_a;
     }
-    else
-    {
-        /* PanelDockSide_After: tab goes to child_b (right/bottom) */
-        Panel* child_b = anchor->child_b;
 
-        child_b->tab_first = tab;
-        child_b->tab_last = tab;
-        child_b->active_tab = tab;
+    /* PanelDockSide_After: tab goes to child_b (right/bottom) */
+    Panel* child_b = anchor->child_b;
 
-        return child_b;
-    }
+    child_b->tab_first = tab;
+    child_b->tab_last = tab;
+    child_b->active_tab = tab;
+
+    return child_b;
 }
 
 void panel_tabs_cleanup(Panel* panel)
@@ -597,4 +595,141 @@ Panel* panel_process_pending_removes(Panel* root)
 
     TracyCZoneEnd(ctx_ppr);
     return root;
+}
+
+Panel* panel_find_first_leaf(Panel* root)
+{
+    if (!root)
+        return NULL;
+    for (Panel* p = root; p; p = panel_iter_next(p))
+        if (!p->child_a)
+            return p;
+    return NULL;
+}
+
+Panel* panel_find_next_leaf(Panel* root, Panel* current)
+{
+    if (!root || !current)
+        return NULL;
+    Panel* p = current;
+    for (;;)
+    {
+        p = panel_iter_next(p);
+        if (!p)
+            return panel_find_first_leaf(root);
+        if (!p->child_a)
+            return p;
+    }
+}
+
+Panel* panel_find_prev_leaf(Panel* root, Panel* current)
+{
+    if (!root || !current)
+        return NULL;
+
+    /* Walk full depth-first to find the leaf preceding 'current' */
+    Panel* prev = NULL;
+    for (Panel* p = root; p; p = panel_iter_next(p))
+    {
+        if (p == current)
+            break;
+        if (!p->child_a)
+            prev = p;
+    }
+
+    if (prev)
+        return prev;
+
+    /* Wrap to last leaf */
+    Panel* last = NULL;
+    for (Panel* p = root; p; p = panel_iter_next(p))
+        if (!p->child_a)
+            last = p;
+    return last;
+}
+
+Panel* panel_find_spatial(Panel* root, Panel* current, Rect root_rect, PanelSpatial direction)
+{
+    if (!root || !current)
+        return NULL;
+
+    Rect cur = panel_calc_rect(current, root_rect);
+
+    Panel* best = NULL;
+    f32 best_primary = 1e12f;
+    f32 best_overlap = -1.f;
+
+    for (Panel* p = root; p; p = panel_iter_next(p))
+    {
+        if (p == current || p->child_a)
+            continue;
+
+        Rect r = panel_calc_rect(p, root_rect);
+        f32 primary;
+        f32 overlap;
+
+        switch (direction)
+        {
+            case PanelSpatial_Left:
+            {
+                if (r.xmax > cur.xmin)
+                    continue;
+                f32 ol_top = cur.ymin > r.ymin ? cur.ymin : r.ymin;
+                f32 ol_bot = cur.ymax < r.ymax ? cur.ymax : r.ymax;
+                overlap = ol_bot - ol_top;
+                if (overlap <= 0.f)
+                    continue;
+                primary = cur.xmin - r.xmax;
+            }
+            break;
+
+            case PanelSpatial_Right:
+            {
+                if (r.xmin < cur.xmax)
+                    continue;
+                f32 ol_top = cur.ymin > r.ymin ? cur.ymin : r.ymin;
+                f32 ol_bot = cur.ymax < r.ymax ? cur.ymax : r.ymax;
+                overlap = ol_bot - ol_top;
+                if (overlap <= 0.f)
+                    continue;
+                primary = r.xmin - cur.xmax;
+            }
+            break;
+
+            case PanelSpatial_Up:
+            {
+                if (r.ymax > cur.ymin)
+                    continue;
+                f32 ol_left = cur.xmin > r.xmin ? cur.xmin : r.xmin;
+                f32 ol_right = cur.xmax < r.xmax ? cur.xmax : r.xmax;
+                overlap = ol_right - ol_left;
+                if (overlap <= 0.f)
+                    continue;
+                primary = cur.ymin - r.ymax;
+            }
+            break;
+
+            case PanelSpatial_Down:
+            {
+                if (r.ymin < cur.ymax)
+                    continue;
+                f32 ol_left = cur.xmin > r.xmin ? cur.xmin : r.xmin;
+                f32 ol_right = cur.xmax < r.xmax ? cur.xmax : r.xmax;
+                overlap = ol_right - ol_left;
+                if (overlap <= 0.f)
+                    continue;
+                primary = r.ymin - cur.ymax;
+            }
+            break;
+        }
+
+        if (primary < best_primary || (primary == best_primary && overlap > best_overlap))
+        {
+            best = p;
+            best_primary = primary;
+            best_overlap = overlap;
+        }
+    }
+
+    return best;
 }

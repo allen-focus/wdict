@@ -168,7 +168,7 @@ struct WindowContext
 
     /* panel */
     Panel* root_panel;
-    Panel* hovered_panel;
+    Panel* focused_panel;
 
     /* widget needed */
     b32 check;
@@ -528,6 +528,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
         panel_tab_generate_default_name(ctx->root_panel, name_buf, sizeof(name_buf), &name_len);
         panel_tab_declare(ctx->root_panel, (String){ name_buf, name_len });
     }
+    ctx->focused_panel = ctx->root_panel;
 
     /* Render first frames to rasterize glyphs, then show */
     process_frame(ctx);
@@ -758,8 +759,14 @@ static void cmd_split_panel_h(void* userdata, String cmd_text)
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
     u32 panel_id = cmd_parse_u32(cmd_text, str("panel"), 0);
     Panel* p = find_panel_globally(shared, window_id, panel_id);
-    if (p)
-        panel_split(p, Axis2_X, True);
+    if (p && panel_split(p, Axis2_X, True))
+    {
+        /* The split panel is now an internal node — redirect any window
+           that had it focused to child_a (which inherited the original tabs). */
+        for (WindowContext* w = shared->first_window; w; w = w->next)
+            if (w->focused_panel == p)
+                w->focused_panel = p->child_a;
+    }
 }
 
 static void cmd_split_panel_v(void* userdata, String cmd_text)
@@ -768,8 +775,12 @@ static void cmd_split_panel_v(void* userdata, String cmd_text)
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
     u32 panel_id = cmd_parse_u32(cmd_text, str("panel"), 0);
     Panel* p = find_panel_globally(shared, window_id, panel_id);
-    if (p)
-        panel_split(p, Axis2_Y, True);
+    if (p && panel_split(p, Axis2_Y, True))
+    {
+        for (WindowContext* w = shared->first_window; w; w = w->next)
+            if (w->focused_panel == p)
+                w->focused_panel = p->child_a;
+    }
 }
 
 static void cmd_close_panel(void* userdata, String cmd_text)
@@ -953,6 +964,16 @@ static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
     PanelDockSide side = str_compare(side_str, str("before")) ? PanelDockSide_Before : PanelDockSide_After;
     panel_tab_to_new_panel(rt.panel, rt.tab, to_panel, axis, side);
 
+    /* The anchor panel (to_panel) is now an internal node — redirect any window
+       that had it focused to the child that retained the original tabs. */
+    for (WindowContext* w = shared->first_window; w; w = w->next)
+    {
+        if (w->focused_panel == to_panel)
+        {
+            w->focused_panel = (side == PanelDockSide_Before) ? to_panel->child_b : to_panel->child_a;
+        }
+    }
+
     /* If the source was the root leaf panel and is now empty, close the window */
     if (!rt.panel->child_a && !rt.panel->parent && !rt.panel->tab_first)
     {
@@ -964,6 +985,86 @@ static void cmd_tab_to_new_panel(void* userdata, String cmd_text)
                 DestroyWindow(from_win->window);
         }
     }
+}
+
+static void cmd_panel_focus_next(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->root_panel)
+        return;
+
+    if (w->focused_panel)
+        w->focused_panel = panel_find_next_leaf(w->root_panel, w->focused_panel);
+    else
+        w->focused_panel = panel_find_first_leaf(w->root_panel);
+}
+
+static void cmd_panel_focus_prev(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->root_panel)
+        return;
+
+    if (w->focused_panel)
+        w->focused_panel = panel_find_prev_leaf(w->root_panel, w->focused_panel);
+    else
+        w->focused_panel = panel_find_first_leaf(w->root_panel);
+}
+
+static void cmd_panel_focus_left(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->root_panel || !w->focused_panel)
+        return;
+    Rect root_rect = { 0, 0, (f32)w->ui.client_width, (f32)w->ui.client_height - 1 };
+    Panel* next = panel_find_spatial(w->root_panel, w->focused_panel, root_rect, PanelSpatial_Left);
+    if (next)
+        w->focused_panel = next;
+}
+
+static void cmd_panel_focus_down(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->root_panel || !w->focused_panel)
+        return;
+    Rect root_rect = { 0, 0, (f32)w->ui.client_width, (f32)w->ui.client_height - 1 };
+    Panel* next = panel_find_spatial(w->root_panel, w->focused_panel, root_rect, PanelSpatial_Down);
+    if (next)
+        w->focused_panel = next;
+}
+
+static void cmd_panel_focus_up(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->root_panel || !w->focused_panel)
+        return;
+    Rect root_rect = { 0, 0, (f32)w->ui.client_width, (f32)w->ui.client_height - 1 };
+    Panel* next = panel_find_spatial(w->root_panel, w->focused_panel, root_rect, PanelSpatial_Up);
+    if (next)
+        w->focused_panel = next;
+}
+
+static void cmd_panel_focus_right(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->root_panel || !w->focused_panel)
+        return;
+    Rect root_rect = { 0, 0, (f32)w->ui.client_width, (f32)w->ui.client_height - 1 };
+    Panel* next = panel_find_spatial(w->root_panel, w->focused_panel, root_rect, PanelSpatial_Right);
+    if (next)
+        w->focused_panel = next;
 }
 
 //
@@ -1378,21 +1479,6 @@ static void panel_container(WindowContext* ctx, const Rect rect)
     };
     // clang-format on
 
-    /* Find hovered panel for keyboard shortcuts */
-    ctx->hovered_panel = NULL;
-    for (Panel* hp = ctx->root_panel; hp; hp = panel_iter_next(hp))
-    {
-        if (hp->child_a)
-            continue;
-        Rect r = panel_calc_rect(hp, rect);
-        if (ctx->ui.mouse_pos.x >= r.xmin && ctx->ui.mouse_pos.x < r.xmax && ctx->ui.mouse_pos.y >= r.ymin &&
-            ctx->ui.mouse_pos.y < r.ymax)
-        {
-            ctx->hovered_panel = hp;
-            break;
-        }
-    }
-
     ctx->decoration_spacer_count = 0;
     f32 decoration_w = ctx->decoration_buttons_width;
 
@@ -1408,6 +1494,12 @@ static void panel_container(WindowContext* ctx, const Rect rect)
            Only the top-left leaf panel needs the left inset, otherwise tabs would
            render underneath the menu/search buttons. */
         Rect r = panel_calc_rect(p, rect);
+
+        /* Click-to-focus: left-click within panel bounds sets it as the focused panel */
+        if (ctx->ui.mouse_lclick && ctx->ui.mouse_pos.x >= r.xmin && ctx->ui.mouse_pos.x < r.xmax &&
+            ctx->ui.mouse_pos.y >= r.ymin && ctx->ui.mouse_pos.y < r.ymax)
+            ctx->focused_panel = p;
+
         b32 touches_top = (r.ymin <= rect.ymin + 0.5f);
         b32 touches_right = (r.xmax >= rect.xmax - 0.5f);
         b32 touches_left = (r.xmin <= rect.xmin + 0.5f);
@@ -1434,7 +1526,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             .padding = s_padding_medium,
             .child_gap = s_child_gap_medium,
             .direction = LAYOUT_TOP_TO_BOTTOM,
-            .show_bottom_bar = (p == ctx->hovered_panel),
+            .show_bottom_bar = (p == ctx->focused_panel),
         });
         {
             PanelTab* active = panel_tab_get_active(p);
@@ -1606,6 +1698,14 @@ static void process_frame(WindowContext* ctx)
     isize arena_pos_backup = ui_frame_begin(ui_ctx);
     {
         ctx->root_panel = panel_process_pending_removes(ctx->root_panel);
+
+        /* If focused panel was removed, fall back to first leaf */
+        if (ctx->focused_panel)
+        {
+            if (!panel_find_by_id(ctx->root_panel, ctx->focused_panel->id))
+                ctx->focused_panel = panel_find_first_leaf(ctx->root_panel);
+        }
+
         f32 client_w = (f32)ui_ctx->client_width;
         f32 client_h = (f32)ui_ctx->client_height;
 
@@ -2061,7 +2161,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     if (!(lx >= p->rect.xmin && lx < p->rect.xmax && ly >= p->rect.ymin && ly < p->rect.ymax))
                     {
                         p->open = False;
-                        return 0;
+                        break;
                     }
             }
 
@@ -2198,10 +2298,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     u32 to_panel_id = 0;
                     u32 window_id = ctx ? ctx->id : 0;
 
-                    if (ctx && ctx->hovered_panel)
+                    if (ctx && ctx->focused_panel)
                     {
-                        panel_id = ctx->hovered_panel->id;
-                        PanelTab* at = panel_tab_get_active(ctx->hovered_panel);
+                        panel_id = ctx->focused_panel->id;
+                        PanelTab* at = panel_tab_get_active(ctx->focused_panel);
                         if (at)
                             tab_id = at->id;
                     }
@@ -2213,9 +2313,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                             end++;
                         String token = { cmd_text.data, end };
 
-                        if (str_compare(token, str("tab.move_to_panel")) && ctx && ctx->hovered_panel)
+                        if (str_compare(token, str("tab.move_to_panel")) && ctx && ctx->focused_panel)
                         {
-                            Panel* next = ctx->hovered_panel;
+                            Panel* next = ctx->focused_panel;
                             do
                             {
                                 next = panel_iter_next(next);
@@ -2223,8 +2323,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                             if (next)
                                 to_panel_id = next->id;
                         }
-                        if (str_compare(token, str("tab.to_new_panel")) && ctx && ctx->hovered_panel)
-                            to_panel_id = ctx->hovered_panel->id;
+                        if (str_compare(token, str("tab.to_new_panel")) && ctx && ctx->focused_panel)
+                            to_panel_id = ctx->focused_panel->id;
                     }
 
                     if (panel_id)
@@ -2232,6 +2332,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                                        str_fmt(CMD_STR_MAX_LENGTH, "%.*s panel=%u tab=%u to_panel=%u window=%u",
                                                (i32)cmd_text.len, cmd_text.data, panel_id, tab_id, to_panel_id,
                                                window_id));
+                    else if (window_id)
+                        cmd_queue_push(&shared->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "%.*s window=%u",
+                                                                   (i32)cmd_text.len, cmd_text.data, window_id));
                     else
                         cmd_queue_push(&shared->cmd_queue, cmd_text);
                     return 0;
@@ -2432,6 +2535,12 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),      str("Move Tab To Next Panel"),   str(""), cmd_tab_move_to_panel,      &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"), str("Move Tab To New Window"),   str(""), cmd_tab_move_to_new_window, &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),       str("Move Tab To New Panel"),    str(""), cmd_tab_to_new_panel,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_next"),      str("Focus Next Panel"),         str(""), cmd_panel_focus_next,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_prev"),      str("Focus Previous Panel"),     str(""), cmd_panel_focus_prev,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_left"),      str("Focus Panel Left"),         str(""), cmd_panel_focus_left,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_down"),      str("Focus Panel Down"),         str(""), cmd_panel_focus_down,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_up"),        str("Focus Panel Up"),           str(""), cmd_panel_focus_up,         &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_right"),     str("Focus Panel Right"),        str(""), cmd_panel_focus_right,      &shared });
 
         /* Bind shortcuts */
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },      str("tab.new"));
@@ -2443,7 +2552,13 @@ i32 WinMainCRTStartup()
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },      str("tab.move_to_panel"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },      str("tab.to_new_panel axis=X"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },      str("tab.to_new_panel axis=Y"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                       VK_F11 },  str("app.toggle_theme"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      VK_TAB },   str("panel.focus_next"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_TAB },   str("panel.focus_prev"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'H' },      str("panel.focus_left"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'J' },      str("panel.focus_down"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'K' },      str("panel.focus_up"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'L' },      str("panel.focus_right"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                      VK_F11 },  str("app.toggle_theme"));
         Assert(!shortcut_detect_conflicts(&shared.shortcuts));
 
         /* Load cursors */
