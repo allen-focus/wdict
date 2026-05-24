@@ -63,6 +63,13 @@ typedef enum
 
 typedef struct
 {
+    b32 open;
+    f32 t;
+    Rect rect;
+} OverlayPopup;
+
+typedef struct
+{
     /* general */
     Color accent_bg;
     Color accent_fg;
@@ -173,11 +180,15 @@ struct WindowContext
     Rect decoration_close;
     Rect decoration_menu;
     Rect decoration_search;
-    f32 decoration_right_buttons_width;
+    f32 decoration_buttons_width;
     f32 decoration_left_buttons_width;
     Rect decoration_spacer_rects[MAX_DECORATION_SPACER];
     isize decoration_spacer_count;
     TitleBarHot tb_hovered_button;
+
+    /* overlay popups */
+    OverlayPopup search_popup;
+    OverlayPopup menu_popup;
 
     /* guards */
     b32 in_frame;
@@ -218,7 +229,7 @@ static const Theme s_theme_light = {
     .border           = rgba(192, 191, 188, 255),
     .scrollbar_thumb  = rgba(94,  92,  100, 80 ),
     .scrollbar_track  = rgba(192, 191, 188, 80 ),
-    .shadow           = rgba(0,   0,   0,   255),
+    .shadow           = rgba(192, 191, 188, 255),
 
     /* specific */
     .bar_bg           = rgba(222, 221, 218, 255),
@@ -908,7 +919,7 @@ static void decoration_overlay(WindowContext* ctx)
     f32 right_total_w = button_w * 3;
     f32 start_x = client_w - right_total_w;
 
-    ctx->decoration_right_buttons_width = right_total_w;
+    ctx->decoration_buttons_width = right_total_w;
     ctx->decoration_left_buttons_width = left_total_w;
 
     b32 is_active = GetActiveWindow() == window;
@@ -936,7 +947,9 @@ static void decoration_overlay(WindowContext* ctx)
                 UIBoxInteractResult ir = ui_box_interact(btn, str("decoration_menu"));
                 if (ir.last_box)
                 {
-                    btn->cfg.color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
+                    update_transition(&ctx->menu_popup.t, ctx->menu_popup.open ? 1.f : 0.f, 15.f);
+                    Color base_color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
+                    btn->cfg.color = lerp_color(base_color, theme->accent_weak_bg, ctx->menu_popup.t);
                     ctx->decoration_menu = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
                                                    ir.last_box->position.x + ir.last_box->size.width,
                                                    ir.last_box->position.y + ir.last_box->size.height };
@@ -959,7 +972,9 @@ static void decoration_overlay(WindowContext* ctx)
                 UIBoxInteractResult ir = ui_box_interact(btn, str("decoration_search"));
                 if (ir.last_box)
                 {
-                    btn->cfg.color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
+                    update_transition(&ctx->search_popup.t, ctx->search_popup.open ? 1.f : 0.f, 15.f);
+                    Color base_color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
+                    btn->cfg.color = lerp_color(base_color, theme->accent_weak_bg, ctx->search_popup.t);
                     ctx->decoration_search = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
                                                      ir.last_box->position.x + ir.last_box->size.width,
                                                      ir.last_box->position.y + ir.last_box->size.height };
@@ -971,6 +986,84 @@ static void decoration_overlay(WindowContext* ctx)
         }
     }
     ui_box_end(left_buttons_container);
+
+    /* menu popup (context-menu-like panel below the menu button) */
+    if (ctx->menu_popup.open)
+    {
+        f32 popup_w = 200;
+        f32 popup_h = 150;
+        f32 gap = 4;
+        f32 popup_x = ctx->decoration_menu.xmin;
+        f32 popup_y = ctx->decoration_menu.ymax + gap;
+
+        UIBox* popup = ui_box_begin(&(BoxConfig){
+            .sizing = { fixed(popup_w), fixed(popup_h) },
+            .flags = BoxFlag_Float,
+            .float_offset = { popup_x, -(client_h - 1) + popup_y },
+            .color = theme->palette_bg,
+            .rect_style = {
+                .corner_radius = 8,
+                .shadow_color = theme->shadow,
+                .shadow_offset = { 0, 2 },
+                .shadow_sigma = 4,
+                .border_color = theme->border,
+                .border_thickness = 1,
+            },
+        });
+        {
+            UIBoxInteractResult ir = ui_box_interact(popup, str("##menu_popup"));
+            if (ir.last_box)
+            {
+                ctx->menu_popup.rect = (Rect){
+                    ir.last_box->position.x,
+                    ir.last_box->position.y,
+                    ir.last_box->position.x + ir.last_box->size.width,
+                    ir.last_box->position.y + ir.last_box->size.height,
+                };
+            }
+            /* TODO: popup content goes here */
+        }
+        ui_box_end(popup);
+    }
+
+    /* search popup (context-menu-like panel below the search button) */
+    if (ctx->search_popup.open)
+    {
+        f32 popup_w = 200;
+        f32 popup_h = 150;
+        f32 gap = 4;
+        f32 popup_x = ctx->decoration_search.xmin;
+        f32 popup_y = ctx->decoration_search.ymax + gap;
+
+        UIBox* popup = ui_box_begin(&(BoxConfig){
+            .sizing = { fixed(popup_w), fixed(popup_h) },
+            .flags = BoxFlag_Float,
+            .float_offset = { popup_x, -(client_h - 1) + popup_y },
+            .color = theme->palette_bg,
+            .rect_style = {
+                .corner_radius = 8,
+                .shadow_color = theme->shadow,
+                .shadow_offset = { 0, 2 },
+                .shadow_sigma = 4,
+                .border_color = theme->border,
+                .border_thickness = 1,
+            },
+        });
+        {
+            UIBoxInteractResult ir = ui_box_interact(popup, str("##search_popup"));
+            if (ir.last_box)
+            {
+                ctx->search_popup.rect = (Rect){
+                    ir.last_box->position.x,
+                    ir.last_box->position.y,
+                    ir.last_box->position.x + ir.last_box->size.width,
+                    ir.last_box->position.y + ir.last_box->size.height,
+                };
+            }
+            /* TODO: popup content goes here */
+        }
+        ui_box_end(popup);
+    }
 
     /* minimize */
     {
@@ -1090,7 +1183,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
     }
 
     ctx->decoration_spacer_count = 0;
-    f32 decoration_w = ctx->decoration_right_buttons_width;
+    f32 decoration_w = ctx->decoration_buttons_width;
 
     for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
     {
@@ -1580,10 +1673,17 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_NCLBUTTONDOWN:
         {
-            if (ctx && ctx->tb_hovered_button != TitleBarHot_None)
+            if (ctx)
             {
-                ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
-                return 0;
+                if (ctx->menu_popup.open && ctx->tb_hovered_button != TitleBarHot_Menu)
+                    ctx->menu_popup.open = False;
+                if (ctx->search_popup.open && ctx->tb_hovered_button != TitleBarHot_Search)
+                    ctx->search_popup.open = False;
+                if (ctx->tb_hovered_button != TitleBarHot_None)
+                {
+                    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                    return 0;
+                }
             }
             return DefWindowProcW(window, message, wparam, lparam);
         }
@@ -1605,7 +1705,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         ShowWindow(window, SW_MINIMIZE);
                         break;
                     case TitleBarHot_Menu:
+                        ctx->menu_popup.open = !ctx->menu_popup.open;
+                        break;
                     case TitleBarHot_Search:
+                        ctx->search_popup.open = !ctx->search_popup.open;
+                        break;
                     case TitleBarHot_None:
                     default:
                         return DefWindowProcW(window, message, wparam, lparam);
@@ -1716,9 +1820,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_LBUTTONDOWN:
         {
-            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
-            ui_ctx->mouse_lclick = True;
-            ui_ctx->mouse_press = True;
+            /* Determine double-click */
             f64 now = ui_ctx->current_time;
             i32 click_x = GET_X_LPARAM(lparam);
             i32 click_y = GET_Y_LPARAM(lparam);
@@ -1734,6 +1836,27 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_ctx->last_lclick_time = now;
             ui_ctx->last_lclick_pos.x = (f32)click_x;
             ui_ctx->last_lclick_pos.y = (f32)click_y;
+
+            /* Handle Overlay Popup */
+            OverlayPopup* popups[] = { &ctx->menu_popup, &ctx->search_popup };
+            f32 dpi_scale = (f32)ctx->ui.dpi / USER_DEFAULT_SCREEN_DPI;
+            f32 lx = click_x / dpi_scale;
+            f32 ly = click_y / dpi_scale;
+            for (isize i = 0; i < (isize)countof(popups); i++)
+            {
+                OverlayPopup* p = popups[i];
+                if (p->open && p->rect.xmax > p->rect.xmin)
+                    if (!(lx >= p->rect.xmin && lx < p->rect.xmax && ly >= p->rect.ymin && ly < p->rect.ymax))
+                    {
+                        p->open = False;
+                        return 0;
+                    }
+            }
+
+            /* Update */
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+            ui_ctx->mouse_lclick = True;
+            ui_ctx->mouse_press = True;
             SetCapture(window);
             return 0;
         }
