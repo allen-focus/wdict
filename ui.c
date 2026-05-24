@@ -1250,7 +1250,7 @@ Color lerp_color(const Color a, const Color b, const f32 t)
     return c;
 }
 
-static b32 approach_f32(f32* value, const f32 target, const f32 speed)
+b32 update_transition(f32* value, const f32 target, const f32 speed)
 {
     // Clamp animation timestep to avoid huge dt spikes after idle/sleep.
     f32 anim_dt = min(g_ui_ctx->frame_delta_time, 1.f / 60.f);
@@ -1259,27 +1259,6 @@ static b32 approach_f32(f32* value, const f32 target, const f32 speed)
     b32 is_done = fabs(*value - target) < 0.001f;
     if (is_done)
         *value = target;
-    else
-        ui_request_frames();
-    return is_done;
-}
-
-b32 update_transition(f32* transition, const f32 speed, const f32 target)
-{
-    Assert(target >= 0.f && target <= 1.f);
-
-    // Clamp animation timestep to avoid huge dt spikes after idle/sleep.
-    f32 anim_dt = min(g_ui_ctx->frame_delta_time, 1.f / 60.f);
-
-    b32 is_done = False;
-    *transition += (target - *transition) * speed * anim_dt;
-    *transition = clamp(*transition, 0.f, 1.f);
-
-    if (fabs(*transition - target) < 0.001f)
-    {
-        is_done = True;
-        *transition = target;
-    }
     else
         ui_request_frames();
     return is_done;
@@ -1465,12 +1444,12 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                     *scroll_delta = clamp(target, 0.f, scroll_max_delta);
                     start_timed_lerp(scroll_anim, *scroll_delta, *scroll_delta, g_ui_ctx->current_time, 0.f);
                 }
-                if (update_transition(&last_thumb->hot_t, 20.f, 1.f))
+                if (update_transition(&last_thumb->hot_t, 1.f, 20.f))
                     last_thumb->anim_state = TRANSITION_REVERSE;
             }
             else
             {
-                if (update_transition(&last_thumb->hot_t, 18.f, SCROLLBAR_THUMB_OPACITY_HOVER))
+                if (update_transition(&last_thumb->hot_t, SCROLLBAR_THUMB_OPACITY_HOVER, 18.f))
                     last_thumb->anim_state = TRANSITION_IDLE;
             }
 
@@ -1480,7 +1459,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
         else if (ui_hovered(thumb_flags))
         {
             last_thumb->anim_state = TRANSITION_FORWARD;
-            update_transition(&last_thumb->hot_t, 14.f, SCROLLBAR_THUMB_OPACITY_HOVER);
+            update_transition(&last_thumb->hot_t, SCROLLBAR_THUMB_OPACITY_HOVER, 14.f);
 
             last_thumb->active_t = 0.f;
         }
@@ -1501,9 +1480,9 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
                 last_thumb->anim_state = TRANSITION_REVERSE;
 
             if (last_thumb->anim_state == TRANSITION_FORWARD)
-                update_transition(&last_thumb->hot_t, 8.f, SCROLLBAR_THUMB_OPACITY_INACTIVE);
+                update_transition(&last_thumb->hot_t, SCROLLBAR_THUMB_OPACITY_INACTIVE, 8.f);
             else if (last_thumb->anim_state == TRANSITION_REVERSE)
-                if (update_transition(&last_thumb->hot_t, 4.f, 0.f))
+                if (update_transition(&last_thumb->hot_t, 0.f, 4.f))
                     last_thumb->anim_state = TRANSITION_IDLE;
 
             last_thumb->active_t = 0.f;
@@ -1522,7 +1501,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
             scroll_ctx.last_area->idle_timer = 0.f; // to suppress thumb auto-hide transition
             last_bar->anim_state = TRANSITION_FORWARD;
             if (last_bar->anim_state == TRANSITION_FORWARD)
-                update_transition(&last_bar->hot_t, 14.f, 1.f);
+                update_transition(&last_bar->hot_t, 1.f, 14.f);
 
             /* Click to jump to clicked position */
             if (ui_lclicked(bar_flags) && !ui_pressed(thumb_flags))
@@ -1540,7 +1519,7 @@ static void scrollbar(ScrollContext scroll_ctx, const b32 is_horizontal, const f
             if (last_bar->hot_t)
             {
                 last_bar->anim_state = TRANSITION_REVERSE;
-                if (update_transition(&last_bar->hot_t, 12.f, 0.f))
+                if (update_transition(&last_bar->hot_t, 0.f, 12.f))
                     last_bar->anim_state = TRANSITION_IDLE;
             }
         }
@@ -1849,10 +1828,12 @@ void ui_panel_boundaries(const Panel* root, const Rect root_rect, const PanelThe
             /* Transition and draw splitter line */
             if (result.last_box)
             {
-                update_transition(&result.last_box->hot_t, 20.f,
-                                  ui_hovered(flags) || ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f);
-                update_transition(&result.last_box->active_t, 20.f,
-                                  ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f);
+                update_transition(&result.last_box->hot_t,
+                                  ui_hovered(flags) || ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f,
+                                  20.f);
+                update_transition(&result.last_box->active_t,
+                                  ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f,
+                                  20.f);
             }
             f32 hot_t = result.last_box ? result.last_box->hot_t : 0.f;
             f32 active_t = result.last_box ? result.last_box->active_t : 0.f;
@@ -1960,8 +1941,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         /* Drop-target highlight transition */
                         if (tab_interact_res.last_box)
                             update_transition(
-                                &tab_interact_res.last_box->hot_t, 15.f,
-                                ui_drag_over(tab_interact_res.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f);
+                                &tab_interact_res.last_box->hot_t,
+                                ui_drag_over(tab_interact_res.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f,
+                                15.f);
                         f32 drop_t = tab_interact_res.last_box ? tab_interact_res.last_box->hot_t : 0.f;
 
                         /* Drag payload */
@@ -2142,8 +2124,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     b32 spacer_is_drop_target = ui_drag_over(spacer_interact_res.flags) && g_ui_ctx->drag_payload_size;
                     if (spacer_interact_res.last_box)
                     {
-                        update_transition(&spacer_interact_res.last_box->hot_t, 15.f,
-                                          spacer_is_drop_target ? 1.f : 0.f);
+                        update_transition(&spacer_interact_res.last_box->hot_t,
+                                          spacer_is_drop_target ? 1.f : 0.f,
+                                          15.f);
 
                         /* Capture spacer rect for HTCAPTION hit-test */
                         {
@@ -2347,10 +2330,12 @@ void ui_panel_end(PanelContext* panel_ctx)
 
                             if (zone_interact_res.last_box)
                             {
-                                update_transition(&zone_interact_res.last_box->hot_t, 12.f,
-                                                  has_active_drag ? 1.f : 0.f);
-                                update_transition(&zone_interact_res.last_box->active_t, 12.f,
-                                                  is_zone_hovered ? 1.f : 0.f);
+                                update_transition(&zone_interact_res.last_box->hot_t,
+                                                  has_active_drag ? 1.f : 0.f,
+                                                  12.f);
+                                update_transition(&zone_interact_res.last_box->active_t,
+                                                  is_zone_hovered ? 1.f : 0.f,
+                                                  12.f);
                             }
 
                             f32 hot_t = zone_interact_res.last_box ? zone_interact_res.last_box->hot_t : 0.f;
@@ -2456,8 +2441,9 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
         if (ui_lclicked(result.flags))
             result.last_box->anim_state = *check ? TRANSITION_REVERSE : TRANSITION_FORWARD;
         if (result.last_box->anim_state != TRANSITION_IDLE)
-            if (update_transition(&result.last_box->active_t, 18.f,
-                                  result.last_box->anim_state == TRANSITION_REVERSE ? 0.f : 1.f))
+            if (update_transition(&result.last_box->active_t,
+                                  result.last_box->anim_state == TRANSITION_REVERSE ? 0.f : 1.f,
+                                  18.f))
                 result.last_box->anim_state = TRANSITION_IDLE;
     }
     bg_color_transition = lerp_color(bg_color_transition, active_bg, result.last_box->active_t);
@@ -2823,7 +2809,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     }
 
     /* Copy and Cursor glide/trail animation */
-    update_transition(&state->copy_t, 1.5f, 0.f);
+    update_transition(&state->copy_t, 0.f, 1.5f);
     if (is_focused)
     {
         f32 cursor_x = 0.f;
@@ -2832,8 +2818,8 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
             String text_to_cursor = { state->base, state->cursor };
             cursor_x = get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size, g_ui_ctx->dpi);
         }
-        approach_f32(&state->cursor_glide_x, cursor_x, 34.f);
-        approach_f32(&state->cursor_trail_x, cursor_x, 12.f);
+        update_transition(&state->cursor_glide_x, cursor_x, 34.f);
+        update_transition(&state->cursor_trail_x, cursor_x, 12.f);
     }
 
     /* Create text field box */
@@ -2888,10 +2874,10 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                     }
                 }
             }
-            update_transition(&result.last_box->active_t, 20.f, 1.f);
+            update_transition(&result.last_box->active_t, 1.f, 20.f);
         }
         else
-            update_transition(&result.last_box->active_t, 18.f, 0.f);
+            update_transition(&result.last_box->active_t, 0.f, 18.f);
         border_color_transition.a = lerp_u8(0, border_color.a, result.last_box->active_t);
         box->cfg.rect_style.border_color = border_color_transition;
         {

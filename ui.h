@@ -608,7 +608,7 @@ void ui_set_desired_cursor(Cursor shape);
 
 // transition
 Color lerp_color(const Color a, const Color b, const f32 t);
-b32 update_transition(f32* transition, const f32 speed, const f32 target);
+b32 update_transition(f32* value, const f32 target, const f32 speed);
 void ui_request_frames(void);
 
 // scroll area
