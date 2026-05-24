@@ -1829,10 +1829,8 @@ void ui_panel_boundaries(const Panel* root, const Rect root_rect, const PanelThe
             if (result.last_box)
             {
                 update_transition(&result.last_box->hot_t,
-                                  ui_hovered(flags) || ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f,
-                                  20.f);
-                update_transition(&result.last_box->active_t,
-                                  ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f,
+                                  ui_hovered(flags) || ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f, 20.f);
+                update_transition(&result.last_box->active_t, ui_pressed(flags) || ui_dragging(flags) ? 1.f : 0.f,
                                   20.f);
             }
             f32 hot_t = result.last_box ? result.last_box->hot_t : 0.f;
@@ -1918,9 +1916,31 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
             PanelTab* active = panel_tab_get_active(cfg->panel);
             isize tab_index = 0;
 
+            /* Left inset filler — invisible box reserving space for left decoration buttons */
+            if (cfg->tab_bar_left_inset > 0)
+            {
+                UIBox* left_inset_container =
+                    ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .direction = LAYOUT_TOP_TO_BOTTOM });
+                {
+                    ui_box_end(ui_box_begin(&(BoxConfig){
+                        .sizing = { fixed(cfg->tab_bar_left_inset), grow({}) },
+                    }));
+
+                    /* Underline */
+                    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(cfg->tab_bar_left_inset), fixed(1) },
+                                                          .color = cfg->theme->tab_border }));
+                }
+                ui_box_end(left_inset_container);
+
+                /* Right splitter */
+                ui_box_end(
+                    ui_box_begin(&(BoxConfig){ .sizing = { fixed(1), grow({}) }, .color = cfg->theme->tab_border }));
+            }
+
             ScrollContext tab_bar_scroll_ctx = ui_scrollable_area_begin(&(ScrollableAreaConfig){
                 .hash_str = str_fmt(HASH_STR_MAX_LENGTH, "panel_%u (scroll area)", cfg->panel->id),
-                .sizing = { fit({ .max = rect.xmax - rect.xmin - cfg->tab_bar_right_inset - 1 }), // 1 is boundary width
+                .sizing = { fit({ .max =
+                                      rect.xmax - rect.xmin - cfg->tab_bar_right_inset - cfg->tab_bar_left_inset - 1 }),
                             fixed(tab_bar_height) },
                 .bg = cfg->theme->tab_bg,
                 .thumb_color = cfg->theme->scrollbar_thumb,
@@ -1942,8 +1962,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                         if (tab_interact_res.last_box)
                             update_transition(
                                 &tab_interact_res.last_box->hot_t,
-                                ui_drag_over(tab_interact_res.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f,
-                                15.f);
+                                ui_drag_over(tab_interact_res.flags) && g_ui_ctx->drag_payload_size ? 1.f : 0.f, 15.f);
                         f32 drop_t = tab_interact_res.last_box ? tab_interact_res.last_box->hot_t : 0.f;
 
                         /* Drag payload */
@@ -2124,8 +2143,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                     b32 spacer_is_drop_target = ui_drag_over(spacer_interact_res.flags) && g_ui_ctx->drag_payload_size;
                     if (spacer_interact_res.last_box)
                     {
-                        update_transition(&spacer_interact_res.last_box->hot_t,
-                                          spacer_is_drop_target ? 1.f : 0.f,
+                        update_transition(&spacer_interact_res.last_box->hot_t, spacer_is_drop_target ? 1.f : 0.f,
                                           15.f);
 
                         /* Capture spacer rect for HTCAPTION hit-test */
@@ -2330,11 +2348,9 @@ void ui_panel_end(PanelContext* panel_ctx)
 
                             if (zone_interact_res.last_box)
                             {
-                                update_transition(&zone_interact_res.last_box->hot_t,
-                                                  has_active_drag ? 1.f : 0.f,
+                                update_transition(&zone_interact_res.last_box->hot_t, has_active_drag ? 1.f : 0.f,
                                                   12.f);
-                                update_transition(&zone_interact_res.last_box->active_t,
-                                                  is_zone_hovered ? 1.f : 0.f,
+                                update_transition(&zone_interact_res.last_box->active_t, is_zone_hovered ? 1.f : 0.f,
                                                   12.f);
                             }
 
@@ -2442,8 +2458,7 @@ UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, 
             result.last_box->anim_state = *check ? TRANSITION_REVERSE : TRANSITION_FORWARD;
         if (result.last_box->anim_state != TRANSITION_IDLE)
             if (update_transition(&result.last_box->active_t,
-                                  result.last_box->anim_state == TRANSITION_REVERSE ? 0.f : 1.f,
-                                  18.f))
+                                  result.last_box->anim_state == TRANSITION_REVERSE ? 0.f : 1.f, 18.f))
                 result.last_box->anim_state = TRANSITION_IDLE;
     }
     bg_color_transition = lerp_color(bg_color_transition, active_bg, result.last_box->active_t);

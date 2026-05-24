@@ -31,6 +31,8 @@
 
 #define ICON_FONT_UTF8_OK     "\xEE\xA0\x80"
 #define ICON_FONT_UTF8_CANCEL "\xEE\xA0\x81"
+#define ICON_FONT_UTF8_MENU   "\xEF\x80\x88"
+#define ICON_FONT_UTF8_SEARCH "\xEF\x94\x8D"
 
 ///
 
@@ -558,6 +560,7 @@ typedef struct
     Rect root_rect;
     Rect panel_rect; // pre-computed panel rect (set by caller; zero = compute internally)
     f32 tab_bar_right_inset; // pixels to trim from tab bar right edge (0 = full width)
+    f32 tab_bar_left_inset;  // pixels to trim from tab bar left edge (0 = full width)
     const PanelTheme* theme;
     const Font* font_ui;
     f32 font_size;

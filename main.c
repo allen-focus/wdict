@@ -57,6 +57,8 @@ typedef enum
     TitleBarHot_Minimize,
     TitleBarHot_Maximize,
     TitleBarHot_Close,
+    TitleBarHot_Menu,
+    TitleBarHot_Search,
 } TitleBarHot;
 
 typedef struct
@@ -169,7 +171,10 @@ struct WindowContext
     Rect decoration_minimize;
     Rect decoration_maximize;
     Rect decoration_close;
-    f32 decoration_buttons_width;
+    Rect decoration_menu;
+    Rect decoration_search;
+    f32 decoration_right_buttons_width;
+    f32 decoration_left_buttons_width;
     Rect decoration_spacer_rects[MAX_DECORATION_SPACER];
     isize decoration_spacer_count;
     TitleBarHot tb_hovered_button;
@@ -899,14 +904,73 @@ static void decoration_overlay(WindowContext* ctx)
     f32 font_size = 12.f;
     f32 button_h = font_size * 2.5f + 2.f - 1;
     f32 button_w = button_h + 1; /* square-ish */
-    f32 total_w = button_w * 3;
-    f32 start_x = client_w - total_w;
+    f32 left_total_w = button_w * 2;
+    f32 right_total_w = button_w * 3;
+    f32 start_x = client_w - right_total_w;
 
-    ctx->decoration_buttons_width = total_w;
+    ctx->decoration_right_buttons_width = right_total_w;
+    ctx->decoration_left_buttons_width = left_total_w;
 
     b32 is_active = GetActiveWindow() == window;
     b32 is_maximized = IsZoomed(window);
     Color fg = is_active ? theme->hover_fg : theme->active_fg;
+
+    UIBox* left_buttons_container = ui_box_begin(&(BoxConfig){ .sizing = { fixed(left_total_w), fixed(button_h) },
+                                                               .child_gap = font_size * 0.25f,
+                                                               .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+                                                               .flags = BoxFlag_Float,
+                                                               .float_offset = { 0, -(client_h - 1) } });
+    {
+        f32 left_button_w = button_w * 0.8f;
+        f32 left_button_h = button_h * 0.8f;
+
+        /* menu */
+        {
+            UIBox* btn = ui_box_begin(&(BoxConfig){
+                .sizing = { fixed(left_button_w), fixed(left_button_h) },
+                .rect_style = { .corner_radius = 4 },
+                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+            });
+            {
+                b32 is_hovered = (ctx->tb_hovered_button == TitleBarHot_Menu);
+                UIBoxInteractResult ir = ui_box_interact(btn, str("decoration_menu"));
+                if (ir.last_box)
+                {
+                    btn->cfg.color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
+                    ctx->decoration_menu = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
+                                                   ir.last_box->position.x + ir.last_box->size.width,
+                                                   ir.last_box->position.y + ir.last_box->size.height };
+                }
+                ui_text(str(ICON_FONT_UTF8_MENU),
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ICON], .font_size = 10, .color = fg });
+            }
+            ui_box_end(btn);
+        }
+
+        /* search */
+        {
+            UIBox* btn = ui_box_begin(&(BoxConfig){
+                .sizing = { fixed(left_button_w), fixed(left_button_h) },
+                .rect_style = { .corner_radius = 4 },
+                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+            });
+            {
+                b32 is_hovered = (ctx->tb_hovered_button == TitleBarHot_Search);
+                UIBoxInteractResult ir = ui_box_interact(btn, str("decoration_search"));
+                if (ir.last_box)
+                {
+                    btn->cfg.color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
+                    ctx->decoration_search = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
+                                                     ir.last_box->position.x + ir.last_box->size.width,
+                                                     ir.last_box->position.y + ir.last_box->size.height };
+                }
+                ui_text(str(ICON_FONT_UTF8_SEARCH),
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ICON], .font_size = 10, .color = fg });
+            }
+            ui_box_end(btn);
+        }
+    }
+    ui_box_end(left_buttons_container);
 
     /* minimize */
     {
@@ -918,7 +982,7 @@ static void decoration_overlay(WindowContext* ctx)
         });
         {
             b32 is_hovered = (ctx->tb_hovered_button == TitleBarHot_Minimize);
-            UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_minimize"));
+            UIBoxInteractResult ir = ui_box_interact(btn, str("decoration_minimize"));
             if (ir.last_box)
             {
                 btn->cfg.color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
@@ -942,7 +1006,7 @@ static void decoration_overlay(WindowContext* ctx)
         });
         {
             b32 is_hovered = (ctx->tb_hovered_button == TitleBarHot_Maximize);
-            UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_maximize"));
+            UIBoxInteractResult ir = ui_box_interact(btn, str("decoration_maximize"));
             if (ir.last_box)
             {
                 btn->cfg.color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
@@ -966,7 +1030,7 @@ static void decoration_overlay(WindowContext* ctx)
         });
         {
             b32 is_hovered = (ctx->tb_hovered_button == TitleBarHot_Close);
-            UIBoxInteractResult ir = ui_box_interact(btn, str("##decoration_close"));
+            UIBoxInteractResult ir = ui_box_interact(btn, str("decoration_close"));
             if (ir.last_box)
             {
                 btn->cfg.color = is_hovered ? theme->destructive_bg : (Color){ 0, 0, 0, 0 };
@@ -1026,7 +1090,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
     }
 
     ctx->decoration_spacer_count = 0;
-    f32 decoration_w = ctx->decoration_buttons_width;
+    f32 decoration_w = ctx->decoration_right_buttons_width;
 
     for (Panel* p = ctx->root_panel; p; p = panel_iter_next(p))
     {
@@ -1035,22 +1099,29 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             continue;
 
         /* Pre-compute panel rect and reserve space for window caption buttons.
-           Only the top-right leaf panel needs the inset, otherwise tabs would
-           render underneath the minimize/maximize/close buttons. */
+           Only the top-right leaf panel needs the right inset, otherwise tabs would
+           render underneath the minimize/maximize/close buttons.
+           Only the top-left leaf panel needs the left inset, otherwise tabs would
+           render underneath the menu/search buttons. */
         Rect r = panel_calc_rect(p, rect);
         b32 touches_top = (r.ymin <= rect.ymin + 0.5f);
         b32 touches_right = (r.xmax >= rect.xmax - 0.5f);
-        f32 inset = 0;
+        b32 touches_left = (r.xmin <= rect.xmin + 0.5f);
+        f32 right_inset = 0;
+        f32 left_inset = 0;
         {
             if (touches_top && touches_right)
-                inset = decoration_w;
+                right_inset = decoration_w;
+            if (touches_top && touches_left)
+                left_inset = ctx->decoration_left_buttons_width;
         }
 
         PanelContext panel = ui_panel_begin(&(PanelConfig){
             .panel = p,
             .root_rect = rect,
             .panel_rect = r,
-            .tab_bar_right_inset = inset,
+            .tab_bar_right_inset = right_inset,
+            .tab_bar_left_inset = left_inset,
             .theme = &pt,
             .font_ui = &shared->fonts[FONT_INDEX_UI],
             .font_size = 12,
@@ -1320,6 +1391,12 @@ static void process_frame(WindowContext* ctx)
 
 static TitleBarHot titlebar_hit_test_button(const WindowContext* ctx, f32 logical_x, f32 logical_y)
 {
+    if (logical_x >= ctx->decoration_menu.xmin && logical_x < ctx->decoration_menu.xmax &&
+        logical_y >= ctx->decoration_menu.ymin && logical_y < ctx->decoration_menu.ymax)
+        return TitleBarHot_Menu;
+    if (logical_x >= ctx->decoration_search.xmin && logical_x < ctx->decoration_search.xmax &&
+        logical_y >= ctx->decoration_search.ymin && logical_y < ctx->decoration_search.ymax)
+        return TitleBarHot_Search;
     if (logical_x >= ctx->decoration_close.xmin && logical_x < ctx->decoration_close.xmax &&
         logical_y >= ctx->decoration_close.ymin && logical_y < ctx->decoration_close.ymax)
         return TitleBarHot_Close;
@@ -1463,8 +1540,9 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 if (ctx->tb_hovered_button == TitleBarHot_Maximize)
                     return HTMAXBUTTON;
 
-                /* minimize / close button rects → HTCAPTION (NC message routing) */
-                if (ctx->tb_hovered_button == TitleBarHot_Minimize || ctx->tb_hovered_button == TitleBarHot_Close)
+                /* menu / search / minimize / close button rects → HTCAPTION (NC message routing) */
+                if (ctx->tb_hovered_button == TitleBarHot_Menu || ctx->tb_hovered_button == TitleBarHot_Search ||
+                    ctx->tb_hovered_button == TitleBarHot_Minimize || ctx->tb_hovered_button == TitleBarHot_Close)
                     return HTCAPTION;
 
                 /* top resize zone — only for non-maximized windows */
@@ -1526,6 +1604,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     case TitleBarHot_Minimize:
                         ShowWindow(window, SW_MINIMIZE);
                         break;
+                    case TitleBarHot_Menu:
+                    case TitleBarHot_Search:
                     case TitleBarHot_None:
                     default:
                         return DefWindowProcW(window, message, wparam, lparam);
