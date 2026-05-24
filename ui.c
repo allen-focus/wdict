@@ -1252,7 +1252,10 @@ Color lerp_color(const Color a, const Color b, const f32 t)
 
 static b32 approach_f32(f32* value, const f32 target, const f32 speed)
 {
-    *value += (target - *value) * min(speed * g_ui_ctx->frame_delta_time, 1.f);
+    // Clamp animation timestep to avoid huge dt spikes after idle/sleep.
+    f32 anim_dt = min(g_ui_ctx->frame_delta_time, 1.f / 60.f);
+
+    *value += (target - *value) * min(speed * anim_dt, 1.f);
     b32 is_done = fabs(*value - target) < 0.001f;
     if (is_done)
         *value = target;
@@ -1265,8 +1268,11 @@ b32 update_transition(f32* transition, const f32 speed, const f32 target)
 {
     Assert(target >= 0.f && target <= 1.f);
 
+    // Clamp animation timestep to avoid huge dt spikes after idle/sleep.
+    f32 anim_dt = min(g_ui_ctx->frame_delta_time, 1.f / 60.f);
+
     b32 is_done = False;
-    *transition += (target - *transition) * speed * g_ui_ctx->frame_delta_time;
+    *transition += (target - *transition) * speed * anim_dt;
     *transition = clamp(*transition, 0.f, 1.f);
 
     if (fabs(*transition - target) < 0.001f)
