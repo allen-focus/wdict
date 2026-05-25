@@ -1751,13 +1751,38 @@ static void process_frame(WindowContext* ctx)
 
     isize arena_pos_backup = ui_frame_begin(ui_ctx);
     {
+        /* Save sibling ID before removal in case focused panel is removed */
+        u32 focused_panel_sibling_id = 0;
+        if (ctx->focused_panel && ctx->focused_panel->parent)
+        {
+            Panel* sib = (ctx->focused_panel->parent->child_a == ctx->focused_panel)
+                             ? ctx->focused_panel->parent->child_b
+                             : ctx->focused_panel->parent->child_a;
+            Panel* leaf = panel_find_first_leaf(sib);
+            if (leaf)
+                focused_panel_sibling_id = leaf->id;
+        }
+
         ctx->root_panel = panel_process_pending_removes(ctx->root_panel);
 
-        /* If focused panel was removed, fall back to first leaf */
+        /* If focused panel was removed, focus its sibling */
         if (ctx->focused_panel)
         {
             if (!panel_find_by_id(ctx->root_panel, ctx->focused_panel->id))
-                ctx->focused_panel = panel_find_first_leaf(ctx->root_panel);
+            {
+                if (focused_panel_sibling_id)
+                {
+                    Panel* sib = panel_find_by_id(ctx->root_panel, focused_panel_sibling_id);
+                    if (sib)
+                        ctx->focused_panel = sib;
+                    else
+                        ctx->focused_panel = panel_find_first_leaf(ctx->root_panel);
+                }
+                else
+                {
+                    ctx->focused_panel = panel_find_first_leaf(ctx->root_panel);
+                }
+            }
         }
 
         f32 client_w = (f32)ui_ctx->client_width;
