@@ -560,7 +560,7 @@ typedef struct
     Rect root_rect;
     Rect panel_rect; // pre-computed panel rect (set by caller; zero = compute internally)
     f32 tab_bar_right_inset; // pixels to trim from tab bar right edge (0 = full width)
-    f32 tab_bar_left_inset;  // pixels to trim from tab bar left edge (0 = full width)
+    f32 tab_bar_left_inset; // pixels to trim from tab bar left edge (0 = full width)
     const PanelTheme* theme;
     const Font* font_ui;
     f32 font_size;
@@ -577,6 +577,7 @@ typedef struct
     Panel* panel;
     ScrollContext scroll_ctx;
     UIBox* outer_box;
+    UIBoxInteractResult interact;
     f32 panel_w;
     f32 panel_h;
     Rect tab_bar_spacer_rect; // output: absolute logical rect of tab bar spacer (filled by ui_panel_begin)

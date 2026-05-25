@@ -1899,7 +1899,8 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         .float_offset = { rect.xmin, rect.ymin },
     });
     {
-        ui_box_interact(container, str_fmt(HASH_STR_MAX_LENGTH, "panel_%u", cfg->panel->id));
+        UIBoxInteractResult container_interact =
+            ui_box_interact(container, str_fmt(HASH_STR_MAX_LENGTH, "panel_%u", cfg->panel->id));
 
         /*
          * Tab bar
@@ -2250,6 +2251,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
         PanelContext panel_ctx = { .panel = cfg->panel,
                                    .scroll_ctx = panel_content_scroll_ctx,
                                    .outer_box = container,
+                                   .interact = container_interact,
                                    .panel_w = rect_w,
                                    .panel_h = rect_h,
                                    .tab_bar_spacer_rect = tab_bar_spacer_rect,

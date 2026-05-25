@@ -372,16 +372,12 @@ static void render_dictionary_content(const void* data, void* ctx)
     const Theme* theme = &shared->theme;
 
     ui_text((String){ (u8*)e->word, (isize)strlen(e->word) },
-            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                           .font_size = 16,
-                           .color = theme->accent_bg,
-                           .line_height = 24 });
+            &(TextConfig){
+                .font = &shared->fonts[FONT_INDEX_UI], .font_size = 16, .color = theme->accent_bg, .line_height = 24 });
 
     ui_text((String){ (u8*)e->definition, (isize)strlen(e->definition) },
-            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                           .font_size = 13,
-                           .color = theme->panel_fg,
-                           .line_height = 20 });
+            &(TextConfig){
+                .font = &shared->fonts[FONT_INDEX_UI], .font_size = 13, .color = theme->panel_fg, .line_height = 20 });
 
     ui_text((String){ (u8*)e->example, (isize)strlen(e->example) },
             &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
@@ -1592,11 +1588,6 @@ static void panel_container(WindowContext* ctx, const Rect rect)
            render underneath the menu/search buttons. */
         Rect r = panel_calc_rect(p, rect);
 
-        /* Click-to-focus: left-click within panel bounds sets it as the focused panel */
-        if (ctx->ui.mouse_lclick && ctx->ui.mouse_pos.x >= r.xmin && ctx->ui.mouse_pos.x < r.xmax &&
-            ctx->ui.mouse_pos.y >= r.ymin && ctx->ui.mouse_pos.y < r.ymax)
-            ctx->focused_panel = p;
-
         b32 touches_top = (r.ymin <= rect.ymin + 0.5f);
         b32 touches_right = (r.xmax >= rect.xmax - 0.5f);
         b32 touches_left = (r.xmin <= rect.xmin + 0.5f);
@@ -1626,6 +1617,9 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             .show_bottom_bar = (p == ctx->focused_panel),
         });
         {
+            if (ui_lclicked(panel.interact.flags))
+                ctx->focused_panel = panel.panel;
+
             PanelTab* active = panel_tab_get_active(p);
             if (active)
             {
@@ -1635,99 +1629,101 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 }
                 else
                 {
-                String tab_label = { active->name, active->name_len };
-                ui_text(tab_label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                                  .font_size = 14,
-                                                  .color = theme->accent_bg,
-                                                  .line_height = 20 });
+                    String tab_label = { active->name, active->name_len };
+                    ui_text(tab_label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                                      .font_size = 14,
+                                                      .color = theme->accent_bg,
+                                                      .line_height = 20 });
 
-                ui_text(str("   "), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL],
-                                                               .font_size = 11,
-                                                               .color = theme->panel_fg,
-                                                               .line_height = 16 });
-                ui_text(str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                       .font_size = 11,
-                                       .color = theme->panel_fg,
-                                       .line_height = 16 });
-                ui_text(str("Ctrl+T new tab. Ctrl+W close tab. F11 toggle theme."),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                       .font_size = 11,
-                                       .color = theme->panel_fg,
-                                       .line_height = 16 });
-                ui_text(str("Ctrl+Shift+Left/Right to reorder tabs."),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                       .font_size = 11,
-                                       .color = theme->panel_fg,
-                                       .line_height = 16 });
-                ui_text(str("Ctrl+Shift+N moves tab to next panel."),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                       .font_size = 11,
-                                       .color = theme->panel_fg,
-                                       .line_height = 16 });
-                ui_text(str("Ctrl+Shift+F/G to detach tab as new panel (H/V)."),
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                       .font_size = 11,
-                                       .color = theme->panel_fg,
-                                       .line_height = 16 });
+                    ui_text(str("   "), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL],
+                                                                   .font_size = 11,
+                                                                   .color = theme->panel_fg,
+                                                                   .line_height = 16 });
+                    ui_text(str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                           .font_size = 11,
+                                           .color = theme->panel_fg,
+                                           .line_height = 16 });
+                    ui_text(str("Ctrl+T new tab. Ctrl+W close tab. F11 toggle theme."),
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                           .font_size = 11,
+                                           .color = theme->panel_fg,
+                                           .line_height = 16 });
+                    ui_text(str("Ctrl+Shift+Left/Right to reorder tabs."),
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                           .font_size = 11,
+                                           .color = theme->panel_fg,
+                                           .line_height = 16 });
+                    ui_text(str("Ctrl+Shift+N moves tab to next panel."),
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                           .font_size = 11,
+                                           .color = theme->panel_fg,
+                                           .line_height = 16 });
+                    ui_text(str("Ctrl+Shift+F/G to detach tab as new panel (H/V)."),
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                           .font_size = 11,
+                                           .color = theme->panel_fg,
+                                           .line_height = 16 });
 
-                UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
-                                                        .child_gap = s_child_gap_medium,
-                                                        .direction = LAYOUT_LEFT_TO_RIGHT });
-                {
-                    /* Button: create window */
-                    UISignalFlags cw_button_flags =
-                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "New Window##panel_cw_button_%u", p->id),
-                                  &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                    UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+                                                            .child_gap = s_child_gap_medium,
+                                                            .direction = LAYOUT_LEFT_TO_RIGHT });
+                    {
+                        /* Button: create window */
+                        UISignalFlags cw_button_flags =
+                            ui_button(str_fmt(HASH_STR_MAX_LENGTH, "New Window##panel_cw_button_%u", p->id),
+                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                      (Color){ 0 }, theme->hover_fg, theme->hover_bg);
+                        if (ui_lclicked(cw_button_flags))
+                            cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"));
+
+                        /* Button: split horizontally */
+                        UISignalFlags sph_button_flags =
+                            ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Horizontally##panel_sph_button_%u", p->id),
+                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                      (Color){ 0 }, theme->hover_fg, theme->hover_bg);
+                        if (ui_lclicked(sph_button_flags))
+                            cmd_queue_push(&shared->cmd_queue,
+                                           str_fmt(CMD_STR_MAX_LENGTH, "panel.split_h panel=%u", p->id));
+
+                        /* Button: split vertically */
+                        UISignalFlags spv_button_flags =
+                            ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Vertically##panel_spv_button_%u", p->id),
+                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                      (Color){ 0 }, theme->hover_fg, theme->hover_bg);
+                        if (ui_lclicked(spv_button_flags))
+                            cmd_queue_push(&shared->cmd_queue,
+                                           str_fmt(CMD_STR_MAX_LENGTH, "panel.split_v panel=%u", p->id));
+                    }
+                    ui_box_end(box);
+
+                    UIBox* box2 = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+                                                             .child_gap = s_child_gap_big,
+                                                             .alignment = { ALIGN_START, ALIGN_CENTER } });
+                    {
+                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "nothing##world_%u", p->id),
+                                  &shared->fonts[FONT_INDEX_MONO], 11, (Sizing){ fixed(80), fit({}) }, s_padding_small,
                                   (Color){ 0 }, theme->hover_fg, theme->hover_bg);
-                    if (ui_lclicked(cw_button_flags))
-                        cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"));
+                        ui_text_field(&ctx->text_edit_1,
+                                      str_fmt(HASH_STR_MAX_LENGTH, "placeholder##text_field_%u", p->id),
+                                      &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_small,
+                                      theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
+                                      theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash);
+                        UISignalFlags flags = ui_switchbox(
+                            str_fmt(HASH_STR_MAX_LENGTH, "switch box_%u", p->id), &shared->fonts[FONT_INDEX_ICON],
+                            &ctx->check, theme->hover_bg, theme->accent_bg, theme->accent_fg, theme->shadow);
+                        if (ui_lclicked(flags))
+                            ctx->check = !ctx->check;
+                    }
+                    ui_box_end(box2);
 
-                    /* Button: split horizontally */
-                    UISignalFlags sph_button_flags =
-                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Horizontally##panel_sph_button_%u", p->id),
-                                  &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                  (Color){ 0 }, theme->hover_fg, theme->hover_bg);
-                    if (ui_lclicked(sph_button_flags))
-                        cmd_queue_push(&shared->cmd_queue,
-                                       str_fmt(CMD_STR_MAX_LENGTH, "panel.split_h panel=%u", p->id));
-
-                    /* Button: split vertically */
-                    UISignalFlags spv_button_flags =
-                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Vertically##panel_spv_button_%u", p->id),
-                                  &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
-                                  (Color){ 0 }, theme->hover_fg, theme->hover_bg);
-                    if (ui_lclicked(spv_button_flags))
-                        cmd_queue_push(&shared->cmd_queue,
-                                       str_fmt(CMD_STR_MAX_LENGTH, "panel.split_v panel=%u", p->id));
-                }
-                ui_box_end(box);
-
-                UIBox* box2 = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
-                                                         .child_gap = s_child_gap_big,
-                                                         .alignment = { ALIGN_START, ALIGN_CENTER } });
-                {
-                    ui_button(str_fmt(HASH_STR_MAX_LENGTH, "nothing##world_%u", p->id), &shared->fonts[FONT_INDEX_MONO],
-                              11, (Sizing){ fixed(80), fit({}) }, s_padding_small, (Color){ 0 }, theme->hover_fg,
-                              theme->hover_bg);
-                    ui_text_field(&ctx->text_edit_1, str_fmt(HASH_STR_MAX_LENGTH, "placeholder##text_field_%u", p->id),
-                                  &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_small,
-                                  theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
-                                  theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash);
-                    UISignalFlags flags = ui_switchbox(str_fmt(HASH_STR_MAX_LENGTH, "switch box_%u", p->id),
-                                                       &shared->fonts[FONT_INDEX_ICON], &ctx->check, theme->hover_bg,
-                                                       theme->accent_bg, theme->accent_fg, theme->shadow);
-                    if (ui_lclicked(flags))
-                        ctx->check = !ctx->check;
-                }
-                ui_box_end(box2);
-
-                /* Text test */
-                // TODO(important):
-                //       The current text width calculation is VERY heavy (and probably shouldn't be called so many
-                //       times!). Just tried 10 rounds, and the FPS dropped to ~8 frames per second on my laptop. With
-                //       `.wrap = False`, 10 rounds give ~70 FPS. With 0 rounds, ~110 FPS.
-                // clang-format off
+                    /* Text test */
+                    // TODO(important):
+                    //       The current text width calculation is VERY heavy (and probably shouldn't be called so many
+                    //       times!). Just tried 10 rounds, and the FPS dropped to ~8 frames per second on my laptop.
+                    //       With
+                    //       `.wrap = False`, 10 rounds give ~70 FPS. With 0 rounds, ~110 FPS.
+                    // clang-format off
                 for (isize i = 0; i < 1; i++)
                 {
                     ui_text(
@@ -1757,7 +1753,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                            .line_height = 20,
                                            .wrap = True });
                 }
-                // clang-format on
+                    // clang-format on
                 }
             }
         }
