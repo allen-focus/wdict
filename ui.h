@@ -516,7 +516,14 @@ typedef struct
     UIBox* last_content;
     Color thumb_color;
     b32 fixed_track;
-    f32 cursor_content_x;
+
+    /* Caller requests 'keep this region visible':
+       scroll_hint = { x, y } — position of the item/point (-1 disables that axis).
+       scroll_hint_h       — height of the item for Y-axis (>0 = rectangle; 0/-1 = point).
+       The engine replies by adjusting scroll_anim.target — hence "hint", not "target". */
+    Position scroll_hint;
+    f32 scroll_hint_h;
+
     f32 scroll_margin;
 } ScrollContext;
 
@@ -526,10 +533,12 @@ typedef struct
     Sizing sizing;
     Padding padding;
     f32 child_gap;
+    f32 corner_radius;
     Alignment alignment;
     LayoutDirection direction;
     Color bg;
     Color thumb_color;
+    f32 scroll_margin;
     b32 fixed_track;
 } ScrollableAreaConfig;
 

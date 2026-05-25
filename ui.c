@@ -1585,11 +1585,15 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
     ScrollContext scroll_ctx = { 0 };
     scroll_ctx.thumb_color = cfg->thumb_color;
     scroll_ctx.fixed_track = cfg->fixed_track;
-    scroll_ctx.cursor_content_x = -1.f;
+    scroll_ctx.scroll_hint = (Position){ -1.f, -1.f }; /* {-1,-1} = "no hint" */
+    scroll_ctx.scroll_hint_h = -1.f;
+    scroll_ctx.scroll_margin = cfg->scroll_margin;
 
     /* Create area box */
-    scroll_ctx.area = ui_box_begin(&(BoxConfig){
-        .sizing = cfg->sizing, .color = cfg->bg, .flags = BoxFlag_Clip, .rect_style = { .corner_radius = 8 } });
+    scroll_ctx.area = ui_box_begin(&(BoxConfig){ .sizing = cfg->sizing,
+                                                 .color = cfg->bg,
+                                                 .rect_style = { .corner_radius = cfg->corner_radius },
+                                                 .flags = BoxFlag_Clip });
 
     /* Handle interaction and animation */
     UIBoxInteractResult result = ui_box_interact(scroll_ctx.area, cfg->hash_str);
@@ -1676,21 +1680,41 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
             }
         }
 
-        /* Auto-scroll to keep cursor visible with scrolloff margin */
-        if (scroll_ctx.cursor_content_x >= 0.f && scroll_ctx.max_delta.x > 0)
+        /* Auto-scroll X — text cursor (point: width=0 by convention) */
+        if (scroll_ctx.scroll_hint.x >= 0.f && scroll_ctx.max_delta.x > 0)
         {
             f32 viewport_width = virtual_area_size.width;
             f32 current_scroll = last_area->scroll_delta.x;
             f32 margin = scroll_ctx.scroll_margin;
             f32 target = current_scroll;
 
-            if (scroll_ctx.cursor_content_x < current_scroll + margin)
-                target = max(0.f, scroll_ctx.cursor_content_x - margin);
-            else if (scroll_ctx.cursor_content_x > current_scroll + viewport_width - margin)
-                target = min(scroll_ctx.max_delta.x, scroll_ctx.cursor_content_x - viewport_width + margin);
+            if (scroll_ctx.scroll_hint.x < current_scroll + margin)
+                target = max(0.f, scroll_ctx.scroll_hint.x - margin);
+            else if (scroll_ctx.scroll_hint.x > current_scroll + viewport_width - margin)
+                target = min(scroll_ctx.max_delta.x, scroll_ctx.scroll_hint.x - viewport_width + margin);
 
             if (target != current_scroll)
                 start_timed_lerp(&last_area->scroll_anim_x, current_scroll, target, g_ui_ctx->current_time,
+                                 SCROLL_ANIM_DURATION);
+        }
+
+        /* Auto-scroll Y — selected item (rectangle: hint.y + hint_h = bottom) */
+        if (scroll_ctx.scroll_hint.y >= 0.f && scroll_ctx.max_delta.y > 0)
+        {
+            f32 viewport_height = virtual_area_size.height;
+            f32 current_scroll = last_area->scroll_delta.y;
+            f32 margin = scroll_ctx.scroll_margin;
+            f32 target = current_scroll;
+            f32 item_top = scroll_ctx.scroll_hint.y;
+            f32 item_bot = scroll_ctx.scroll_hint_h >= 0 ? item_top + scroll_ctx.scroll_hint_h : item_top;
+
+            if (item_top < current_scroll + margin)
+                target = max(0.f, item_top - margin);
+            else if (item_bot > current_scroll + viewport_height - margin)
+                target = min(scroll_ctx.max_delta.y, item_bot - viewport_height + margin);
+
+            if (target != current_scroll)
+                start_timed_lerp(&last_area->scroll_anim_y, current_scroll, target, g_ui_ctx->current_time,
                                  SCROLL_ANIM_DURATION);
         }
 
@@ -2944,12 +2968,12 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                 .hash_str = str_concat(&g_ui_ctx->arena, text_hash.hash_str, str(" (scroll area)")),
                 .sizing = { grow({}), grow({}) },
                 .thumb_color = thumb_color,
+                .scroll_margin = font_size * 2.f,
                 .fixed_track = True });
-            scroll_ctx.scroll_margin = font_size * 2.f;
             if (cursor_moved && state->text_len > 0)
             {
                 String text_to_cursor = { state->base, state->cursor };
-                scroll_ctx.cursor_content_x =
+                scroll_ctx.scroll_hint.x =
                     get_text_width(renderer, g_ui_ctx->raster_cache, text_to_cursor, font, font_size, g_ui_ctx->dpi) +
                     padding.left;
             }
