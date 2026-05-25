@@ -42,6 +42,8 @@ typedef struct
     char title[44]; // UTF-8 tab name, null-terminated
 } TabDragPayload;
 
+typedef void (*TabRenderFn)(const void* content_data, void* ctx);
+
 typedef struct PanelTab PanelTab;
 struct PanelTab
 {
@@ -50,6 +52,9 @@ struct PanelTab
     PanelTab* next;
     u32 id;
     b32 frame_declared;
+
+    const void* content_data;
+    TabRenderFn render_fn;
 };
 
 typedef struct Panel Panel;

@@ -365,6 +365,38 @@ static FieldDef s_word_fields[] = {
     { "word", s_word_extract, 1.0f },
 };
 
+static void render_dictionary_content(const void* data, void* ctx)
+{
+    const DictionaryEntry* e = (const DictionaryEntry*)data;
+    AppShared* shared = (AppShared*)ctx;
+    const Theme* theme = &shared->theme;
+
+    ui_text((String){ (u8*)e->word, (isize)strlen(e->word) },
+            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                           .font_size = 16,
+                           .color = theme->accent_bg,
+                           .line_height = 24 });
+
+    ui_text((String){ (u8*)e->definition, (isize)strlen(e->definition) },
+            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                           .font_size = 13,
+                           .color = theme->panel_fg,
+                           .line_height = 20 });
+
+    ui_text((String){ (u8*)e->example, (isize)strlen(e->example) },
+            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
+                           .font_size = 11,
+                           .color = theme->panel_fg,
+                           .line_height = 18,
+                           .wrap = True });
+}
+
+static void panel_tab_set_dictionary(PanelTab* tab, const DictionaryEntry* entry)
+{
+    tab->content_data = (const void*)entry;
+    tab->render_fn = render_dictionary_content;
+}
+
 //
 // Window Creation
 //
@@ -1363,7 +1395,18 @@ static void decoration_overlay(WindowContext* ctx)
                                     row->cfg.color = theme->hover_bg;
 
                                 if (ui_lclicked(rir.flags))
+                                {
+                                    const DictionaryEntry* entry = (const DictionaryEntry*)sr[i].entry;
+                                    PanelTab* active = panel_tab_get_active(ctx->focused_panel);
+                                    if (active)
+                                    {
+                                        panel_tab_set_dictionary(active, entry);
+                                        isize word_len = strlen(entry->word);
+                                        memcpy(active->name, entry->word, word_len);
+                                        active->name_len = word_len;
+                                    }
                                     result_clicked = True;
+                                }
 
                                 /* render word with fuzzy-match highlighting */
                                 TextConfig normal_cfg = {
@@ -1586,6 +1629,12 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             PanelTab* active = panel_tab_get_active(p);
             if (active)
             {
+                if (active->render_fn)
+                {
+                    active->render_fn(active->content_data, shared);
+                }
+                else
+                {
                 String tab_label = { active->name, active->name_len };
                 ui_text(tab_label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                                   .font_size = 14,
@@ -1709,6 +1758,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                            .wrap = True });
                 }
                 // clang-format on
+                }
             }
         }
         ui_panel_end(&panel);
