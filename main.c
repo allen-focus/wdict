@@ -185,6 +185,7 @@ struct WindowContext
     u8 search_text_buf[SEARCH_QUERY_BUF];
     TextEditState search_text_edit;
     i32 search_selected_index;
+    b32 search_activate_pending;
 
     /* decoration (window-level overlay) */
     Rect decoration_minimize;
@@ -206,6 +207,8 @@ struct WindowContext
     b32 in_frame;
     b32 mouse_tracked;
 };
+
+static u64 s_search_input_hash;
 
 static u32 s_window_next_id = 1; /* 0 reserved for none */
 static u16 s_utf16_pending_high = 0;
@@ -548,6 +551,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     ctx->search_text_edit.base = ctx->search_text_buf;
     ctx->search_text_edit.size = SEARCH_QUERY_BUF;
     ctx->search_selected_index = -1;
+    ctx->search_activate_pending = False;
 
     /* Add to window list */
     window_list_add(shared, ctx);
@@ -1321,9 +1325,17 @@ static void decoration_overlay(WindowContext* ctx)
             sr_count = n;
         }
 
-        /* clamp selected index */
-        if (ctx->search_selected_index >= sr_count)
-            ctx->search_selected_index = sr_count > 0 ? sr_count - 1 : -1;
+        /* wrap selected index + auto-select first item */
+        if (sr_count > 0)
+        {
+            if (ctx->search_selected_index < 0)
+                ctx->search_selected_index = 0;
+            ctx->search_selected_index %= sr_count;
+        }
+        else
+        {
+            ctx->search_selected_index = -1;
+        }
 
         UIBox* popup = ui_box_begin(&(BoxConfig) {
             .sizing = { fixed(popup_w), fixed(popup_h) }, .flags = BoxFlag_Float,
@@ -1405,8 +1417,18 @@ static void decoration_overlay(WindowContext* ctx)
 
                                     if (ui_hovered(rir.flags))
                                         row->cfg.color = theme->hover_bg;
+                                    else if (i == ctx->search_selected_index)
+                                        row->cfg.color = theme->active_bg;
 
-                                    if (ui_lclicked(rir.flags))
+                                    b32 activate_this = ui_lclicked(rir.flags);
+                                    if (!activate_this && ctx->search_activate_pending &&
+                                        i == ctx->search_selected_index)
+                                    {
+                                        ctx->search_activate_pending = False;
+                                        activate_this = True;
+                                    }
+
+                                    if (activate_this)
                                     {
                                         const DictionaryEntry* entry = (const DictionaryEntry*)sr[i].entry;
                                         PanelTab* active = panel_tab_get_active(ctx->focused_panel);
@@ -1476,7 +1498,10 @@ static void decoration_overlay(WindowContext* ctx)
 
                         /* close popup only if the click wasn't consumed by the scrollbar */
                         if (result_clicked && ui_ctx->mouse_captured_by_hash != scroll.hash)
+                        {
                             ctx->search_popup.open = False;
+                            ctx->search_selected_index = -1;
+                        }
                     }
                     ui_box_end(scroll_container);
                 }
@@ -2197,7 +2222,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 if (ctx->menu_popup.open && ctx->tb_hovered_button != TitleBarHot_Menu)
                     ctx->menu_popup.open = False;
                 if (ctx->search_popup.open && ctx->tb_hovered_button != TitleBarHot_Search)
+                {
                     ctx->search_popup.open = False;
+                    ctx->search_selected_index = -1;
+                    ctx->search_activate_pending = False;
+                }
                 if (ctx->tb_hovered_button != TitleBarHot_None)
                 {
                     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
@@ -2228,6 +2257,14 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         break;
                     case TitleBarHot_Search:
                         ctx->search_popup.open = !ctx->search_popup.open;
+                        if (ctx->search_popup.open)
+                            ctx->ui.focused_hash = s_search_input_hash;
+                        else
+                        {
+                            ctx->ui.focused_hash = 0;
+                            ctx->search_selected_index = -1;
+                            ctx->search_activate_pending = False;
+                        }
                         break;
                     case TitleBarHot_None:
                     default:
@@ -2368,6 +2405,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     if (!(lx >= p->rect.xmin && lx < p->rect.xmax && ly >= p->rect.ymin && ly < p->rect.ymax))
                     {
                         p->open = False;
+                        if (p == &ctx->search_popup)
+                        {
+                            ctx->search_selected_index = -1;
+                            ctx->search_activate_pending = False;
+                        }
                         break;
                     }
             }
@@ -2489,6 +2531,23 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
             if (wparam == VK_ESCAPE)
             {
+                /* Close open overlays before destroying the window */
+                if (ctx)
+                {
+                    OverlayPopup* popups[] = { &ctx->search_popup, &ctx->menu_popup };
+                    for (isize i = 0; i < (isize)countof(popups); i++)
+                    {
+                        if (popups[i]->open)
+                        {
+                            popups[i]->open = False;
+                            ctx->search_selected_index = -1;
+                            ctx->search_activate_pending = False;
+                            ctx->ui.focused_hash = 0;
+                            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                            return 0;
+                        }
+                    }
+                }
                 DestroyWindow(window);
                 return 0;
             }
@@ -2552,6 +2611,22 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     else
                         cmd_queue_push(&shared->cmd_queue, cmd_text);
                     return 0;
+                }
+            }
+
+            /* Popup navigation — active when a popup's text field has focus */
+            if (ctx && ctx->search_popup.open && ctx->ui.focused_hash == s_search_input_hash)
+            {
+                switch (wparam)
+                {
+                    case VK_UP:   ctx->search_selected_index--; return 0;
+                    case VK_DOWN: ctx->search_selected_index++; return 0;
+                    case VK_RETURN:
+                        if (ctx->search_selected_index >= 0)
+                            ctx->search_activate_pending = True;
+                        return 0;
+                    case 'P': if (ctrl) { ctx->search_selected_index--; return 0; } break;
+                    case 'N': if (ctrl) { ctx->search_selected_index++; return 0; } break;
                 }
             }
 
@@ -2811,6 +2886,9 @@ i32 WinMainCRTStartup()
     search_init(&shared.word_search, s_dictionary, s_dictionary_size, sizeof(DictionaryEntry), s_word_fields,
                 countof(s_word_fields), s_word_extract);
     search_start(&shared.word_search);
+
+    /* Pre-compute focus hashes for popup input routing */
+    s_search_input_hash = fnv1a_64("search input", 12);
 
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
