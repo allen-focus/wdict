@@ -1797,6 +1797,36 @@ static void process_frame(WindowContext* ctx)
 
     isize arena_pos_backup = ui_frame_begin(ui_ctx);
     {
+        /* Input pre-pass: if any open overlay popup covers the mouse,
+           claim input for this frame.  During the panel pass we exile the
+           mouse to (-FLT_MAX, -FLT_MAX) so that rect_contains_point fails
+           for every box — panels and their widgets see no hover, click,
+           drag-anchor, or scroll.  Mouse state is restored before the
+           overlay rendering pass so popups see the real input.
+           This keeps Core (ui.c) completely unaware of overlay Z-order. */
+        b32 overlay_claims_input = False;
+        {
+            f32 mx = ui_ctx->mouse_pos.x;
+            f32 my = ui_ctx->mouse_pos.y;
+            OverlayPopup* popups[] = { &ctx->search_popup, &ctx->menu_popup };
+            for (isize i = 0; i < countof(popups); i++)
+            {
+                OverlayPopup* p = popups[i];
+                if (p->open && p->rect.xmax > p->rect.xmin &&
+                    mx >= p->rect.xmin && mx < p->rect.xmax &&
+                    my >= p->rect.ymin && my < p->rect.ymax)
+                {
+                    overlay_claims_input = True;
+                    break;
+                }
+            }
+        }
+
+        /* Per-frame snapshot of mouse input state, restored after the
+           panel pass so overlay rendering sees the real mouse position. */
+        Position saved_mouse_pos, saved_mouse_delta, saved_mouse_scroll;
+        b32 saved_lclick, saved_rclick, saved_mclick, saved_press, saved_dclick;
+
         /* Save sibling ID before removal in case focused panel is removed */
         u32 focused_panel_sibling_id = 0;
         if (ctx->focused_panel && ctx->focused_panel->parent)
@@ -1833,6 +1863,33 @@ static void process_frame(WindowContext* ctx)
 
         f32 client_w = (f32)ui_ctx->client_width;
         f32 client_h = (f32)ui_ctx->client_height;
+
+        /* When an overlay is open and covers the mouse, exile the mouse
+           position to (-FLT_MAX, -FLT_MAX) for the panel pass.
+           Every UI box's rect_contains_point check fails naturally —
+           no per-widget guards required.  Scroll delta, drag delta, and
+           all click/press flags are also cleared as defense-in-depth. */
+        if (overlay_claims_input)
+        {
+            saved_mouse_pos    = ui_ctx->mouse_pos;
+            saved_mouse_delta  = ui_ctx->mouse_delta;
+            saved_mouse_scroll = ui_ctx->mouse_scroll_delta;
+            saved_lclick       = ui_ctx->mouse_lclick;
+            saved_rclick       = ui_ctx->mouse_rclick;
+            saved_mclick       = ui_ctx->mouse_mclick;
+            saved_press        = ui_ctx->mouse_press;
+            saved_dclick       = ui_ctx->mouse_double_click;
+
+            ui_ctx->mouse_pos.x        = -FLT_MAX;
+            ui_ctx->mouse_pos.y        = -FLT_MAX;
+            ui_ctx->mouse_delta        = (Position){0};
+            ui_ctx->mouse_scroll_delta = (Position){0};
+            ui_ctx->mouse_lclick       = False;
+            ui_ctx->mouse_rclick       = False;
+            ui_ctx->mouse_mclick       = False;
+            ui_ctx->mouse_press        = False;
+            ui_ctx->mouse_double_click = False;
+        }
 
         UIBox* root_box_container = ui_box_begin(&(BoxConfig){
             .sizing = { fixed(client_w), fixed(client_h) },
@@ -1902,6 +1959,20 @@ static void process_frame(WindowContext* ctx)
                     }
                 }
                 ui_box_end(content);
+
+                /* Restore real mouse state so overlay popups (search,
+                   menu, context menu) can process input normally. */
+                if (overlay_claims_input)
+                {
+                    ui_ctx->mouse_pos           = saved_mouse_pos;
+                    ui_ctx->mouse_delta         = saved_mouse_delta;
+                    ui_ctx->mouse_scroll_delta  = saved_mouse_scroll;
+                    ui_ctx->mouse_lclick        = saved_lclick;
+                    ui_ctx->mouse_rclick        = saved_rclick;
+                    ui_ctx->mouse_mclick        = saved_mclick;
+                    ui_ctx->mouse_press         = saved_press;
+                    ui_ctx->mouse_double_click  = saved_dclick;
+                }
 
                 /* decoration buttons float on top of panels at top-right */
                 decoration_overlay(ctx);
