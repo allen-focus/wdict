@@ -1588,7 +1588,8 @@ ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg)
     scroll_ctx.cursor_content_x = -1.f;
 
     /* Create area box */
-    scroll_ctx.area = ui_box_begin(&(BoxConfig){ .sizing = cfg->sizing, .color = cfg->bg, .flags = BoxFlag_Clip });
+    scroll_ctx.area = ui_box_begin(&(BoxConfig){
+        .sizing = cfg->sizing, .color = cfg->bg, .flags = BoxFlag_Clip, .rect_style = { .corner_radius = 8 } });
 
     /* Handle interaction and animation */
     UIBoxInteractResult result = ui_box_interact(scroll_ctx.area, cfg->hash_str);
@@ -2650,16 +2651,17 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg,
                             const Color border_color, const Color fg, const Color thumb_color,
                             const Color cursor_bar_color, const Color cursor_trail_color, const Color selection_color,
-                            const Color selection_flash_color)
+                            const Color selection_flash_color, const b32 auto_focus)
 {
     TracyCZoneNC(ctx_tf, "TextField", TracyColor_Widget, TRACY_SUBSYSTEMS & TracySys_Widget);
+
     // clang-format off
     get_text_height_fn get_text_height = g_ui_ctx->render_fn.get_text_height;
     get_text_width_fn get_text_width = g_ui_ctx->render_fn.get_text_width;
     struct Renderer* renderer = g_ui_ctx->renderer;
     f32 text_height = get_text_height(renderer, g_ui_ctx->raster_cache, text_with_hash_str, font, font_size, g_ui_ctx->dpi);
     SizingAxis text_container_height = fixed(text_height + padding.top + padding.bottom);
-    Color placeholder_color = { fg.r, fg.g, fg.b, fg.a / 2 };
+    Color placeholder_color = { fg.r, fg.g, fg.b, fg.a / 4 };
     TextConfig text_cfg = { .font = font, .font_size = font_size, .line_height = font_size, .wrap = False };
     // clang-format on
 
@@ -2671,7 +2673,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     u64 text_hash_key = fnv1a_64(text_hash.hash_str.data, text_hash.hash_str.len);
     u64 content_hash = fnv1a_64_continue(text_hash_key, " (content box)", 14);
     isize cursor_before = state->cursor;
-    b32 is_focused = text_hash_key == g_ui_ctx->focused_hash;
+    b32 is_focused = (text_hash_key == g_ui_ctx->focused_hash) || auto_focus;
     if (is_focused)
     {
         /* IME composition: delete previous range, then insert new composition */
@@ -2864,7 +2866,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
     }
 
     /* Copy and Cursor glide/trail animation */
-    update_transition(&state->copy_t, 0.f, 1.5f);
+    update_transition(&state->copy_t, 0.f, 2.5f);
     if (is_focused)
     {
         f32 cursor_x = 0.f;

@@ -451,6 +451,7 @@ struct UIContext
     b32 mouse_mclick;
     b32 mouse_press;
     b32 mouse_double_click;
+
     f64 last_lclick_time;
     Position last_lclick_pos;
     Cursor desired_cursor;
@@ -637,7 +638,7 @@ UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_st
                             const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg,
                             const Color border_color, const Color fg, const Color thumb_color,
                             const Color cursor_bar_color, const Color cursor_trail_color, const Color selection_color,
-                            const Color selection_flash_color);
+                            const Color selection_flash_color, const b32 auto_focus);
 
 //
 // Global Variables

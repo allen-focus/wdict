@@ -43,6 +43,7 @@
 #define MAX_WINDOWS           16
 #define MAX_DECORATION_SPACER 16
 #define CMD_ARENA_SIZE        KB(64)
+#define SEARCH_DISPLAY_MAX    100
 
 typedef enum
 {
@@ -95,6 +96,7 @@ typedef struct
     Color warning_bg;
     Color warning_fg;
 
+    Color hint;
     Color border;
     Color scrollbar_thumb;
     Color scrollbar_track;
@@ -236,6 +238,7 @@ static const Theme s_theme_light = {
     .warning_bg       = rgba(229, 165, 10,  255),
     .warning_fg       = rgba(0,   0,   0,   255),
 
+    .hint             = rgba(119, 118, 123, 255),
     .border           = rgba(192, 191, 188, 255),
     .scrollbar_thumb  = rgba(94,  92,  100, 80 ),
     .scrollbar_track  = rgba(192, 191, 188, 80 ),
@@ -280,6 +283,7 @@ static const Theme s_theme_dark = {
     .warning_bg       = rgba(205, 147, 9,   255),
     .warning_fg       = rgba(0,   0,   0,   255),
 
+    .hint             = rgba(154, 153, 150, 255),
     .border           = rgba(94,  92,  100, 255),
     .scrollbar_thumb  = rgba(192, 191, 188, 80 ),
     .scrollbar_track  = rgba(94,  92,  100, 80 ),
@@ -297,15 +301,15 @@ static const Theme s_theme_dark = {
 
     .cursor_bar       = rgba(255, 255, 255, 255),
     .cursor_trail     = rgba(246, 245, 244, 255),
-    .selection        = rgba(255, 192, 87,  255),
+    .selection        = rgba(94,  92,  100, 255),
     .selection_flash  = rgba(255, 192, 87,  255),
 };
 
-static Padding s_padding_medium = { 20, 20, 20, 20 };
-static Padding s_padding_small  = { 10, 10, 10, 10 };
+static Padding s_padding_big    = { 20, 20, 20, 20 };
+static Padding s_padding_medium = { 10, 10, 10, 10 };
 
-static f32 s_child_gap_big    = 20;
-static f32 s_child_gap_medium = 10;
+static f32 s_child_gap_big     = 20;
+static f32 s_child_gap_medium  = 10;
 // clang-format on
 
 //
@@ -1150,6 +1154,10 @@ static void cmd_panel_resize_right(void* userdata, String cmd_text)
 }
 
 //
+// Frame Processing
+//
+
+//
 // Decoration overlay — window-level min/max/close buttons rendered as
 // float-positioned boxes at the top-right corner.  Drawn AFTER all panel
 // content so they always appear on top.
@@ -1280,16 +1288,13 @@ static void decoration_overlay(WindowContext* ctx)
     /* search popup with fuzzy word search */
     if (ctx->search_popup.open)
     {
-        f32 popup_w = 280.f;
+        f32 popup_w = 240.f;
         f32 popup_h = 350.f;
         f32 gap = 4.f;
-        f32 pad = 8.f;
-        f32 font_size = 13.f;
-        f32 row_h = font_size * 1.8f;
+        f32 pad = 6.f;
+        f32 font_size = 12.f;
         f32 popup_x = ctx->decoration_search.xmin;
         f32 popup_y = ctx->decoration_search.ymax + gap;
-
-#define SEARCH_DISPLAY_MAX 100
 
         /* build query from text edit state and run search */
         String query = { ctx->search_text_buf, ctx->search_text_edit.text_len };
@@ -1320,12 +1325,9 @@ static void decoration_overlay(WindowContext* ctx)
         if (ctx->search_selected_index >= sr_count)
             ctx->search_selected_index = sr_count > 0 ? sr_count - 1 : -1;
 
-        UIBox* popup = ui_box_begin(&(BoxConfig){
-            .sizing = { fixed(popup_w), fixed(popup_h) },
-            .flags = BoxFlag_Float,
-            .float_offset = { popup_x, -(client_h - 1) + popup_y },
-            .padding = { pad, pad, pad, pad },
-            .color = theme->palette_bg,
+        UIBox* popup = ui_box_begin(&(BoxConfig) {
+            .sizing = { fixed(popup_w), fixed(popup_h) }, .flags = BoxFlag_Float,
+            .float_offset = { popup_x, -(client_h - 1) + popup_y }, .color = theme->palette_bg,
             .rect_style = {
                 .corner_radius = 8,
                 .shadow_color = theme->shadow,
@@ -1348,126 +1350,140 @@ static void decoration_overlay(WindowContext* ctx)
             }
 
             UIBox* vbox = ui_box_begin(&(BoxConfig){
-                .sizing = { fixed(popup_w - pad * 2.f), fixed(popup_h - pad * 2.f) },
+                .sizing = { grow({}), grow({}) },
+                .padding = { 1, 0, 1, 0 },
                 .direction = LAYOUT_TOP_TO_BOTTOM,
-                .child_gap = gap,
             });
             {
-                /* text input field */
-                ui_text_field(&ctx->search_text_edit, str("Search word##search_input"), &shared->fonts[FONT_INDEX_UI],
-                              font_size, (SizingAxis)fixed(popup_w - pad * 2.f), s_padding_small, theme->palette_bg,
-                              theme->border, theme->panel_fg, theme->scrollbar_thumb, theme->cursor_bar,
-                              theme->cursor_trail, theme->selection, theme->selection_flash);
+                /* text field */
+                UIBox* text_field_container =
+                    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fit({}) }, .padding = { 0, pad, 0, pad } });
+                {
+                    ui_text_field(&ctx->search_text_edit, str("Search word##search_input"),
+                                  &shared->fonts[FONT_INDEX_UI], font_size, (SizingAxis)fixed(popup_w - pad * 2.f),
+                                  s_padding_medium, theme->palette_bg, (Color){ 0 }, theme->panel_fg,
+                                  theme->scrollbar_thumb, theme->cursor_bar, theme->cursor_trail, theme->selection,
+                                  theme->selection_flash, True);
+                }
+                ui_box_end(text_field_container);
+
+                /* splitter */
+                ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->border }));
 
                 /* results area */
                 if (sr_count > 0)
                 {
                     b32 result_clicked = False;
 
-                    ScrollContext scroll = ui_scrollable_area_begin(&(ScrollableAreaConfig){
-                        .hash_str = str("##search_results"),
-                        .sizing = { fixed(popup_w - pad * 2.f), grow({}) },
-                        .bg = theme->palette_bg,
-                        .thumb_color = theme->scrollbar_thumb,
-                        .direction = LAYOUT_TOP_TO_BOTTOM,
-                    });
+                    UIBox* scroll_container =
+                        ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .padding = { 0, 1, 0, 1 } });
                     {
-                        for (i32 i = 0; i < sr_count; i++)
+                        ScrollContext scroll = ui_scrollable_area_begin(&(ScrollableAreaConfig){
+                            .hash_str = str("##search_results"),
+                            .sizing = { grow({}), grow({}) },
+                            .padding = { 5, 5, 5, 5 },
+                            .bg = theme->palette_bg,
+                            .thumb_color = theme->scrollbar_thumb,
+                            .direction = LAYOUT_TOP_TO_BOTTOM,
+                        });
                         {
-                            String word_text = sr[i].text;
-
-                            UIBox* row = ui_box_begin(&(BoxConfig){
-                                .sizing = { fit_grow({}), fixed(row_h) },
-                                .direction = LAYOUT_LEFT_TO_RIGHT,
-                                .alignment = { ALIGN_START, ALIGN_CENTER },
-                                .color = (Color){ 0, 0, 0, 0 },
-                                .rect_style = { .corner_radius = 4 },
-                            });
+                            for (i32 i = 0; i < sr_count; i++)
                             {
-                                UIBoxInteractResult rir = ui_box_interact(
-                                    row, str_fmt(HASH_STR_MAX_LENGTH, "search_result_%u_%d", ctx->id, i));
+                                String word_text = sr[i].text;
 
-                                if (ui_hovered(rir.flags))
-                                    row->cfg.color = theme->hover_bg;
-
-                                if (ui_lclicked(rir.flags))
+                                UIBox* row = ui_box_begin(&(BoxConfig){
+                                    .sizing = { fit_grow({}), fit({}) },
+                                    .direction = LAYOUT_LEFT_TO_RIGHT,
+                                    .alignment = { ALIGN_START, ALIGN_CENTER },
+                                    .padding = { 8, 8, 8, 8 },
+                                    .color = (Color){ 0, 0, 0, 0 },
+                                    .rect_style = { .corner_radius = 4 },
+                                });
                                 {
-                                    const DictionaryEntry* entry = (const DictionaryEntry*)sr[i].entry;
-                                    PanelTab* active = panel_tab_get_active(ctx->focused_panel);
-                                    if (active)
+                                    UIBoxInteractResult rir = ui_box_interact(
+                                        row, str_fmt(HASH_STR_MAX_LENGTH, "search_result_%u_%d", ctx->id, i));
+
+                                    if (ui_hovered(rir.flags))
+                                        row->cfg.color = theme->hover_bg;
+
+                                    if (ui_lclicked(rir.flags))
                                     {
-                                        panel_tab_set_dictionary(active, entry);
-                                        isize word_len = strlen(entry->word);
-                                        memcpy(active->name, entry->word, word_len);
-                                        active->name_len = word_len;
-                                    }
-                                    result_clicked = True;
-                                }
-
-                                /* render word with fuzzy-match highlighting */
-                                TextConfig normal_cfg = {
-                                    .font = &shared->fonts[FONT_INDEX_UI],
-                                    .font_size = font_size,
-                                    .color = theme->panel_fg,
-                                };
-                                TextConfig highlight_cfg = {
-                                    .font = &shared->fonts[FONT_INDEX_UI],
-                                    .font_size = font_size,
-                                    .color = theme->accent_bg,
-                                };
-
-                                if (sr[i].range_count == 0)
-                                {
-                                    ui_text(word_text, &normal_cfg);
-                                }
-                                else
-                                {
-                                    isize prev = 0;
-                                    for (i32 r = 0; r < sr[i].range_count; r++)
-                                    {
-                                        /* normal text */
-                                        if (sr[i].ranges[r].start > (i32)prev)
+                                        const DictionaryEntry* entry = (const DictionaryEntry*)sr[i].entry;
+                                        PanelTab* active = panel_tab_get_active(ctx->focused_panel);
+                                        if (active)
                                         {
-                                            String seg = {
-                                                word_text.data + prev,
-                                                sr[i].ranges[r].start - (i32)prev,
-                                            };
+                                            panel_tab_set_dictionary(active, entry);
+                                            isize word_len = strlen(entry->word);
+                                            memcpy(active->name, entry->word, word_len);
+                                            active->name_len = word_len;
+                                        }
+                                        result_clicked = True;
+                                    }
+
+                                    /* render word with fuzzy-match highlighting */
+                                    TextConfig normal_cfg = {
+                                        .font = &shared->fonts[FONT_INDEX_UI],
+                                        .font_size = font_size,
+                                        .color = theme->panel_fg,
+                                    };
+                                    TextConfig highlight_cfg = {
+                                        .font = &shared->fonts[FONT_INDEX_UI],
+                                        .font_size = font_size,
+                                        .color = theme->accent_bg,
+                                    };
+
+                                    if (sr[i].range_count == 0)
+                                    {
+                                        ui_text(word_text, &normal_cfg);
+                                    }
+                                    else
+                                    {
+                                        isize prev = 0;
+                                        for (i32 r = 0; r < sr[i].range_count; r++)
+                                        {
+                                            /* normal text */
+                                            if (sr[i].ranges[r].start > (i32)prev)
+                                            {
+                                                String seg = {
+                                                    word_text.data + prev,
+                                                    sr[i].ranges[r].start - (i32)prev,
+                                                };
+                                                ui_text(seg, &normal_cfg);
+                                            }
+
+                                            /* matched text */
+                                            {
+                                                String seg = {
+                                                    word_text.data + sr[i].ranges[r].start,
+                                                    sr[i].ranges[r].end - sr[i].ranges[r].start,
+                                                };
+                                                ui_text(seg, &highlight_cfg);
+                                            }
+
+                                            prev = sr[i].ranges[r].end;
+                                        }
+                                        if (prev < word_text.len)
+                                        {
+                                            String seg = { word_text.data + prev, word_text.len - prev };
                                             ui_text(seg, &normal_cfg);
                                         }
-
-                                        /* matched text */
-                                        {
-                                            String seg = {
-                                                word_text.data + sr[i].ranges[r].start,
-                                                sr[i].ranges[r].end - sr[i].ranges[r].start,
-                                            };
-                                            ui_text(seg, &highlight_cfg);
-                                        }
-
-                                        prev = sr[i].ranges[r].end;
-                                    }
-                                    if (prev < word_text.len)
-                                    {
-                                        String seg = { word_text.data + prev, word_text.len - prev };
-                                        ui_text(seg, &normal_cfg);
                                     }
                                 }
+                                ui_box_end(row);
                             }
-                            ui_box_end(row);
                         }
-                    }
-                    ui_scrollable_area_end(scroll);
+                        ui_scrollable_area_end(scroll);
 
-                    /* close popup only if the click wasn't consumed by the scrollbar */
-                    if (result_clicked && ui_ctx->mouse_captured_by_hash != scroll.hash)
-                        ctx->search_popup.open = False;
+                        /* close popup only if the click wasn't consumed by the scrollbar */
+                        if (result_clicked && ui_ctx->mouse_captured_by_hash != scroll.hash)
+                            ctx->search_popup.open = False;
+                    }
+                    ui_box_end(scroll_container);
                 }
             }
             ui_box_end(vbox);
         }
         ui_box_end(popup);
-
-#undef SEARCH_DISPLAY_MAX
     }
 
     /* minimize */
@@ -1543,10 +1559,6 @@ static void decoration_overlay(WindowContext* ctx)
     }
 }
 
-//
-// Frame Processing
-//
-
 static void panel_container(WindowContext* ctx, const Rect rect)
 {
     TracyCZoneNC(ctx_pc, "PanelContainer", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
@@ -1611,7 +1623,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             .font_size = 12,
             .cmd_queue = &shared->cmd_queue,
             .window_id = ctx->id,
-            .padding = s_padding_medium,
+            .padding = s_padding_big,
             .child_gap = s_child_gap_medium,
             .direction = LAYOUT_TOP_TO_BOTTOM,
             .show_bottom_bar = (p == ctx->focused_panel),
@@ -1672,7 +1684,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                         /* Button: create window */
                         UISignalFlags cw_button_flags =
                             ui_button(str_fmt(HASH_STR_MAX_LENGTH, "New Window##panel_cw_button_%u", p->id),
-                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_medium,
                                       (Color){ 0 }, theme->hover_fg, theme->hover_bg);
                         if (ui_lclicked(cw_button_flags))
                             cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"));
@@ -1680,7 +1692,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                         /* Button: split horizontally */
                         UISignalFlags sph_button_flags =
                             ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Horizontally##panel_sph_button_%u", p->id),
-                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_medium,
                                       (Color){ 0 }, theme->hover_fg, theme->hover_bg);
                         if (ui_lclicked(sph_button_flags))
                             cmd_queue_push(&shared->cmd_queue,
@@ -1689,7 +1701,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                         /* Button: split vertically */
                         UISignalFlags spv_button_flags =
                             ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Vertically##panel_spv_button_%u", p->id),
-                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_small,
+                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_medium,
                                       (Color){ 0 }, theme->hover_fg, theme->hover_bg);
                         if (ui_lclicked(spv_button_flags))
                             cmd_queue_push(&shared->cmd_queue,
@@ -1702,13 +1714,13 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                                                              .alignment = { ALIGN_START, ALIGN_CENTER } });
                     {
                         ui_button(str_fmt(HASH_STR_MAX_LENGTH, "nothing##world_%u", p->id),
-                                  &shared->fonts[FONT_INDEX_MONO], 11, (Sizing){ fixed(80), fit({}) }, s_padding_small,
+                                  &shared->fonts[FONT_INDEX_MONO], 11, (Sizing){ fixed(80), fit({}) }, s_padding_medium,
                                   (Color){ 0 }, theme->hover_fg, theme->hover_bg);
-                        ui_text_field(&ctx->text_edit_1,
-                                      str_fmt(HASH_STR_MAX_LENGTH, "placeholder##text_field_%u", p->id),
-                                      &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_small,
-                                      theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
-                                      theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash);
+                        ui_text_field(
+                            &ctx->text_edit_1, str_fmt(HASH_STR_MAX_LENGTH, "placeholder##text_field_%u", p->id),
+                            &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_medium,
+                            theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
+                            theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash, False);
                         UISignalFlags flags = ui_switchbox(
                             str_fmt(HASH_STR_MAX_LENGTH, "switch box_%u", p->id), &shared->fonts[FONT_INDEX_ICON],
                             &ctx->check, theme->hover_bg, theme->accent_bg, theme->accent_fg, theme->shadow);
@@ -1812,8 +1824,7 @@ static void process_frame(WindowContext* ctx)
             for (isize i = 0; i < countof(popups); i++)
             {
                 OverlayPopup* p = popups[i];
-                if (p->open && p->rect.xmax > p->rect.xmin &&
-                    mx >= p->rect.xmin && mx < p->rect.xmax &&
+                if (p->open && p->rect.xmax > p->rect.xmin && mx >= p->rect.xmin && mx < p->rect.xmax &&
                     my >= p->rect.ymin && my < p->rect.ymax)
                 {
                     overlay_claims_input = True;
@@ -1871,23 +1882,23 @@ static void process_frame(WindowContext* ctx)
            all click/press flags are also cleared as defense-in-depth. */
         if (overlay_claims_input)
         {
-            saved_mouse_pos    = ui_ctx->mouse_pos;
-            saved_mouse_delta  = ui_ctx->mouse_delta;
+            saved_mouse_pos = ui_ctx->mouse_pos;
+            saved_mouse_delta = ui_ctx->mouse_delta;
             saved_mouse_scroll = ui_ctx->mouse_scroll_delta;
-            saved_lclick       = ui_ctx->mouse_lclick;
-            saved_rclick       = ui_ctx->mouse_rclick;
-            saved_mclick       = ui_ctx->mouse_mclick;
-            saved_press        = ui_ctx->mouse_press;
-            saved_dclick       = ui_ctx->mouse_double_click;
+            saved_lclick = ui_ctx->mouse_lclick;
+            saved_rclick = ui_ctx->mouse_rclick;
+            saved_mclick = ui_ctx->mouse_mclick;
+            saved_press = ui_ctx->mouse_press;
+            saved_dclick = ui_ctx->mouse_double_click;
 
-            ui_ctx->mouse_pos.x        = -FLT_MAX;
-            ui_ctx->mouse_pos.y        = -FLT_MAX;
-            ui_ctx->mouse_delta        = (Position){0};
-            ui_ctx->mouse_scroll_delta = (Position){0};
-            ui_ctx->mouse_lclick       = False;
-            ui_ctx->mouse_rclick       = False;
-            ui_ctx->mouse_mclick       = False;
-            ui_ctx->mouse_press        = False;
+            ui_ctx->mouse_pos.x = -FLT_MAX;
+            ui_ctx->mouse_pos.y = -FLT_MAX;
+            ui_ctx->mouse_delta = (Position){ 0 };
+            ui_ctx->mouse_scroll_delta = (Position){ 0 };
+            ui_ctx->mouse_lclick = False;
+            ui_ctx->mouse_rclick = False;
+            ui_ctx->mouse_mclick = False;
+            ui_ctx->mouse_press = False;
             ui_ctx->mouse_double_click = False;
         }
 
@@ -1964,14 +1975,14 @@ static void process_frame(WindowContext* ctx)
                    menu, context menu) can process input normally. */
                 if (overlay_claims_input)
                 {
-                    ui_ctx->mouse_pos           = saved_mouse_pos;
-                    ui_ctx->mouse_delta         = saved_mouse_delta;
-                    ui_ctx->mouse_scroll_delta  = saved_mouse_scroll;
-                    ui_ctx->mouse_lclick        = saved_lclick;
-                    ui_ctx->mouse_rclick        = saved_rclick;
-                    ui_ctx->mouse_mclick        = saved_mclick;
-                    ui_ctx->mouse_press         = saved_press;
-                    ui_ctx->mouse_double_click  = saved_dclick;
+                    ui_ctx->mouse_pos = saved_mouse_pos;
+                    ui_ctx->mouse_delta = saved_mouse_delta;
+                    ui_ctx->mouse_scroll_delta = saved_mouse_scroll;
+                    ui_ctx->mouse_lclick = saved_lclick;
+                    ui_ctx->mouse_rclick = saved_rclick;
+                    ui_ctx->mouse_mclick = saved_mclick;
+                    ui_ctx->mouse_press = saved_press;
+                    ui_ctx->mouse_double_click = saved_dclick;
                 }
 
                 /* decoration buttons float on top of panels at top-right */
