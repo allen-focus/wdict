@@ -24,9 +24,9 @@ typedef enum
 } PanelSpatial;
 
 #define PANEL_TAB_NAME_MAX 64
-#define PANEL_PCT_MIN       0.05f
-#define PANEL_PCT_MAX       0.95f
-#define MIN_PANEL_PIXELS    40.f
+#define PANEL_PCT_MIN      0.05f
+#define PANEL_PCT_MAX      0.95f
+#define MIN_PANEL_PIXELS   40.f
 
 typedef enum
 {

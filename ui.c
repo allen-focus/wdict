@@ -2324,8 +2324,8 @@ void ui_panel_end(PanelContext* panel_ctx)
         f32 usable_w = panel_ctx->panel_w;
         f32 usable_h = panel_ctx->panel_h - tab_bar_height;
         f32 pad = 12.f;
-        f32 usable_w_padded = usable_w - pad * 2;
-        f32 usable_h_padded = usable_h - pad * 2;
+        f32 usable_w_padded = max(0.f, usable_w - pad * 2);
+        f32 usable_h_padded = max(0.f, usable_h - pad * 2);
 
         /* Layout definitions */
         const char* dock_zone_suffixes[4] = { "Y_before", "Y_after", "X_before", "X_after" };

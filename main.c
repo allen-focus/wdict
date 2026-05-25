@@ -27,8 +27,10 @@
 
 ///
 
-#define CLIENT_WIDTH  1000
-#define CLIENT_HEIGHT 750
+#define CLIENT_WIDTH      1000
+#define CLIENT_HEIGHT     750
+#define MIN_WINDOW_WIDTH  320
+#define MIN_WINDOW_HEIGHT 200
 
 #ifdef TRACY_ENABLE
 #    define IDLE_WAKE_FRAMES 0x7FFFFFFF
@@ -2479,6 +2481,18 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             }
             if (codepoint >= 0x20 && codepoint != 127 && ui_ctx->char_input_queue_count < CHAR_INPUT_QUEUE_CAPACITY)
                 ui_ctx->char_input_queue[ui_ctx->char_input_queue_count++] = codepoint;
+            return 0;
+        }
+
+        case WM_GETMINMAXINFO:
+        {
+            MINMAXINFO* mmi = (MINMAXINFO*)lparam;
+            u32 dpi = GetDpiForWindow(window);
+            f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+            i32 frame_x = GetSystemMetricsForDpi(SM_CXFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            i32 frame_y = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            mmi->ptMinTrackSize.x = (LONG)(MIN_WINDOW_WIDTH * dpi_scale) + frame_x * 2;
+            mmi->ptMinTrackSize.y = (LONG)(MIN_WINDOW_HEIGHT * dpi_scale) + frame_y;
             return 0;
         }
 
