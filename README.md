@@ -1,4 +1,4 @@
-# Build
+## Build
 
 To build the binary from source code, have [Visual Studio][VS] installed first, then you can use either of the following methods:
 
@@ -21,7 +21,146 @@ cmake --build build --config release
 
 `--config` can be `release`, `debug`, or `profile`.
 
-# License
+
+## Dictionary Data
+
+The application embeds an English–Chinese dictionary as a binary blob (`data/dict.bin`) via `resource.rc` (`DICT_DATA RCDATA`). At runtime, `DictDB` (see `dict.h`) opens the blob with zero-copy parsing — all pointers point directly into the embedded binary, requiring no heap allocation.
+
+The blob is little-endian and consists of four contiguous sections:
+
+```
+┌─────────────────────┐  offset 0
+│  FileHeader  32 B   │
+├─────────────────────┤  header.words_off
+│  WordIndex[]        │  12 bytes per entry, sorted alphabetically
+├─────────────────────┤  header.entdata_off
+│  EntryData          │  variable-length EntryBlob per entry, tightly packed
+├─────────────────────┤  header.strpool_off
+│  StringPool         │  all strings null-terminated, offset 0 = empty string
+└─────────────────────┘
+```
+
+### FileHeader (32 bytes, packed)
+
+| Offset   | Field          | Type   | Description                |
+| -------- | -------------- | ------ | -------------------------- |
+| 0        | `magic`        | u32    | `0x44494354` ("DICT")      |
+| 4        | `version`      | u32    | `1`                        |
+| 8        | `word_count`   | u32    | Number of word entries     |
+| 12       | `words_off`    | u32    | Byte offset to WordIndex[] |
+| 16       | `entdata_off`  | u32    | Byte offset to EntryData   |
+| 20       | `strpool_off`  | u32    | Byte offset to StringPool  |
+| 24       | `_reserved[2]` | u32    | Reserved, must be 0        |
+
+### WordIndex (12 bytes per entry, sorted alphabetically by word)
+
+| Offset   | Field         | Type   | Description                                             |
+| -------- | ------------- | ------ | ------------------------------------------------------- |
+| 0        | `word_stroff` | u32    | Offset into StringPool (null-terminated word string)    |
+| 4        | `entdata_off` | u32    | Offset into EntryData (start of this entry's EntryBlob) |
+| 8        | `freq`        | u32    | Word frequency; `0xFFFFFFFF` = null (unknown)           |
+
+### EntryData — EntryBlob layout (variable-length, sequential read)
+
+Each EntryBlob is parsed byte-by-byte in the following order:
+
+```
+u32 freq                       // 0xFFFFFFFF = null
+u8  brief_en_count
+u32 brief_en[brief_en_count]   // each: strpool offset
+u8  brief_zh_count
+u32 brief_zh[brief_zh_count]   // each: strpool offset
+u8  pos_count
+
+For each POS (0 … pos_count-1):
+  u8  pos_kind                 // PosKind enum (0=Noun, 1=Verb, …, 255=Unknown)
+  u32 pron_off                 // strpool offset (0 = none)
+  u8  def_count
+
+  For each definition (0 … def_count-1):
+    u32 en_off                 // strpool offset — English definition
+    u32 zh_off                 // strpool offset — Chinese definition
+    u8  ex_count
+
+    For each example (0 … ex_count-1):
+      u32 en_off               // strpool offset — English example sentence
+      u32 zh_off               // strpool offset — Chinese translation
+```
+
+### PosKind enumeration
+
+| Value   | Part of Speech  |
+| ------- | --------------- |
+| 0       | Noun            |
+| 1       | Verb            |
+| 2       | Adjective       |
+| 3       | Adverb          |
+| 4       | Preposition     |
+| 5       | Conjunction     |
+| 6       | Interjection    |
+| 7       | Pronoun         |
+| 8       | Article         |
+| 9       | Phrase          |
+| 10      | Number          |
+| 255     | Unknown         |
+
+### StringPool
+
+All strings are concatenated as UTF-8, each terminated with `\0`. Offset 0 is the empty string (a lone `\0`). Field values of `0` therefore denote "absent" or "empty".
+
+## Building the Blob from JSON
+
+A Python helper script is provided to convert a JSON dictionary file into the binary blob:
+
+```
+python scripts/build_dict.py <input.json> <output.bin>
+```
+
+### Expected JSON format
+
+The top-level object maps each headword to its entry:
+
+```jsonc
+{
+  "aardvark": {
+    "word": "aardvark",
+    "freq": 42238,                  // u32 or null
+    "brief_en": [                   // array of short English glosses
+      "n. nocturnal burrowing mammal …"
+    ],
+    "brief_zh": [                   // array of short Chinese glosses
+      "n. 土豚"
+    ],
+    "pos_node": {
+      "Noun": {                     // part-of-speech name → PosKind enum
+        "pron": "ˈɑːdvɑːk",         // pronunciation (IPA), may be ""
+        "def": [                    // definitions for this POS
+          {
+            "en": "a large animal …",
+            "zh": "土豚〔非洲南部 …〕",
+            "examples": [           // may be []
+              {
+                "en": "…",
+                "zh": "…"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Field notes:
+
+- `freq` — `null` if unknown. Used by `dict_fuzzy_search()` to boost common words.
+- `brief_en` / `brief_zh` — short glosses for quick-lookup UI. May be empty arrays.
+- `pron` — IPA pronunciation string. Empty string if absent.
+- `pos_node` keys — matched to `PosKind` by name (case-sensitive). Unrecognised names become `POS_UNKNOWN` (255).
+
+
+## License
 
 **Project code**: Released under the Unlicense (public domain).
 
