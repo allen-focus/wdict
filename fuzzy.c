@@ -10,6 +10,10 @@
 #define FUZZY_WORD_BOUNDARY_BONUS 2.0f
 #define FUZZY_CAMEL_BONUS         1.0f
 #define FUZZY_FIRST_CHAR_BONUS    2.0f
+#define FUZZY_EXACT_MATCH_BONUS   6.0f
+#define FUZZY_PREFIX_BONUS        4.0f
+#define FUZZY_LENGTH_PENALTY      0.5f
+#define FUZZY_SPAN_PENALTY        0.3f
 
 //
 // Character classification (no utils equivalents)
@@ -305,6 +309,25 @@ FuzzyMatch fuzzy_match(String query, String candidate, Arena* scratch)
                 }
             }
         }
+    }
+
+    /* ---- post-processing: reward full/prefix match, penalise extra length & span ---- */
+    if (best_score < FUZZY_DP_INF && best_count > 0)
+    {
+        // Exact match: every candidate char is matched
+        if (best_count == c_count)
+            best_score -= FUZZY_EXACT_MATCH_BONUS;
+
+        // Longer candidates are worse
+        best_score += (f32)(c_count - q_count) * FUZZY_LENGTH_PENALTY;
+
+        // Wider match span is worse (distance between first and last hit)
+        i32 span = best_positions[best_count - 1] - best_positions[0] + 1;
+        best_score += (f32)span * FUZZY_SPAN_PENALTY;
+
+        // Prefix match: consecutive from position 0
+        if (best_positions[0] == 0 && span == best_count)
+            best_score -= FUZZY_PREFIX_BONUS;
     }
 
     if (best_score >= 1e8f)
