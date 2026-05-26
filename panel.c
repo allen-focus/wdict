@@ -208,6 +208,8 @@ void panel_tab_close(Panel* panel, PanelTab* tab)
     if (panel->active_tab == tab)
         panel->active_tab = tab->next ? tab->next : panel->tab_first;
 
+    if (tab->cleanup_fn && tab->content_data)
+        tab->cleanup_fn((void *)tab->content_data);
     free(tab);
 }
 
@@ -426,6 +428,8 @@ void panel_tabs_cleanup(Panel* panel)
             *prev = tab->next;
             if (panel->active_tab == tab)
                 panel->active_tab = tab->next ? tab->next : panel->tab_first;
+            if (tab->cleanup_fn && tab->content_data)
+                tab->cleanup_fn((void *)tab->content_data);
             free(tab);
         }
         else
@@ -445,6 +449,8 @@ static void panel_free_tabs(Panel* panel)
     while (tab)
     {
         PanelTab* next = tab->next;
+        if (tab->cleanup_fn && tab->content_data)
+            tab->cleanup_fn((void *)tab->content_data);
         free(tab);
         tab = next;
     }

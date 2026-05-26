@@ -43,6 +43,7 @@ typedef struct
 } TabDragPayload;
 
 typedef void (*TabRenderFn)(const void* content_data, void* ctx);
+typedef void (*TabCleanupFn)(void* content_data);
 
 typedef struct PanelTab PanelTab;
 struct PanelTab
@@ -55,6 +56,7 @@ struct PanelTab
 
     const void* content_data;
     TabRenderFn render_fn;
+    TabCleanupFn cleanup_fn;
 };
 
 typedef struct Panel Panel;

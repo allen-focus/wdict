@@ -265,6 +265,9 @@ static DWORD WINAPI search_worker(LPVOID param)
             if (!agg.matched)
                 continue;
 
+            if (state->score_adjust)
+                agg.score = state->score_adjust(entry, agg.score);
+
             /* Resolve the display key via the caller-provided extraction function. */
             String key_str = state->key_extract((const void*)entry);
 

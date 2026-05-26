@@ -4,6 +4,7 @@
 #pragma comment(lib, "dwmapi")
 
 #include "cmd.h"
+#include "dict.h"
 #include "glyph_cache.h"
 #include "panel.h"
 #include "renderer.h"
@@ -143,6 +144,8 @@ typedef struct
     CmdRegistry cmd_registry;
     ShortcutRegistry shortcuts;
     CmdQueue cmd_queue;
+    SearchState word_search;
+    DictDB dict_db;
 
     /* cross-window drag-drop */
     b32 cross_drag_active;
@@ -152,9 +155,6 @@ typedef struct
 
     /* drag hint popup (heap-allocated — UIContext + Renderer are too large for the stack) */
     DragPopup* drag_popup;
-
-    /* word search engine (corpus owned by this compilation unit) */
-    SearchState word_search;
 
     /* accent border color (registry-derived, updated on WM_DWMCOLORIZATIONCOLORCHANGED) */
     Color accent_border_color;
@@ -210,8 +210,9 @@ struct WindowContext
     b32 mouse_tracked;
 };
 
-static u64 s_search_input_hash;
+static DictDB* g_dict_db; /* set at startup, used by extract callbacks */
 
+static u64 s_search_input_hash;
 static u32 s_window_next_id = 1; /* 0 reserved for none */
 static u16 s_utf16_pending_high = 0;
 
@@ -318,88 +319,171 @@ static f32 s_child_gap_medium  = 10;
 // clang-format on
 
 //
-// Dictionary search corpus
+// Dictionary callbacks for search engine
 //
 
-typedef struct
+static String dict_word_extract(const void* entry)
 {
-    const char* word;
-    const char* definition;
-    const char* example;
-} DictionaryEntry;
-
-static DictionaryEntry s_dictionary[] = {
-    { "abandon", "To give up completely", "They had to abandon the sinking ship." },
-    { "brilliant", "Exceptionally clever or talented", "She had a brilliant idea for the project." },
-    { "capture", "To take into one's possession or control", "The photograph captured the sunset perfectly." },
-    { "deliberate", "Done consciously and intentionally", "It was a deliberate decision to wait." },
-    { "emerge", "To come forth into view or notice", "New details began to emerge from the investigation." },
-    { "flourish", "To grow or develop in a healthy way", "The arts began to flourish in the city." },
-    { "genuine", "Truly what something is said to be; authentic", "Her smile was warm and genuine." },
-    { "hesitate", "To pause before doing something", "Don't hesitate to ask for help." },
-    { "illuminate", "To light up or make clear", "The lamp illuminated the dark room." },
-    { "jubilant", "Feeling or expressing great happiness", "The crowd was jubilant after the victory." },
-    { "keen", "Eager or enthusiastic", "He has a keen interest in music." },
-    { "luminous", "Full of or shedding light; bright", "The luminous stars filled the night sky." },
-    { "meticulous", "Showing great attention to detail", "She was meticulous in her research." },
-    { "neglect", "To fail to care for properly", "The old building had been neglected for years." },
-    { "obstacle", "A thing that blocks one's way", "Lack of funding was the main obstacle." },
-    { "profound", "Very great or intense", "The book had a profound impact on readers." },
-    { "quaint", "Attractively unusual or old-fashioned", "They stayed in a quaint village cottage." },
-    { "resilient", "Able to recover quickly from difficulties", "Children are often more resilient than adults." },
-    { "subtle", "So delicate as to be difficult to notice", "There was a subtle change in her tone." },
-    { "tangible", "Perceptible by touch; clear and definite", "We need tangible evidence to proceed." },
-    { "undermine", "To weaken gradually or insidiously", "Constant criticism can undermine confidence." },
-    { "vivid", "Producing powerful feelings or strong images", "He gave a vivid description of the event." },
-    { "warrant", "To justify or necessitate", "The situation does not warrant such concern." },
-    { "yield", "To produce or provide", "The investment is expected to yield good returns." },
-    { "zealous", "Having great energy or enthusiasm", "She was a zealous supporter of the cause." },
-    { "ambiguous", "Open to more than one interpretation", "The contract language was deliberately ambiguous." },
-    { "benevolent", "Well-meaning and kindly", "The benevolent donor funded the entire project." },
-    { "concise", "Giving much information clearly in few words", "Please keep your report concise and focused." },
-    { "diligent", "Having or showing careful persistent effort",
-      "The diligent student always completed her work early." },
-    { "eloquent", "Fluent or persuasive in speaking or writing", "He gave an eloquent speech at the ceremony." },
-};
-
-static const i32 s_dictionary_size = countof(s_dictionary);
-
-static String s_word_extract(const void* entry)
-{
-    const DictionaryEntry* e = (const DictionaryEntry*)entry;
-    return (String){ (u8*)e->word, (isize)strlen(e->word) };
+    const DictWordIndex* w = (const DictWordIndex*)entry;
+    const char* s = DICT_STR(g_dict_db, w->word_stroff);
+    return (String){ (u8*)s, (isize)strlen(s) };
 }
 
-static FieldDef s_word_fields[] = {
-    { "word", s_word_extract, 1.0f },
+static FieldDef s_dict_fields[] = { { "word", dict_word_extract, 1.0f } };
+
+static f32 dict_freq_weight(const void* entry, f32 raw)
+{
+    const DictWordIndex* w = (const DictWordIndex*)entry;
+
+    // freq is a rank: lower value = more frequent word.
+    u32 freq = w->freq;
+
+    // Missing frequency data → treat as extremely rare
+    if (freq == 0xFFFFFFFF)
+        return raw + 2.0f;
+
+    if (freq > 0)
+        return raw + log2f(1.0f + (f32)freq) * 0.2f;
+
+    return raw;
+}
+
+static const char* s_pos_names[] = {
+    [POS_NOUN] = "n.",
+    [POS_VERB] = "v.",
+    [POS_NOUN_VERB] = "n., v.",
+    [POS_ADJ] = "adj.",
+    [POS_ADV] = "adv.",
+    [POS_ADJ_ADV] = "adj., adv.",
+    [POS_CONJ] = "conj.",
+    [POS_DET] = "det.",
+    [POS_INDEF_ART] = "indef. art.",
+    [POS_INTERJ] = "interj.",
+    [POS_MODAL] = "modal v.",
+    [POS_NUM] = "num.",
+    [POS_PREDET] = "predet.",
+    [POS_PREP] = "prep.",
+    [POS_ADV_PREP] = "adv., prep.",
+    [POS_PRON] = "pron.",
+    [POS_SUFFIX] = "suf.",
+    [POS_PREFIX] = "pref.",
+    [POS_AUX_VERB] = "aux. v.",
+    [POS_PHRASAL_VERB] = "phr. v.",
+    [POS_DEF_ART] = "def. art.",
 };
 
-static void render_dictionary_content(const void* data, void* ctx)
+static void render_dict_content(const void* data, void* ctx)
 {
-    const DictionaryEntry* e = (const DictionaryEntry*)data;
+    i32 word_idx = (i32)(isize)data;
     AppShared* shared = (AppShared*)ctx;
+    const DictDB* db = &shared->dict_db;
     const Theme* theme = &shared->theme;
+    const DictWordIndex* w = &db->words[word_idx];
+    const char* word = DICT_STR(db, w->word_stroff);
 
-    ui_text((String){ (u8*)e->word, (isize)strlen(e->word) },
+    /* word title */
+    ui_text((String){ (u8*)word, (isize)strlen(word) },
             &(TextConfig){
-                .font = &shared->fonts[FONT_INDEX_UI], .font_size = 16, .color = theme->accent_bg, .line_height = 24 });
+                .font = &shared->fonts[FONT_INDEX_UI], .font_size = 20, .color = theme->accent_bg, .line_height = 28 });
 
-    ui_text((String){ (u8*)e->definition, (isize)strlen(e->definition) },
-            &(TextConfig){
-                .font = &shared->fonts[FONT_INDEX_UI], .font_size = 13, .color = theme->panel_fg, .line_height = 20 });
+    const u8* p = db->entdata + w->entdata_off;
 
-    ui_text((String){ (u8*)e->example, (isize)strlen(e->example) },
-            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
-                           .font_size = 11,
-                           .color = theme->panel_fg,
-                           .line_height = 18,
-                           .wrap = True });
-}
+    /* freq */
+    p += 4;
 
-static void panel_tab_set_dictionary(PanelTab* tab, const DictionaryEntry* entry)
-{
-    tab->content_data = (const void*)entry;
-    tab->render_fn = render_dictionary_content;
+    /* brief_en */
+    {
+        u8 cnt = dict_rd_u8(&p);
+        TextConfig cfg = {
+            .font = &shared->fonts[FONT_INDEX_UI], .font_size = 13, .color = theme->panel_fg, .line_height = 20
+        };
+        for (u8 i = 0; i < cnt; i++)
+        {
+            u32 off = dict_rd_u32(&p);
+            ui_text((String){ (u8*)DICT_STR(db, off), (isize)strlen(DICT_STR(db, off)) }, &cfg);
+        }
+    }
+
+    /* brief_zh */
+    {
+        u8 cnt = dict_rd_u8(&p);
+        TextConfig cfg = {
+            .font = &shared->fonts[FONT_INDEX_ZH], .font_size = 13, .color = theme->panel_fg, .line_height = 20
+        };
+        for (u8 i = 0; i < cnt; i++)
+        {
+            u32 off = dict_rd_u32(&p);
+            ui_text((String){ (u8*)DICT_STR(db, off), (isize)strlen(DICT_STR(db, off)) }, &cfg);
+        }
+    }
+
+    /* POS sections */
+    u8 pos_count = dict_rd_u8(&p);
+    for (u8 pi = 0; pi < pos_count; pi++)
+    {
+        u8 pos_kind = dict_rd_u8(&p);
+        u32 pron_off = dict_rd_u32(&p);
+
+        /* POS label + pronunciation on one line */
+        if (pos_kind < countof(s_pos_names) && s_pos_names[pos_kind])
+        {
+            UIBox* row = ui_box_begin(
+                &(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_LEFT_TO_RIGHT, .child_gap = 4 });
+            {
+                const char* label = s_pos_names[pos_kind];
+                ui_text((String){ (u8*)label, (isize)strlen(label) },
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
+                                       .font_size = 12,
+                                       .color = theme->accent_subtle_bg,
+                                       .line_height = 18 });
+                if (pron_off)
+                    ui_text((String){ (u8*)DICT_STR(db, pron_off), (isize)strlen(DICT_STR(db, pron_off)) },
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
+                                           .font_size = 12,
+                                           .color = theme->accent_subtle_bg,
+                                           .line_height = 18 });
+            }
+            ui_box_end(row);
+        }
+
+        u8 def_count = dict_rd_u8(&p);
+        for (u8 di = 0; di < def_count; di++)
+        {
+            u32 en_off = dict_rd_u32(&p);
+            u32 zh_off = dict_rd_u32(&p);
+
+            ui_text((String){ (u8*)DICT_STR(db, en_off), (isize)strlen(DICT_STR(db, en_off)) },
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = 13,
+                                   .color = theme->panel_fg,
+                                   .line_height = 20 });
+            ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                   .font_size = 12,
+                                   .color = theme->panel_fg,
+                                   .line_height = 18 });
+
+            u8 ex_count = dict_rd_u8(&p);
+            for (u8 ei = 0; ei < ex_count; ei++)
+            {
+                u32 ex_en = dict_rd_u32(&p);
+                u32 ex_zh = dict_rd_u32(&p);
+
+                ui_text((String){ (u8*)DICT_STR(db, ex_en), (isize)strlen(DICT_STR(db, ex_en)) },
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                       .font_size = 11,
+                                       .color = theme->panel_fg,
+                                       .line_height = 18,
+                                       .wrap = True });
+                ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                       .font_size = 10,
+                                       .color = theme->panel_fg,
+                                       .line_height = 16,
+                                       .wrap = True });
+            }
+        }
+    }
 }
 
 //
@@ -1353,12 +1437,15 @@ static void decoration_overlay(WindowContext* ctx)
         }
         else
         {
-            /* empty query: show all words */
-            i32 n = s_dictionary_size < SEARCH_DISPLAY_MAX ? s_dictionary_size : SEARCH_DISPLAY_MAX;
+            /* empty query: show first words in alphabetical order */
+            u32 total = shared->dict_db.hdr->word_count;
+            i32 n = total < SEARCH_DISPLAY_MAX ? (i32)total : SEARCH_DISPLAY_MAX;
             for (i32 i = 0; i < n; i++)
             {
-                sr[i].entry = &s_dictionary[i];
-                sr[i].key = (String){ (u8*)s_dictionary[i].word, (isize)strlen(s_dictionary[i].word) };
+                const DictWordIndex* w = &shared->dict_db.words[i];
+                sr[i].entry = (void*)w;
+                const char* word = DICT_STR(&shared->dict_db, w->word_stroff);
+                sr[i].key = (String){ (u8*)word, (isize)strlen(word) };
                 sr[i].text = sr[i].key;
                 sr[i].score = 0.f;
                 sr[i].range_count = 0;
@@ -1476,14 +1563,16 @@ static void decoration_overlay(WindowContext* ctx)
                                     /* preview: auto-update tab content for selected item */
                                     if (i == ctx->search_selected_index)
                                     {
-                                        const DictionaryEntry* entry = (const DictionaryEntry*)sr[i].entry;
+                                        const DictWordIndex* w = (const DictWordIndex*)sr[i].entry;
                                         PanelTab* active = panel_tab_get_active(ctx->focused_panel);
                                         if (active)
                                         {
-                                            panel_tab_set_dictionary(active, entry);
-                                            isize word_len = strlen(entry->word);
-                                            memcpy(active->name, entry->word, word_len);
-                                            active->name_len = word_len;
+                                            const char* wrd = DICT_STR(&shared->dict_db, w->word_stroff);
+                                            isize wlen = strlen(wrd);
+                                            memcpy(active->name, wrd, wlen);
+                                            active->name_len = wlen;
+                                            active->content_data = (void*)(isize)(w - shared->dict_db.words);
+                                            active->render_fn = render_dict_content;
                                         }
                                     }
 
@@ -3011,9 +3100,22 @@ i32 WinMainCRTStartup()
     }
     // clang-format on
 
-    /* Initialize and start word search worker */
-    search_init(&shared.word_search, s_dictionary, s_dictionary_size, sizeof(DictionaryEntry), s_word_fields,
-                countof(s_word_fields), s_word_extract);
+    /* Load dictionary blob from embedded RC resource */
+    {
+        HRSRC h_res = FindResourceW(NULL, L"DICT_DATA", (LPCWSTR)RT_RCDATA);
+        Assert(h_res);
+        HGLOBAL h_global = LoadResource(NULL, h_res);
+        Assert(h_global);
+        const void* blob = LockResource(h_global);
+        shared.dict_db = dict_open(blob);
+        Assert(shared.dict_db.hdr);
+        g_dict_db = &shared.dict_db;
+    }
+
+    /* Initialize and start word search worker (corpus = DictDB word index, fixed stride = 12) */
+    search_init(&shared.word_search, shared.dict_db.words, (i32)shared.dict_db.hdr->word_count, sizeof(DictWordIndex),
+                s_dict_fields, countof(s_dict_fields), dict_word_extract);
+    shared.word_search.score_adjust = dict_freq_weight;
     search_start(&shared.word_search);
 
     /* Pre-compute focus hashes for popup input routing */

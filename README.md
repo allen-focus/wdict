@@ -45,7 +45,7 @@ The blob is little-endian and consists of four contiguous sections:
 | Offset   | Field          | Type   | Description                |
 | -------- | -------------- | ------ | -------------------------- |
 | 0        | `magic`        | u32    | `0x44494354` ("DICT")      |
-| 4        | `version`      | u32    | `1`                        |
+| 4        | `version`      | u32    | `2`                        |
 | 8        | `word_count`   | u32    | Number of word entries     |
 | 12       | `words_off`    | u32    | Byte offset to WordIndex[] |
 | 16       | `entdata_off`  | u32    | Byte offset to EntryData   |
@@ -54,11 +54,11 @@ The blob is little-endian and consists of four contiguous sections:
 
 ### WordIndex (12 bytes per entry, sorted alphabetically by word)
 
-| Offset   | Field         | Type   | Description                                             |
-| -------- | ------------- | ------ | ------------------------------------------------------- |
-| 0        | `word_stroff` | u32    | Offset into StringPool (null-terminated word string)    |
-| 4        | `entdata_off` | u32    | Offset into EntryData (start of this entry's EntryBlob) |
-| 8        | `freq`        | u32    | Word frequency; `0xFFFFFFFF` = null (unknown)           |
+| Offset   | Field         | Type   | Description                                               |
+| -------- | ------------- | ------ | --------------------------------------------------------- |
+| 0        | `word_stroff` | u32    | Offset into StringPool (null-terminated word string)      |
+| 4        | `entdata_off` | u32    | Offset into EntryData (start of this entry's EntryBlob)   |
+| 8        | `freq`        | u32    | Frequency rank (lower = more common); `0xFFFFFFFF` = null |
 
 ### EntryData — EntryBlob layout (variable-length, sequential read)
 
@@ -73,7 +73,7 @@ u32 brief_zh[brief_zh_count]   // each: strpool offset
 u8  pos_count
 
 For each POS (0 … pos_count-1):
-  u8  pos_kind                 // PosKind enum (0=Noun, 1=Verb, …, 255=Unknown)
+  u8  pos_kind                 // PosKind enum (0=Noun, 1=Verb, …, 20=Definite article, 255=Unknown)
   u32 pron_off                 // strpool offset (0 = none)
   u8  def_count
 
@@ -89,20 +89,30 @@ For each POS (0 … pos_count-1):
 
 ### PosKind enumeration
 
-| Value   | Part of Speech  |
-| ------- | --------------- |
-| 0       | Noun            |
-| 1       | Verb            |
-| 2       | Adjective       |
-| 3       | Adverb          |
-| 4       | Preposition     |
-| 5       | Conjunction     |
-| 6       | Interjection    |
-| 7       | Pronoun         |
-| 8       | Article         |
-| 9       | Phrase          |
-| 10      | Number          |
-| 255     | Unknown         |
+| Value   | Part of Speech      |
+| ------- | ------------------- |
+| 0       | Noun                |
+| 1       | Verb                |
+| 2       | Noun, verb          |
+| 3       | Adjective           |
+| 4       | Adverb              |
+| 5       | Adjective, adverb   |
+| 6       | Conjunction         |
+| 7       | Determiner          |
+| 8       | Indefinite article  |
+| 9       | Interjection        |
+| 10      | Modal verb          |
+| 11      | Number              |
+| 12      | Predeterminer       |
+| 13      | Preposition         |
+| 14      | Adverb, preposition |
+| 15      | Pronoun             |
+| 16      | Suffix              |
+| 17      | Prefix              |
+| 18      | Auxiliary verb      |
+| 19      | Phrasal verb        |
+| 20      | Definite article    |
+| 255     | Unknown             |
 
 ### StringPool
 

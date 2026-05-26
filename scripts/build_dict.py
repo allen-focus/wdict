@@ -19,17 +19,27 @@ from pathlib import Path
 # ─── PosKind enumeration (matches C enum in dict.h) ──────────────────────────
 
 POS_MAP = {
-    "Noun":          0,
-    "Verb":          1,
-    "Adjective":     2,
-    "Adverb":        3,
-    "Preposition":   4,
-    "Conjunction":   5,
-    "Interjection":  6,
-    "Pronoun":       7,
-    "Article":       8,
-    "Phrase":        9,
-    "Number":        10,
+    "Noun":               0,
+    "Verb":               1,
+    "Noun, verb":         2,
+    "Adjective":          3,
+    "Adverb":             4,
+    "Adjective, adverb":  5,
+    "Conjunction":        6,
+    "Determiner":         7,
+    "Indefinite article": 8,
+    "Interjection":       9,
+    "Modal verb":         10,
+    "Number":             11,
+    "Predeterminer":      12,
+    "Preposition":        13,
+    "Adverb, preposition": 14,
+    "Pronoun":            15,
+    "Suffix":             16,
+    "Prefix":             17,
+    "Auxiliary verb":     18,
+    "Phrasal verb":       19,
+    "Definite article":   20,
 }
 
 POS_UNKNOWN = 0xFF
@@ -157,7 +167,7 @@ class Builder:
         out = bytearray()
         out += struct.pack('<IIIIIIII',
             0x44494354,       # magic "DICT"
-            1,                # version
+            2,                # version
             len(word_entries),# word_count
             words_off,
             entdata_off,

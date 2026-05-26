@@ -443,3 +443,120 @@ int main(void)
 }
 
 #endif // FUZZY_STANDALONE_TEST
+
+//
+// Benchmark
+//
+
+#ifdef FUZZY_BENCH
+
+#    include <stdio.h>
+#    include <windows.h>
+#    include <string.h>
+#    include "dict.h"
+
+static void* bench_read_file(const char* path, usize* out_size)
+{
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return NULL;
+    DWORD hi = 0;
+    DWORD lo = GetFileSize(h, &hi);
+    usize size = ((usize)hi << 32) | lo;
+    HANDLE map = CreateFileMappingW(h, NULL, PAGE_READONLY, 0, 0, NULL);
+    void* ptr = NULL;
+    if (map)
+    {
+        ptr = MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0);
+        CloseHandle(map);
+    }
+    CloseHandle(h);
+    *out_size = size;
+    return ptr;
+}
+
+static void bench_close_file(void* ptr)
+{
+    if (ptr)
+        UnmapViewOfFile(ptr);
+}
+
+int main(void)
+{
+    usize blob_size = 0;
+    void* blob = bench_read_file("data/dict.bin", &blob_size);
+    if (!blob)
+    {
+        printf("FATAL: cannot open data/dict.bin\n");
+        return 1;
+    }
+
+    DictDB db = dict_open(blob);
+    if (!db.hdr)
+    {
+        printf("FATAL: dict_open failed\n");
+        bench_close_file(blob);
+        return 1;
+    }
+
+    u32 total = db.hdr->word_count;
+    printf("Dictionary: %u words\n\n", total);
+
+    Arena scratch = arena_new(MB(1));
+
+    typedef struct { const char* name; const char* text; } BenchQuery;
+    BenchQuery queries[] = {
+        {"(empty)",  ""},
+        {"z",        "z"},
+        {"a",        "a"},
+        {"st",       "st"},
+        {"pr",       "pr"},
+        {"lnr",      "lnr"},
+        {"the",      "the"},
+        {"com",      "com"},
+        {"abc",      "abc"},
+        {"tes",      "tes"},
+        {"tion",     "tion"},
+        {"commu",    "commu"},
+        {"linear",   "linear"},
+        {"dict",     "dict"},
+    };
+
+    printf("%-10s %10s %10s %10s %9s\n", "Query", "Total(ms)", "Matched", "us/word", "Kw/s");
+    printf("%s\n", "------------------------------------------------------");
+
+    for (i32 qi = 0; qi < countof(queries); qi++)
+    {
+        String query = { (u8*)queries[qi].text, (isize)strlen(queries[qi].text) };
+
+        LARGE_INTEGER freq, t0, t1;
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&t0);
+
+        i32 matched = 0;
+        for (u32 i = 0; i < total; i++)
+        {
+            const char* word = DICT_STR(&db, db.words[i].word_stroff);
+            String candidate = { (u8*)word, (isize)strlen(word) };
+            FuzzyMatch m = fuzzy_match(query, candidate, &scratch);
+            if (m.score < 1e8f)
+                matched++;
+        }
+
+        QueryPerformanceCounter(&t1);
+        f64 ms = (f64)(t1.QuadPart - t0.QuadPart) * 1000.0 / (f64)freq.QuadPart;
+        f64 us_per_word = ms * 1000.0 / (f64)total;
+        f64 kw_per_s = ms > 0.0 ? (f64)total / ms : 0.0;
+
+        printf("%-10s %10.2f %10d %10.1f %9.1f\n", queries[qi].name, ms, matched, us_per_word, kw_per_s);
+    }
+
+    arena_release(&scratch);
+    bench_close_file(blob);
+
+    printf("\n=== Bench complete ===\n");
+    return 0;
+}
+
+#endif // FUZZY_BENCH

@@ -31,6 +31,12 @@
 // Returned String points into the entry — no arena allocation needed.
 typedef String (*FieldExtractFn)(const void* entry);
 
+// Optional per-entry score adjustment (called by the worker after query_eval).
+// entry — opaque corpus entry pointer (same as passed to query_eval)
+// raw_score — score returned by query_eval (lower = better match)
+// Returns adjusted score.  If NULL, no adjustment is applied.
+typedef f32 (*ScoreAdjustFn)(const void* entry, f32 raw_score);
+
 typedef struct
 {
     const char* name; // field name, e.g. "key" / "text" / "tag"
@@ -160,6 +166,10 @@ typedef struct
 
     // Result-key extraction (set by search_init)
     FieldExtractFn key_extract;
+
+    // Optional per-entry score adjuster (e.g. frequency weighting).
+    // Set by caller after search_init.  Default NULL (no adjustment).
+    ScoreAdjustFn score_adjust;
 } SearchState;
 
 //

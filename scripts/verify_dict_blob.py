@@ -13,7 +13,7 @@ with open(sys.argv[1], 'rb') as f:
  entdata_off, strpool_off, r0, r1) = struct.unpack_from('<IIIIIIII', blob, 0)
 
 assert magic    == 0x44494354, f'bad magic: 0x{magic:08X}'
-assert version  == 1,          f'bad version: {version}'
+assert version  == 2,          f'bad version: {version}'
 assert r0 == 0 and r1 == 0,    f'reserved non-zero: {r0} {r1}'
 assert words_off == 32
 assert entdata_off == 32 + word_count * 12
