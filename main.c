@@ -1010,7 +1010,6 @@ static void cmd_palette_toggle(void* userdata, String cmd_text)
         ctx->ui.focused_hash = s_search_palette_input_hash;
         ctx->palette_selected_index = 0;
         ctx->palette_search_mode = PALETTE_MODE_WORD;
-        ctx->palette_effective_mode = PALETTE_MODE_WORD;
         ctx->palette_switch_version = 0;
     }
     else
@@ -1020,7 +1019,6 @@ static void cmd_palette_toggle(void* userdata, String cmd_text)
         ctx->palette_prev_selected_index = -1;
         ctx->palette_activate_pending = False;
         ctx->palette_search_mode = PALETTE_MODE_WORD;
-        ctx->palette_effective_mode = PALETTE_MODE_WORD;
         ctx->palette_switch_version = 0;
     }
     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
@@ -3701,6 +3699,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     // clang-format on
                     search_reconfigure(&shared->palette_search, fields, field_count);
                     ctx->palette_search_mode = new_mode;
+                    ctx->palette_effective_mode = new_mode;
                     /* Re-issue current query with new fields */
                     String cur_query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
                     if (cur_query.len > 0)
