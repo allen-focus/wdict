@@ -1,6 +1,7 @@
 #pragma once
 
 #include "utils.h"
+#include <string.h>
 
 //
 // Constants
@@ -15,28 +16,28 @@
 
 typedef enum
 {
-    POS_NOUN         = 0,   // Noun
-    POS_VERB         = 1,   // Verb
-    POS_NOUN_VERB    = 2,   // Noun, verb
-    POS_ADJ          = 3,   // Adjective
-    POS_ADV          = 4,   // Adverb
-    POS_ADJ_ADV      = 5,   // Adjective, adverb
-    POS_CONJ         = 6,   // Conjunction
-    POS_DET          = 7,   // Determiner
-    POS_INDEF_ART    = 8,   // Indefinite article
-    POS_INTERJ       = 9,   // Interjection
-    POS_MODAL        = 10,  // Modal verb
-    POS_NUM          = 11,  // Number
-    POS_PREDET       = 12,  // Predeterminer
-    POS_PREP         = 13,  // Preposition
-    POS_ADV_PREP     = 14,  // Adverb, preposition
-    POS_PRON         = 15,  // Pronoun
-    POS_SUFFIX       = 16,  // Suffix
-    POS_PREFIX       = 17,  // Prefix
-    POS_AUX_VERB     = 18,  // Auxiliary verb
-    POS_PHRASAL_VERB = 19,  // Phrasal verb
-    POS_DEF_ART      = 20,  // Definite article
-    POS_UNKNOWN      = 0xFF
+    POS_NOUN = 0, // Noun
+    POS_VERB = 1, // Verb
+    POS_NOUN_VERB = 2, // Noun, verb
+    POS_ADJ = 3, // Adjective
+    POS_ADV = 4, // Adverb
+    POS_ADJ_ADV = 5, // Adjective, adverb
+    POS_CONJ = 6, // Conjunction
+    POS_DET = 7, // Determiner
+    POS_INDEF_ART = 8, // Indefinite article
+    POS_INTERJ = 9, // Interjection
+    POS_MODAL = 10, // Modal verb
+    POS_NUM = 11, // Number
+    POS_PREDET = 12, // Predeterminer
+    POS_PREP = 13, // Preposition
+    POS_ADV_PREP = 14, // Adverb, preposition
+    POS_PRON = 15, // Pronoun
+    POS_SUFFIX = 16, // Suffix
+    POS_PREFIX = 17, // Prefix
+    POS_AUX_VERB = 18, // Auxiliary verb
+    POS_PHRASAL_VERB = 19, // Phrasal verb
+    POS_DEF_ART = 20, // Definite article
+    POS_UNKNOWN = 0xFF
 } PosKind;
 
 //
@@ -95,6 +96,7 @@ i32 dict_lookup(const DictDB* db, const char* word);
 // All are static inline so the compiler can fold the tiny helpers.
 //
 
+#pragma warning(disable : 4068)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"
 

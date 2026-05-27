@@ -10,7 +10,6 @@
 //
 
 #include "search.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -283,8 +282,7 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
                     local_count++;
                 i32 to_move = local_count - 1 - pos;
                 if (to_move > 0)
-                    memmove(&local_results[pos + 1], &local_results[pos],
-                            (usize)to_move * sizeof(SearchResult));
+                    memmove(&local_results[pos + 1], &local_results[pos], (usize)to_move * sizeof(SearchResult));
 
                 local_results[pos] = (SearchResult){
                     .entry = entry,
@@ -293,8 +291,7 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
                     .score = agg.score,
                     .range_count = agg.range_count,
                 };
-                memcpy(local_results[pos].ranges, agg.ranges,
-                       (usize)agg.range_count * sizeof(FuzzyRange));
+                memcpy(local_results[pos].ranges, agg.ranges, (usize)agg.range_count * sizeof(FuzzyRange));
             }
         }
 
@@ -303,8 +300,7 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
         {
             state->worker_result_counts[my_index] = local_count;
             if (local_count > 0)
-                memcpy(state->worker_results[my_index], local_results,
-                       (usize)local_count * sizeof(SearchResult));
+                memcpy(state->worker_results[my_index], local_results, (usize)local_count * sizeof(SearchResult));
         }
         else
         {
@@ -399,8 +395,7 @@ b32 search_start(SearchState* state)
     {
         state->worker_params[i].state = state;
         state->worker_params[i].worker_id = i;
-        state->worker_handles[i] = CreateThread(
-            NULL, 0, search_worker_thread, &state->worker_params[i], 0, NULL);
+        state->worker_handles[i] = CreateThread(NULL, 0, search_worker_thread, &state->worker_params[i], 0, NULL);
         if (!state->worker_handles[i])
         {
             state->running = 0;
@@ -471,8 +466,7 @@ void search_set_query(SearchState* state, String query)
     // Skip unchanged queries to avoid aborting in-progress searches
     // every frame (the search popup render loop calls us unconditionally).
     AcquireSRWLockShared(&state->query_lock);
-    b32 same = (len == state->query_len &&
-                (len == 0 || memcmp(state->query_buf, query.data, (usize)len) == 0));
+    b32 same = (len == state->query_len && (len == 0 || memcmp(state->query_buf, query.data, (usize)len) == 0));
     ReleaseSRWLockShared(&state->query_lock);
     if (same)
         return;
@@ -513,8 +507,7 @@ void search_set_query(SearchState* state, String query)
     }
 
     InterlockedIncrement(&state->search_round);
-    InterlockedExchange(&state->query_version_snapshot,
-                        InterlockedOr(&state->query_version, 0));
+    InterlockedExchange(&state->query_version_snapshot, InterlockedOr(&state->query_version, 0));
 
     for (i32 wi = 0; wi < k; wi++)
         SetEvent(state->worker_events[wi]);
@@ -557,8 +550,7 @@ i32 search_get_results(SearchState* state, SearchResult* out, i32 max_count)
             SearchResult merged_results[SEARCH_MAX_RESULTS];
             i32 merged_count = merge_k_sorted(state, merged_results, SEARCH_MAX_RESULTS);
             if (merged_count > 0)
-                memcpy(state->results, merged_results,
-                       (usize)merged_count * sizeof(SearchResult));
+                memcpy(state->results, merged_results, (usize)merged_count * sizeof(SearchResult));
             state->result_count = merged_count;
             state->published_version = cur_ver;
         }
