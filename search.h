@@ -22,6 +22,19 @@
 #define SEARCH_MAX_RESULTS 200
 #define SEARCH_QUERY_BUF   512
 #define SEARCH_SCRATCH_MB  1
+#define SEARCH_MAX_WORKERS 8
+
+//
+// Worker thread parameter — packed into SearchState so it outlives search_start.
+//
+
+typedef struct SearchState SearchState;
+
+typedef struct
+{
+    SearchState* state;
+    i32 worker_id;
+} SearchWorkerParam;
 
 //
 // Field descriptor
@@ -137,7 +150,7 @@ typedef struct
 // Ranges in SearchResult are UTF-8 byte offsets into `text`,
 // NOT codepoint indices — required for CJK highlight slicing.
 
-typedef struct
+struct SearchState
 {
     // Corpus (read-only after init, opaque — search.c walks via stride arithmetic)
     const void* corpus;
@@ -153,6 +166,7 @@ typedef struct
     // Search output (worker writes, UI reads — results_lock)
     SearchResult results[SEARCH_MAX_RESULTS];
     i32 result_count;
+    volatile LONG published_version;
     SRWLOCK results_lock;
 
     // Worker control
@@ -170,7 +184,41 @@ typedef struct
     // Optional per-entry score adjuster (e.g. frequency weighting).
     // Set by caller after search_init.  Default NULL (no adjustment).
     ScoreAdjustFn score_adjust;
-} SearchState;
+
+    //
+    // Multi-thread worker pool (coordinator + K parallel workers)
+    //
+    // Coordinator builds QueryNode tree, slices corpus, wakes each worker
+    // via its own worker_events[i], waits for done_event, version‑checks,
+    // K‑way merges, and publishes.
+    // Workers process their pre‑assigned slice with per‑entry checkpoint
+    // version‑abort.  Per‑worker event eliminates token‑theft and done_count
+    // mismatch bugs inherent in semaphore‑based broadcast.
+    //
+
+    HANDLE worker_handles[SEARCH_MAX_WORKERS];
+    HANDLE worker_events[SEARCH_MAX_WORKERS]; // coordinator → worker[i]: one shot per round (auto‑reset)
+    HANDLE done_event; // last worker → coordinator: all‑done signal
+    volatile LONG done_count; // workers finished this round
+    volatile LONG search_round; // generation counter: invalidates stale workers
+    volatile LONG query_version_snapshot; // stable version ref for worker checkpoint
+    const QueryNode* active_query_tree; // coordinator builds; workers read‑only
+
+    struct
+    {
+        i32 start;
+        i32 end;
+    } slices[SEARCH_MAX_WORKERS]; // coordinator writes per round; workers read own slot
+
+    // Per‑worker result buffers — heap‑allocated in search_init, freed in search_stop.
+    // DO NOT stack‑allocate SearchState: sizeof(SearchResult[K][200]) ~ 900 KB.
+    SearchResult (*worker_results)[SEARCH_MAX_RESULTS];
+    i32 worker_result_counts[SEARCH_MAX_WORKERS];
+
+    SearchWorkerParam worker_params[SEARCH_MAX_WORKERS]; // thread startup params (outsurvives stack)
+
+    i32 worker_count; // actual worker count (set in search_init)
+};
 
 //
 // API

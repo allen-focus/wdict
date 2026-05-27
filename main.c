@@ -1434,6 +1434,11 @@ static void decoration_overlay(WindowContext* ctx)
         {
             search_set_query(&shared->word_search, query);
             sr_count = search_get_results(&shared->word_search, sr, SEARCH_DISPLAY_MAX);
+            {
+                char dbg_str[256];
+                snprintf(dbg_str, sizeof(dbg_str), "%d\n", sr_count);
+                OutputDebugStringA(dbg_str);
+            }
         }
         else
         {
