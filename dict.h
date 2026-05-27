@@ -7,11 +7,12 @@
 // Constants
 //
 
-#define DICT_MAGIC   0x44494354u /* "DICT" */
-#define DICT_VERSION 2u
+#define DICT_MAGIC           0x44494354u /* "DICT" */
+#define DICT_VERSION         2u
+#define DICT_SEARCH_SEP_CHAR ((char)0x01)
 
 //
-// PosKind — packed as u8 in the binary blob.
+// PosKind
 //
 
 typedef enum
@@ -41,7 +42,7 @@ typedef enum
 } PosKind;
 
 //
-// On-disk binary structures (packed — no padding).
+// On-disk binary structures
 //
 
 typedef struct
@@ -90,6 +91,50 @@ i32 dict_lookup(const DictDB* db, const char* word);
 
 // Convert a strpool offset to a C string pointer.
 #define DICT_STR(db, off) ((const char*)((db)->strpool + (off)))
+
+//
+// Search auxiliary data — pre-built concatenated definition/example text for
+// multi-threaded fuzzy search.  One entry per WordIndex slot.
+//
+// Separator between individual strings: 0x01 (SOH).  It is never typed by
+// users and does not appear in dictionary text, so it cannot create false
+// cross-segment consecutive-character bonuses.
+//
+
+typedef enum
+{
+    AUXSEG_DEF_EN = 0,
+    AUXSEG_DEF_ZH = 1,
+    AUXSEG_EX_EN = 2,
+    AUXSEG_EX_ZH = 3,
+} AuxSegKind;
+
+typedef struct
+{
+    u32 offset; // byte offset within def_search_text or ex_search_text
+    u32 len; // length in bytes (excludes the trailing separator)
+    u8 kind; // AuxSegKind
+    u8 def_index; // which definition/example group (0-based)
+} AuxSegment;
+
+typedef struct
+{
+    char*       def_search_text; // \x01-concatenated definition strings (def_en + def_zh per POS)
+    char*       ex_search_text;  // \x01-concatenated example strings
+    i32 def_len;
+    i32 ex_len;
+    AuxSegment* def_segs; // [def_seg_count] — arena-allocated
+    i32 def_seg_count;
+    AuxSegment* ex_segs; // [ex_seg_count] — arena-allocated
+    i32 ex_seg_count;
+} DictSearchAuxEntry;
+
+// Build the search-auxiliary array from an open DictDB.
+// All memory (entry array + text buffers + segment arrays) is allocated from
+// `arena`.  Returns NULL if the arena is too small.
+// The returned array has db->hdr->word_count entries, indexed parallel to
+// db->words[].
+DictSearchAuxEntry* dict_build_search_aux(const DictDB* db, Arena* arena);
 
 //
 // EntryBlob low-level readers (used by entry_view.c to parse entry data).

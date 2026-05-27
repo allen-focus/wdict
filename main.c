@@ -148,6 +148,8 @@ typedef struct
     CmdQueue cmd_queue;
     SearchState word_search;
     DictDB dict_db;
+    DictSearchAuxEntry* search_aux;
+    Arena search_aux_arena;
 
     /* cross-window drag-drop */
     b32 cross_drag_active;
@@ -224,6 +226,7 @@ struct WindowContext
 };
 
 static DictDB* g_dict_db; /* set at startup, used by extract callbacks */
+static DictSearchAuxEntry* g_search_aux; /* set at startup, used by extract callbacks */
 
 static u64 s_search_input_hash;
 static u64 s_search_palette_input_hash;
@@ -341,6 +344,20 @@ static String dict_word_extract(const void* entry)
     const DictWordIndex* w = (const DictWordIndex*)entry;
     const char* s = DICT_STR(g_dict_db, w->word_stroff);
     return (String){ (u8*)s, (isize)strlen(s) };
+}
+
+static String dict_def_extract(const void* entry)
+{
+    const DictWordIndex* w = (const DictWordIndex*)entry;
+    i32 idx = (i32)(w - g_dict_db->words);
+    return (String){ (u8*)g_search_aux[idx].def_search_text, g_search_aux[idx].def_len };
+}
+
+static String dict_ex_extract(const void* entry)
+{
+    const DictWordIndex* w = (const DictWordIndex*)entry;
+    i32 idx = (i32)(w - g_dict_db->words);
+    return (String){ (u8*)g_search_aux[idx].ex_search_text, g_search_aux[idx].ex_len };
 }
 
 static FieldDef s_dict_fields[] = { { "word", dict_word_extract, 1.0f } };
@@ -3528,6 +3545,14 @@ i32 WinMainCRTStartup()
         g_dict_db = &shared.dict_db;
     }
 
+    /* Build search auxiliary data (pre-concatenated definition/example text for multi-field fuzzy search) */
+    {
+        shared.search_aux_arena = arena_new(MB(20));
+        shared.search_aux = dict_build_search_aux(&shared.dict_db, &shared.search_aux_arena);
+        Assert(shared.search_aux);
+        g_search_aux = shared.search_aux;
+    }
+
     /* Initialize and start word search worker (corpus = DictDB word index, fixed stride = 12) */
     search_init(&shared.word_search, shared.dict_db.words, (i32)shared.dict_db.hdr->word_count, sizeof(DictWordIndex),
                 s_dict_fields, countof(s_dict_fields), dict_word_extract);
@@ -3784,6 +3809,8 @@ i32 WinMainCRTStartup()
 
     /* Stop word search worker */
     search_stop(&shared.word_search);
+
+    arena_release(&shared.search_aux_arena);
 
     font_unregister(&shared.fonts[FONT_INDEX_UI]);
     font_unregister(&shared.fonts[FONT_INDEX_ZH]);
