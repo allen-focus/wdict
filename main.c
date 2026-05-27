@@ -1476,6 +1476,234 @@ static PaletteRowResult palette_row_interact(UIBox* row, String hash_str, const 
 }
 
 //
+// Palette Display Item
+//
+
+typedef struct
+{
+    const DictWordIndex* entry;
+    String word_text;
+    String display_context; // def or example snippet; zero-length if not applicable
+    f32 score;
+    i32 word_range_count;
+    FuzzyRange word_ranges[FUZZY_MAX_RANGES];
+    i32 ctx_range_count;
+    FuzzyRange ctx_ranges[FUZZY_MAX_RANGES];
+    b32 has_context;
+} PaletteDisplayItem;
+
+//
+// Locate which AuxSegment contains a given byte offset (binary search).
+// Returns the index, or -1 if the offset falls outside all segments.
+// If offset lands in a separator gap between segments, returns the segment
+// immediately before it so the caller still gets a meaningful fallback.
+//
+static i32 aux_segment_locate(const AuxSegment* segs, i32 seg_count, u32 offset)
+{
+    if (seg_count == 0)
+        return -1;
+    i32 lo = 0, hi = seg_count - 1;
+    while (lo <= hi)
+    {
+        i32 mid = (lo + hi) / 2;
+        u32 seg_start = segs[mid].offset;
+        u32 seg_end = segs[mid].offset + segs[mid].len;
+        if (offset < seg_start)
+            hi = mid - 1;
+        else if (offset >= seg_end)
+            lo = mid + 1;
+        else
+            return mid;
+    }
+    /* offset falls in a separator gap or beyond boundaries */
+    if (hi >= 0)
+        return hi; /* segment immediately before gap */
+    if (lo < seg_count)
+        return lo; /* segment immediately after (rare) */
+    return -1;
+}
+
+//
+// Snap a byte offset backward to the start of the UTF-8 character it
+// falls in.  Bytes 0x80-0xBF are continuation bytes — walk left until a
+// start byte.
+//
+static i32 utf8_back_to_char_start(const u8* data, i32 offset, i32 min_bound)
+{
+    while (offset > min_bound && (data[offset] & 0xC0) == 0x80)
+        offset--;
+    return offset;
+}
+
+//
+// Snap a byte offset forward past continuation bytes to the next character
+// boundary.  Already at a start byte → return unchanged.
+//
+static i32 utf8_fwd_to_char_end(const u8* data, i32 offset, i32 max_bound)
+{
+    while (offset < max_bound && (data[offset] & 0xC0) == 0x80)
+        offset++;
+    return offset;
+}
+
+//
+// Convert raw SearchResult[] into rich PaletteDisplayItem[]
+// using the pre‑built DictSearchAux segment tables.
+//
+// For WORD mode  → word_text = entry's word, no context.
+// For DEF/EX/ALL → locate the matching segment, normalise ranges,
+//                  derive display_context.
+// No allocation — all strings point into pre‑existing memory.
+//
+static i32 palette_build_display_items(const SearchResult* sr, i32 sr_count, SearchPaletteMode mode, i32 max_items,
+                                       PaletteDisplayItem* out)
+{
+    const DictDB* db = g_dict_db;
+    const DictSearchAuxEntry* aux = g_search_aux;
+    i32 count = sr_count < max_items ? sr_count : max_items;
+
+    for (i32 i = 0; i < count; i++)
+    {
+        const DictWordIndex* w = (const DictWordIndex*)sr[i].entry;
+        i32 idx = (i32)(w - db->words);
+        PaletteDisplayItem* item = &out[i];
+        memset(item, 0, sizeof(*item));
+
+        item->entry = w;
+        item->score = sr[i].score;
+
+        const char* wrd = DICT_STR(db, w->word_stroff);
+        item->word_text = (String){ (u8*)wrd, (isize)strlen(wrd) };
+
+        if (mode == PALETTE_MODE_WORD)
+        {
+            /* ranges are byte offsets into the word string */
+            item->word_range_count = sr[i].range_count;
+            memcpy(item->word_ranges, sr[i].ranges, (usize)sr[i].range_count * sizeof(FuzzyRange));
+            item->has_context = False;
+            continue;
+        }
+
+        /* ── All non-word modes: determine which field matched, then locate context segment ── */
+        const AuxSegment* segs;
+        i32 seg_count;
+        const u8* search_text;
+        i32 search_text_len;
+
+        if (mode == PALETTE_MODE_DEF)
+        {
+            segs = aux[idx].def_segs;
+            seg_count = aux[idx].def_seg_count;
+            search_text = (const u8*)aux[idx].def_search_text;
+            search_text_len = aux[idx].def_len;
+        }
+        else if (mode == PALETTE_MODE_EXAMPLE)
+        {
+            segs = aux[idx].ex_segs;
+            seg_count = aux[idx].ex_seg_count;
+            search_text = (const u8*)aux[idx].ex_search_text;
+            search_text_len = aux[idx].ex_len;
+        }
+        else /* PALETTE_MODE_ALL */
+        {
+            const char* word_ptr = DICT_STR(db, w->word_stroff);
+            if (sr[i].text.data == (const u8*)word_ptr)
+            {
+                /* hit was in the word field — treat like WORD mode */
+                item->word_range_count = sr[i].range_count;
+                memcpy(item->word_ranges, sr[i].ranges, (usize)sr[i].range_count * sizeof(FuzzyRange));
+                item->has_context = False;
+                continue;
+            }
+            const u8* def_ptr = (const u8*)aux[idx].def_search_text;
+            const u8* ex_ptr = (const u8*)aux[idx].ex_search_text;
+            if (sr[i].text.data == def_ptr)
+            {
+                segs = aux[idx].def_segs;
+                seg_count = aux[idx].def_seg_count;
+                search_text = def_ptr;
+                search_text_len = aux[idx].def_len;
+            }
+            else if (sr[i].text.data == ex_ptr)
+            {
+                segs = aux[idx].ex_segs;
+                seg_count = aux[idx].ex_seg_count;
+                search_text = ex_ptr;
+                search_text_len = aux[idx].ex_len;
+            }
+            else
+            {
+                /* unexpected ref_text — show word only */
+                item->has_context = False;
+                continue;
+            }
+        }
+
+        /* Verify the result's ref_text matches what we expect.
+           (In ALL mode the hit might be in the word field — handled above.) */
+        if (sr[i].range_count == 0 || seg_count == 0)
+        {
+            item->has_context = False;
+            continue;
+        }
+
+        /* Locate the segment that contains the first highlight range.
+           If ranges[0] falls in a separator gap, try subsequent ranges. */
+        i32 seg_idx = -1;
+        for (i32 r = 0; r < sr[i].range_count; r++)
+        {
+            seg_idx = aux_segment_locate(segs, seg_count, (u32)sr[i].ranges[r].start);
+            if (seg_idx >= 0)
+                break;
+        }
+
+        if (seg_idx < 0)
+        {
+            /* No segment covers the hit — fallback: show word only */
+            item->has_context = False;
+            continue;
+        }
+
+        const AuxSegment* seg = &segs[seg_idx];
+        item->display_context.data = (u8*)search_text + seg->offset;
+        item->display_context.len = seg->len;
+        item->has_context = True;
+
+        /* Normalise ranges to be segment-local */
+        item->ctx_range_count = 0;
+        for (i32 r = 0; r < sr[i].range_count && item->ctx_range_count < FUZZY_MAX_RANGES; r++)
+        {
+            i32 r_start = sr[i].ranges[r].start;
+            i32 r_end = sr[i].ranges[r].end;
+            /* Only include ranges that overlap with this segment */
+            if (r_end <= (i32)seg->offset || r_start >= (i32)(seg->offset + seg->len))
+                continue;
+            i32 local_start = r_start - (i32)seg->offset;
+            i32 local_end = r_end - (i32)seg->offset;
+            if (local_start < 0)
+                local_start = 0;
+            if (local_end > (i32)seg->len)
+                local_end = (i32)seg->len;
+
+            /* Snap to UTF-8 character boundaries — byte-level clipping may
+               split a multi-byte codepoint (common with CJK in example text). */
+            local_start = utf8_back_to_char_start(search_text + seg->offset, local_start, 0);
+            local_end = utf8_fwd_to_char_end(search_text + seg->offset, local_end, seg->len);
+            if (local_end > local_start)
+            {
+                item->ctx_ranges[item->ctx_range_count].start = local_start;
+                item->ctx_ranges[item->ctx_range_count].end = local_end;
+                item->ctx_range_count++;
+            }
+        }
+        /* If no ranges survived normalisation, still show the context
+           without highlights — better than an empty row. */
+    }
+
+    return count;
+}
+
+//
 // Frame Processing
 //
 
@@ -1496,6 +1724,7 @@ static void render_highlighted_text(String text, i32 range_count, const FuzzyRan
                 String seg = { text.data + prev, ranges[r].start - (i32)prev };
                 ui_text(seg, normal_cfg);
             }
+            if (ranges[r].end > ranges[r].start)
             {
                 String seg = { text.data + ranges[r].start, ranges[r].end - ranges[r].start };
                 ui_text(seg, highlight_cfg);
@@ -2056,13 +2285,17 @@ static void search_palette_render(WindowContext* ctx)
         sr_count = n;
     }
 
+    /* Build rich display items (word + context, normalised ranges) */
+    PaletteDisplayItem items[SEARCH_DISPLAY_MAX];
+    i32 item_count = palette_build_display_items(sr, sr_count, mode, SEARCH_DISPLAY_MAX, items);
+
     /* ── Determine view state ── */
     PaletteViewState view_state;
     if (query.len == 0)
         view_state = PALETTE_VIEW_EMPTY;
     else if (shared->palette_search.published_version < ctx->palette_switch_version)
         view_state = PALETTE_VIEW_LOADING;
-    else if (sr_count > 0)
+    else if (item_count > 0)
         view_state = PALETTE_VIEW_RESULTS;
     else
         view_state = PALETTE_VIEW_NO_MATCH;
@@ -2074,12 +2307,12 @@ static void search_palette_render(WindowContext* ctx)
         ctx->palette_selected_index = 0;
 
     /* auto-select first item when results transition from empty to non-empty */
-    if (sr_count > 0 && ctx->palette_selected_index < 0)
+    if (item_count > 0 && ctx->palette_selected_index < 0)
         ctx->palette_selected_index = 0;
 
     /* wrap selected index */
-    if (sr_count > 0)
-        ctx->palette_selected_index = (ctx->palette_selected_index % sr_count + sr_count) % sr_count;
+    if (item_count > 0)
+        ctx->palette_selected_index = (ctx->palette_selected_index % item_count + item_count) % item_count;
     else
         ctx->palette_selected_index = -1;
 
@@ -2128,20 +2361,21 @@ static void search_palette_render(WindowContext* ctx)
                     &(BoxConfig){ .sizing = { grow({}), fit({}) }, .alignment = { ALIGN_START, ALIGN_CENTER } });
                 {
                     const char* placeholder;
+                    // clang-format off
                     switch (ctx->palette_search_mode)
                     {
                         default:
-                        case PALETTE_MODE_WORD:    placeholder = "Search word...";    break;
+                        case PALETTE_MODE_WORD:    placeholder = "Search word...";       break;
                         case PALETTE_MODE_DEF:     placeholder = "Search definition..."; break;
-                        case PALETTE_MODE_EXAMPLE: placeholder = "Search example..."; break;
-                        case PALETTE_MODE_ALL:     placeholder = "Search all...";     break;
+                        case PALETTE_MODE_EXAMPLE: placeholder = "Search example...";    break;
+                        case PALETTE_MODE_ALL:     placeholder = "Search all...";        break;
                     }
-                    ui_text_field(&ctx->palette_text_edit,
-                                  str_fmt(128, "%s###" SEARCH_PALETTE_INPUT_HASH_STR, placeholder),
-                                  &shared->fonts[FONT_INDEX_UI], font_size, (SizingAxis)fit_grow({}), s_padding_medium,
-                                  theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
-                                  theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash,
-                                  True);
+                    // clang-format on
+                    ui_text_field(
+                        &ctx->palette_text_edit, str_fmt(128, "%s###" SEARCH_PALETTE_INPUT_HASH_STR, placeholder),
+                        &shared->fonts[FONT_INDEX_ZH], font_size, (SizingAxis)fit_grow({}), s_padding_medium,
+                        theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb, theme->cursor_bar,
+                        theme->cursor_trail, theme->selection, theme->selection_flash, True);
                 }
                 ui_box_end(tf_container);
 
@@ -2181,7 +2415,7 @@ static void search_palette_render(WindowContext* ctx)
                 case PALETTE_VIEW_EMPTY:
                 case PALETTE_VIEW_RESULTS:
                 {
-                    if (sr_count == 0)
+                    if (item_count == 0)
                         break;
 
                     b32 result_clicked = False;
@@ -2219,21 +2453,34 @@ static void search_palette_render(WindowContext* ctx)
                                 {
                                     ui_ctx->mouse_scroll_delta.y = 0;
                                     ctx->palette_selected_index =
-                                        palette_nav_apply(ctx->palette_selected_index, sr_count, scroll_action, NULL);
+                                        palette_nav_apply(ctx->palette_selected_index, item_count, scroll_action, NULL);
                                     selection_changed = 1;
                                 }
                             }
 
                             f32 cumulative_y = 0.f;
 
-                            for (i32 i = 0; i < sr_count; i++)
+                            TextConfig normal_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
+                                                      .font_size = font_size,
+                                                      .color = theme->panel_fg };
+                            TextConfig highlight_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
+                                                         .font_size = font_size,
+                                                         .color = theme->accent_bg };
+                            TextConfig context_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
+                                                       .font_size = 10.f,
+                                                       .color = theme->accent_weak_fg };
+                            TextConfig context_hl_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
+                                                          .font_size = 10.f,
+                                                          .color = theme->accent_bg };
+
+                            for (i32 i = 0; i < item_count; i++)
                             {
-                                String word_text = sr[i].text;
+                                PaletteDisplayItem* item = &items[i];
+
                                 UIBox* row = ui_box_begin(&(BoxConfig){
                                     .sizing = { fit_grow({}), fit({}) },
-                                    .direction = LAYOUT_LEFT_TO_RIGHT,
-                                    .alignment = { ALIGN_START, ALIGN_CENTER },
-                                    .padding = { 8, 8, 8, 8 },
+                                    .direction = LAYOUT_TOP_TO_BOTTOM,
+                                    .padding = { 6, 8, 6, 8 },
                                     .color = (Color){ 0, 0, 0, 0 },
                                     .rect_style = { .corner_radius = 4 },
                                 });
@@ -2246,7 +2493,7 @@ static void search_palette_render(WindowContext* ctx)
                                     /* preview: auto-update tab content for selected item */
                                     if (i == ctx->palette_selected_index)
                                     {
-                                        const DictWordIndex* w = (const DictWordIndex*)sr[i].entry;
+                                        const DictWordIndex* w = item->entry;
                                         PanelTab* active = panel_tab_get_active(ctx->focused_panel);
                                         if (active)
                                         {
@@ -2270,19 +2517,28 @@ static void search_palette_render(WindowContext* ctx)
                                     if (commit_this)
                                         result_clicked = True;
 
-                                    /* render word with fuzzy-match highlighting */
-                                    TextConfig normal_cfg = {
-                                        .font = &shared->fonts[FONT_INDEX_UI],
-                                        .font_size = font_size,
-                                        .color = theme->panel_fg,
-                                    };
-                                    TextConfig highlight_cfg = {
-                                        .font = &shared->fonts[FONT_INDEX_UI],
-                                        .font_size = font_size,
-                                        .color = theme->accent_bg,
-                                    };
-                                    render_highlighted_text(word_text, sr[i].range_count, sr[i].ranges, &normal_cfg,
-                                                            &highlight_cfg);
+                                    /* word line — always shown, in horizontal box */
+                                    {
+                                        UIBox* word_line = ui_box_begin(&(BoxConfig){
+                                            .sizing = { fit_grow({}), fit({}) }, .direction = LAYOUT_LEFT_TO_RIGHT });
+                                        {
+                                            render_highlighted_text(item->word_text, item->word_range_count,
+                                                                    item->word_ranges, &normal_cfg, &highlight_cfg);
+                                        }
+                                        ui_box_end(word_line);
+                                    }
+
+                                    /* context line — shown for def/ex/all modes, in horizontal box */
+                                    if (item->has_context && item->display_context.len > 0)
+                                    {
+                                        UIBox* ctx_line = ui_box_begin(&(BoxConfig){
+                                            .sizing = { fit_grow({}), fit({}) }, .direction = LAYOUT_LEFT_TO_RIGHT });
+                                        {
+                                            render_highlighted_text(item->display_context, item->ctx_range_count,
+                                                                    item->ctx_ranges, &context_cfg, &context_hl_cfg);
+                                        }
+                                        ui_box_end(ctx_line);
+                                    }
                                 }
                                 ui_box_end(row);
 
@@ -2303,7 +2559,7 @@ static void search_palette_render(WindowContext* ctx)
                         /* sync viewport -> selected index (scrollbar drag only) */
                         {
                             b32 scrollbar_used = fabs(delta_y_after - delta_y_before) > 0.01f;
-                            if (!selection_changed && scrollbar_used && sr_count > 0 && row_h > 0)
+                            if (!selection_changed && scrollbar_used && item_count > 0 && row_h > 0)
                             {
                                 f32 current_scroll = delta_y_after;
                                 f32 viewport_h = scroll.last_area->size.height;
@@ -2318,7 +2574,7 @@ static void search_palette_render(WindowContext* ctx)
                                         new_idx = (i32)((visible_top + row_h * 0.5f) / row_h);
                                     else
                                         new_idx = (i32)((visible_bottom - row_h * 0.5f) / row_h);
-                                    new_idx = max(0, min(new_idx, sr_count - 1));
+                                    new_idx = max(0, min(new_idx, item_count - 1));
                                     if (new_idx != ctx->palette_selected_index)
                                         ctx->palette_selected_index = new_idx;
                                 }
@@ -3359,10 +3615,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
             /* Palette mode switching — intercept before shortcut lookup
                so Ctrl+W switches to word mode instead of closing a tab. */
-            if (ctx && ctrl && ctx->palette_popup.open &&
-                ctx->ui.focused_hash == s_search_palette_input_hash)
+            if (ctx && ctrl && ctx->palette_popup.open && ctx->ui.focused_hash == s_search_palette_input_hash)
             {
                 SearchPaletteMode new_mode = ctx->palette_search_mode;
+                // clang-format off
                 switch (wparam)
                 {
                     case 'D': new_mode = PALETTE_MODE_DEF;     break;
@@ -3370,19 +3626,22 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     case 'W': new_mode = PALETTE_MODE_WORD;    break;
                     default: goto check_shortcuts;
                 }
+                // clang-format on
 
                 if (new_mode != ctx->palette_search_mode)
                 {
                     const FieldDef* fields;
                     i32 field_count;
+                    // clang-format off
                     switch (new_mode)
                     {
                         default:
-                        case PALETTE_MODE_WORD:   fields = s_dict_fields;     field_count = countof(s_dict_fields);     break;
-                        case PALETTE_MODE_DEF:    fields = s_dict_fields_def; field_count = countof(s_dict_fields_def); break;
-                        case PALETTE_MODE_EXAMPLE: fields = s_dict_fields_ex;  field_count = countof(s_dict_fields_ex);  break;
-                        case PALETTE_MODE_ALL:    fields = s_dict_fields_all;  field_count = countof(s_dict_fields_all); break;
+                        case PALETTE_MODE_WORD:    fields  = s_dict_fields;     field_count = countof(s_dict_fields);     break;
+                        case PALETTE_MODE_DEF:     fields  = s_dict_fields_def; field_count = countof(s_dict_fields_def); break;
+                        case PALETTE_MODE_EXAMPLE: fields  = s_dict_fields_ex;  field_count = countof(s_dict_fields_ex);  break;
+                        case PALETTE_MODE_ALL:     fields  = s_dict_fields_all; field_count = countof(s_dict_fields_all); break;
                     }
+                    // clang-format on
                     search_reconfigure(&shared->palette_search, fields, field_count);
                     ctx->palette_search_mode = new_mode;
                     /* Re-issue current query with new fields */
