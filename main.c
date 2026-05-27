@@ -187,6 +187,7 @@ struct WindowContext
     TextEditState search_text_edit;
     i32 search_selected_index;
     i32 search_prev_selected_index;
+    isize search_prev_query_len;
     b32 search_activate_pending;
 
     /* decoration (window-level overlay) */
@@ -638,6 +639,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     ctx->search_text_edit.size = SEARCH_QUERY_BUF;
     ctx->search_selected_index = -1;
     ctx->search_prev_selected_index = -1;
+    ctx->search_prev_query_len = 0;
     ctx->search_activate_pending = False;
 
     /* Add to window list */
@@ -1453,6 +1455,12 @@ static void decoration_overlay(WindowContext* ctx)
             sr_count = n;
         }
 
+        /* Detect query change: reset to first match so user always sees the best result */
+        b32 query_changed = (query.len != ctx->search_prev_query_len);
+        ctx->search_prev_query_len = query.len;
+        if (query_changed)
+            ctx->search_selected_index = 0;
+
         /* wrap selected index (true modulo for bidirectional wrap) */
         if (sr_count > 0)
             ctx->search_selected_index = (ctx->search_selected_index % sr_count + sr_count) % sr_count;
@@ -1526,7 +1534,6 @@ static void decoration_overlay(WindowContext* ctx)
                                                                               .direction = LAYOUT_TOP_TO_BOTTOM,
                                                                               .scroll_margin = font_size * 2.f });
                         {
-
                             /* Mouse wheel navigates items (fzf-style) */
                             if (ui_ctx->mouse_scroll_delta.y != 0 && ui_hovered(scroll.area_flags))
                             {

@@ -22,8 +22,8 @@
 
 ///
 
-#define RENDERER_ARENA_CAPACITY MB(8)
-#define VERTEX_CAPACITY         16384
+#define RENDERER_ARENA_CAPACITY MB(16)
+#define VERTEX_CAPACITY         32768
 #define VERTEX_IS_TEXT          1.0f
 #define VERTEX_IS_NOT_TEXT      0.0f
 #define CLIP_RECT_CAPACITY      256 // 1. must matches shader's define; 2. must be a power of two
