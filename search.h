@@ -243,3 +243,11 @@ void search_set_query(SearchState* state, String query);
 // UI thread: copy current results (up to max_count) into `out`.
 // Returns the number of results copied.  Non-blocking.
 i32 search_get_results(SearchState* state, SearchResult* out, i32 max_count);
+
+// UI thread: suspend all workers, swap the active field configuration
+// atomically, invalidate cached query, then resume workers.  After return,
+// the next search_set_query will force a new search even for unchanged
+// query text (dedup is bypassed because the fields changed).
+// Must NOT be called from worker threads or overlapped with concurrent
+// search_set_query / search_get_results calls.
+void search_reconfigure(SearchState* state, const FieldDef* fields, i32 field_count);

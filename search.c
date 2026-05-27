@@ -513,6 +513,46 @@ void search_set_query(SearchState* state, String query)
         SetEvent(state->worker_events[wi]);
 }
 
+void search_reconfigure(SearchState* state, const FieldDef* fields, i32 field_count)
+{
+    if (!state->running)
+        return;
+
+    /* 1. Suspend */
+    state->running = 0;
+    for (i32 i = 0; i < state->worker_count; i++)
+        SetEvent(state->worker_events[i]);
+    for (i32 i = 0; i < state->worker_count; i++)
+    {
+        if (state->worker_handles[i])
+        {
+            WaitForSingleObject(state->worker_handles[i], INFINITE);
+            CloseHandle(state->worker_handles[i]);
+            state->worker_handles[i] = NULL;
+        }
+    }
+
+    /* 2. Swap fields */
+    state->active_fields = fields;
+    state->active_field_count = field_count;
+
+    /* 3. Invalidate version so workers treat next query as fresh */
+    InterlockedIncrement(&state->query_version);
+
+    /* 4. Resume */
+    state->running = 1;
+    for (i32 i = 0; i < state->worker_count; i++)
+    {
+        state->worker_params[i].state = state;
+        state->worker_params[i].worker_id = i;
+        state->worker_handles[i] = CreateThread(NULL, 0, search_worker_thread, &state->worker_params[i], 0, NULL);
+    }
+
+    /* 5. Re-trigger search with current query */
+    String current_query = { state->query_buf, state->query_len > 0 ? state->query_len : 0 };
+    search_set_query(state, current_query);
+}
+
 i32 search_get_results(SearchState* state, SearchResult* out, i32 max_count)
 {
     LONG cur_ver = InterlockedOr(&state->query_version, 0);

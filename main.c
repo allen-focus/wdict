@@ -69,6 +69,22 @@ typedef enum
     TitleBarHot_Search,
 } TitleBarHot;
 
+typedef enum
+{
+    PALETTE_MODE_WORD,
+    PALETTE_MODE_DEF,
+    PALETTE_MODE_EXAMPLE,
+    PALETTE_MODE_ALL,
+} SearchPaletteMode;
+
+typedef enum
+{
+    PALETTE_VIEW_EMPTY, /* query is empty */
+    PALETTE_VIEW_LOADING, /* mode switching or waiting for worker results */
+    PALETTE_VIEW_RESULTS, /* search complete, results available */
+    PALETTE_VIEW_NO_MATCH, /* query non-empty but 0 results */
+} PaletteViewState;
+
 typedef struct
 {
     b32 open;
@@ -147,6 +163,7 @@ typedef struct
     ShortcutRegistry shortcuts;
     CmdQueue cmd_queue;
     SearchState word_search;
+    SearchState palette_search;
     DictDB dict_db;
     DictSearchAuxEntry* search_aux;
     Arena search_aux_arena;
@@ -219,6 +236,8 @@ struct WindowContext
     i32 palette_prev_selected_index;
     isize palette_prev_query_len;
     b32 palette_activate_pending;
+    SearchPaletteMode palette_search_mode;
+    volatile LONG palette_switch_version;
 
     /* guards */
     b32 in_frame;
@@ -361,6 +380,20 @@ static String dict_ex_extract(const void* entry)
 }
 
 static FieldDef s_dict_fields[] = { { "word", dict_word_extract, 1.0f } };
+
+static FieldDef s_dict_fields_def[] = {
+    { "def", dict_def_extract, 1.0f },
+};
+
+static FieldDef s_dict_fields_ex[] = {
+    { "ex", dict_ex_extract, 1.0f },
+};
+
+static FieldDef s_dict_fields_all[] = {
+    { "word", dict_word_extract, 1.0f },
+    { "def", dict_def_extract, 0.8f },
+    { "ex", dict_ex_extract, 0.5f },
+};
 
 static f32 dict_freq_weight(const void* entry, f32 raw)
 {
@@ -679,6 +712,8 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     ctx->palette_prev_selected_index = -1;
     ctx->palette_prev_query_len = 0;
     ctx->palette_activate_pending = False;
+    ctx->palette_search_mode = PALETTE_MODE_WORD;
+    ctx->palette_switch_version = 0;
 
     /* Add to window list */
     window_list_add(shared, ctx);
@@ -970,6 +1005,8 @@ static void cmd_palette_toggle(void* userdata, String cmd_text)
     {
         ctx->ui.focused_hash = s_search_palette_input_hash;
         ctx->palette_selected_index = 0;
+        ctx->palette_search_mode = PALETTE_MODE_WORD;
+        ctx->palette_switch_version = 0;
     }
     else
     {
@@ -977,6 +1014,8 @@ static void cmd_palette_toggle(void* userdata, String cmd_text)
         ctx->palette_selected_index = -1;
         ctx->palette_prev_selected_index = -1;
         ctx->palette_activate_pending = False;
+        ctx->palette_search_mode = PALETTE_MODE_WORD;
+        ctx->palette_switch_version = 0;
     }
     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
 }
@@ -1947,15 +1986,54 @@ static void search_palette_render(WindowContext* ctx)
     f32 pad = 6.f;
     f32 font_size = 12.f;
 
-    /* build query from text edit state and run search */
-    String query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
+    /* build query from text edit state */
+    String raw_query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
 
+    /* ── Mode determination (Phase 3 will add prefix parsing) ── */
+    SearchPaletteMode mode = PALETTE_MODE_WORD;
+    String query = raw_query;
+    b32 mode_changed = (mode != ctx->palette_search_mode);
+
+    if (mode_changed)
+    {
+        const FieldDef* fields;
+        i32 field_count;
+        switch (mode)
+        {
+            default:
+            case PALETTE_MODE_WORD:
+                fields = s_dict_fields;
+                field_count = countof(s_dict_fields);
+                break;
+            case PALETTE_MODE_DEF:
+                fields = s_dict_fields_def;
+                field_count = countof(s_dict_fields_def);
+                break;
+            case PALETTE_MODE_EXAMPLE:
+                fields = s_dict_fields_ex;
+                field_count = countof(s_dict_fields_ex);
+                break;
+            case PALETTE_MODE_ALL:
+                fields = s_dict_fields_all;
+                field_count = countof(s_dict_fields_all);
+                break;
+        }
+        search_reconfigure(&shared->palette_search, fields, field_count);
+        ctx->palette_search_mode = mode;
+    }
+
+    /* ── Run search (against palette_search) ── */
     SearchResult sr[SEARCH_DISPLAY_MAX];
     i32 sr_count = 0;
+
     if (query.len > 0)
     {
-        search_set_query(&shared->word_search, query);
-        sr_count = search_get_results(&shared->word_search, sr, SEARCH_DISPLAY_MAX);
+        search_set_query(&shared->palette_search, query);
+        /* After a mode switch, record the query version so we can
+           tell when the new round's results arrive. */
+        if (mode_changed)
+            ctx->palette_switch_version = shared->palette_search.query_version;
+        sr_count = search_get_results(&shared->palette_search, sr, SEARCH_DISPLAY_MAX);
     }
     else
     {
@@ -1974,6 +2052,17 @@ static void search_palette_render(WindowContext* ctx)
         }
         sr_count = n;
     }
+
+    /* ── Determine view state ── */
+    PaletteViewState view_state;
+    if (query.len == 0)
+        view_state = PALETTE_VIEW_EMPTY;
+    else if (shared->palette_search.published_version < ctx->palette_switch_version)
+        view_state = PALETTE_VIEW_LOADING;
+    else if (sr_count > 0)
+        view_state = PALETTE_VIEW_RESULTS;
+    else
+        view_state = PALETTE_VIEW_NO_MATCH;
 
     /* detect query change: reset to first match */
     b32 query_changed = (query.len != ctx->palette_prev_query_len);
@@ -2023,175 +2112,247 @@ static void search_palette_render(WindowContext* ctx)
             .direction = LAYOUT_TOP_TO_BOTTOM,
         });
         {
-            /* text field */
-            UIBox* text_field_container =
-                ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fit({}) }, .padding = { 0, pad, 0, pad } });
+            /* ── Header row: text field + mode indicator ── */
+            UIBox* header = ui_box_begin(&(BoxConfig){
+                .sizing = { grow({}), fit({}) },
+                .direction = LAYOUT_LEFT_TO_RIGHT,
+                .padding = { pad, pad, pad, pad },
+                .child_gap = pad,
+            });
             {
-                ui_text_field(&ctx->palette_text_edit, str("Search word###" SEARCH_PALETTE_INPUT_HASH_STR),
-                              &shared->fonts[FONT_INDEX_UI], font_size, (SizingAxis)fixed(popup_w - pad * 2.f),
-                              s_padding_medium, theme->palette_bg, (Color){ 0 }, theme->panel_fg,
-                              theme->scrollbar_thumb, theme->cursor_bar, theme->cursor_trail, theme->selection,
-                              theme->selection_flash, True);
+                /* text field */
+                UIBox* tf_container = ui_box_begin(
+                    &(BoxConfig){ .sizing = { grow({}), fit({}) }, .alignment = { ALIGN_START, ALIGN_CENTER } });
+                {
+                    ui_text_field(&ctx->palette_text_edit, str("Search###" SEARCH_PALETTE_INPUT_HASH_STR),
+                                  &shared->fonts[FONT_INDEX_UI], font_size, (SizingAxis)fit_grow({}), s_padding_medium,
+                                  theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
+                                  theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash,
+                                  True);
+                }
+                ui_box_end(tf_container);
+
+                /* mode indicator */
+                {
+                    UIBox* indicator = ui_box_begin(&(BoxConfig){ .sizing = { fixed(100), fit_grow({}) },
+                                                                  .color = theme->border,
+                                                                  .rect_style = { .corner_radius = 4 },
+                                                                  .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+                    {
+                        String label;
+                        // clang-format off
+                        switch (ctx->palette_search_mode)
+                        {
+                            case PALETTE_MODE_WORD:    label  = str("[mode: word]");    break;
+                            case PALETTE_MODE_DEF:     label  = str("[mode: def]");     break;
+                            case PALETTE_MODE_EXAMPLE: label  = str("[mode: example]"); break;
+                            case PALETTE_MODE_ALL:     label  = str("[mode: all]");     break;
+                            default:                   label  = str("[mode: word]");    break;
+                        }
+                        // clang-format on
+                        ui_text(label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                                      .font_size = 10.f,
+                                                      .color = theme->accent_weak_fg });
+                    }
+                    ui_box_end(indicator);
+                }
             }
-            ui_box_end(text_field_container);
+            ui_box_end(header);
 
             /* splitter */
             ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->border }));
 
-            /* results area */
-            if (sr_count > 0)
+            /* ── Result area, switched on view_state ── */
+            switch (view_state)
             {
-                b32 result_clicked = False;
-
-                UIBox* scroll_container =
-                    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .padding = { 0, 1, 0, 1 } });
+                case PALETTE_VIEW_EMPTY:
+                case PALETTE_VIEW_RESULTS:
                 {
-                    i32 selection_changed = (ctx->palette_selected_index != ctx->palette_prev_selected_index);
-                    f32 row_h = 0;
+                    if (sr_count == 0)
+                        break;
 
-                    ScrollContext scroll =
-                        ui_scrollable_area_begin(&(ScrollableAreaConfig){ .hash_str = str("##palette_results"),
-                                                                          .sizing = { grow({}), grow({}) },
-                                                                          .corner_radius = 8,
-                                                                          .padding = { 5, 5, 5, 5 },
-                                                                          .bg = theme->palette_bg,
-                                                                          .thumb_color = theme->scrollbar_thumb,
-                                                                          .direction = LAYOUT_TOP_TO_BOTTOM,
-                                                                          .scroll_margin = font_size * 2.f });
+                    b32 result_clicked = False;
+
+                    UIBox* scroll_container =
+                        ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .padding = { 0, 1, 0, 1 } });
                     {
-                        /* on query change: instantly snap scroll to top */
-                        if (query_changed && scroll.last_area)
-                        {
-                            scroll.last_area->scroll_delta.y = 0.f;
-                            scroll.last_area->scroll_anim_y.target = 0.f;
-                            scroll.last_area->scroll_anim_y.start = 0.f;
-                            scroll.last_area->scroll_anim_y.started_at = ui_ctx->current_time;
-                        }
+                        i32 selection_changed = (ctx->palette_selected_index != ctx->palette_prev_selected_index);
+                        f32 row_h = 0;
 
-                        /* mouse wheel navigates items (fzf-style) */
+                        ScrollContext scroll =
+                            ui_scrollable_area_begin(&(ScrollableAreaConfig){ .hash_str = str("##palette_results"),
+                                                                              .sizing = { grow({}), grow({}) },
+                                                                              .corner_radius = 8,
+                                                                              .padding = { 5, 5, 5, 5 },
+                                                                              .bg = theme->palette_bg,
+                                                                              .thumb_color = theme->scrollbar_thumb,
+                                                                              .direction = LAYOUT_TOP_TO_BOTTOM,
+                                                                              .scroll_margin = font_size * 2.f });
                         {
-                            PaletteNavAction scroll_action =
-                                palette_nav_from_scroll(ui_ctx->mouse_scroll_delta.y, ui_hovered(scroll.area_flags));
-                            if (scroll_action != PALETTE_NAV_NONE)
+                            /* on query change: instantly snap scroll to top */
+                            if (query_changed && scroll.last_area)
                             {
-                                ui_ctx->mouse_scroll_delta.y = 0;
-                                ctx->palette_selected_index =
-                                    palette_nav_apply(ctx->palette_selected_index, sr_count, scroll_action, NULL);
-                                selection_changed = 1;
+                                scroll.last_area->scroll_delta.y = 0.f;
+                                scroll.last_area->scroll_anim_y.target = 0.f;
+                                scroll.last_area->scroll_anim_y.start = 0.f;
+                                scroll.last_area->scroll_anim_y.started_at = ui_ctx->current_time;
                             }
-                        }
 
-                        f32 cumulative_y = 0.f;
-
-                        for (i32 i = 0; i < sr_count; i++)
-                        {
-                            String word_text = sr[i].text;
-                            UIBox* row = ui_box_begin(&(BoxConfig){
-                                .sizing = { fit_grow({}), fit({}) },
-                                .direction = LAYOUT_LEFT_TO_RIGHT,
-                                .alignment = { ALIGN_START, ALIGN_CENTER },
-                                .padding = { 8, 8, 8, 8 },
-                                .color = (Color){ 0, 0, 0, 0 },
-                                .rect_style = { .corner_radius = 4 },
-                            });
+                            /* mouse wheel navigates items (fzf-style) */
                             {
-                                PaletteRowResult row_res = palette_row_interact(
-                                    row, str_fmt(HASH_STR_MAX_LENGTH, "palette_result_%u_%d", ctx->id, i), theme,
-                                    i == ctx->palette_selected_index);
-                                row_h = row_res.height;
-
-                                /* preview: auto-update tab content for selected item */
-                                if (i == ctx->palette_selected_index)
+                                PaletteNavAction scroll_action = palette_nav_from_scroll(ui_ctx->mouse_scroll_delta.y,
+                                                                                         ui_hovered(scroll.area_flags));
+                                if (scroll_action != PALETTE_NAV_NONE)
                                 {
-                                    const DictWordIndex* w = (const DictWordIndex*)sr[i].entry;
-                                    PanelTab* active = panel_tab_get_active(ctx->focused_panel);
-                                    if (active)
+                                    ui_ctx->mouse_scroll_delta.y = 0;
+                                    ctx->palette_selected_index =
+                                        palette_nav_apply(ctx->palette_selected_index, sr_count, scroll_action, NULL);
+                                    selection_changed = 1;
+                                }
+                            }
+
+                            f32 cumulative_y = 0.f;
+
+                            for (i32 i = 0; i < sr_count; i++)
+                            {
+                                String word_text = sr[i].text;
+                                UIBox* row = ui_box_begin(&(BoxConfig){
+                                    .sizing = { fit_grow({}), fit({}) },
+                                    .direction = LAYOUT_LEFT_TO_RIGHT,
+                                    .alignment = { ALIGN_START, ALIGN_CENTER },
+                                    .padding = { 8, 8, 8, 8 },
+                                    .color = (Color){ 0, 0, 0, 0 },
+                                    .rect_style = { .corner_radius = 4 },
+                                });
+                                {
+                                    PaletteRowResult row_res = palette_row_interact(
+                                        row, str_fmt(HASH_STR_MAX_LENGTH, "palette_result_%u_%d", ctx->id, i), theme,
+                                        i == ctx->palette_selected_index);
+                                    row_h = row_res.height;
+
+                                    /* preview: auto-update tab content for selected item */
+                                    if (i == ctx->palette_selected_index)
                                     {
-                                        const char* wrd = DICT_STR(&shared->dict_db, w->word_stroff);
-                                        isize wlen = strlen(wrd);
-                                        memcpy(active->name, wrd, wlen);
-                                        active->name_len = wlen;
-                                        active->content_data = (void*)(isize)(w - shared->dict_db.words);
-                                        active->render_fn = render_dict_content;
+                                        const DictWordIndex* w = (const DictWordIndex*)sr[i].entry;
+                                        PanelTab* active = panel_tab_get_active(ctx->focused_panel);
+                                        if (active)
+                                        {
+                                            const char* wrd = DICT_STR(&shared->dict_db, w->word_stroff);
+                                            isize wlen = strlen(wrd);
+                                            memcpy(active->name, wrd, wlen);
+                                            active->name_len = wlen;
+                                            active->content_data = (void*)(isize)(w - shared->dict_db.words);
+                                            active->render_fn = render_dict_content;
+                                        }
                                     }
-                                }
 
-                                /* commit: close popup on click or Enter */
-                                b32 commit_this = row_res.clicked;
-                                if (!commit_this && ctx->palette_activate_pending && i == ctx->palette_selected_index)
+                                    /* commit: close popup on click or Enter */
+                                    b32 commit_this = row_res.clicked;
+                                    if (!commit_this && ctx->palette_activate_pending &&
+                                        i == ctx->palette_selected_index)
+                                    {
+                                        ctx->palette_activate_pending = False;
+                                        commit_this = True;
+                                    }
+                                    if (commit_this)
+                                        result_clicked = True;
+
+                                    /* render word with fuzzy-match highlighting */
+                                    TextConfig normal_cfg = {
+                                        .font = &shared->fonts[FONT_INDEX_UI],
+                                        .font_size = font_size,
+                                        .color = theme->panel_fg,
+                                    };
+                                    TextConfig highlight_cfg = {
+                                        .font = &shared->fonts[FONT_INDEX_UI],
+                                        .font_size = font_size,
+                                        .color = theme->accent_bg,
+                                    };
+                                    render_highlighted_text(word_text, sr[i].range_count, sr[i].ranges, &normal_cfg,
+                                                            &highlight_cfg);
+                                }
+                                ui_box_end(row);
+
+                                if (selection_changed && i == ctx->palette_selected_index)
                                 {
-                                    ctx->palette_activate_pending = False;
-                                    commit_this = True;
+                                    scroll.scroll_hint.y = cumulative_y;
+                                    scroll.scroll_hint_h = row_h;
                                 }
-                                if (commit_this)
-                                    result_clicked = True;
 
-                                /* render word with fuzzy-match highlighting */
-                                TextConfig normal_cfg = {
-                                    .font = &shared->fonts[FONT_INDEX_UI],
-                                    .font_size = font_size,
-                                    .color = theme->panel_fg,
-                                };
-                                TextConfig highlight_cfg = {
-                                    .font = &shared->fonts[FONT_INDEX_UI],
-                                    .font_size = font_size,
-                                    .color = theme->accent_bg,
-                                };
-                                render_highlighted_text(word_text, sr[i].range_count, sr[i].ranges, &normal_cfg,
-                                                        &highlight_cfg);
+                                cumulative_y += row_h;
                             }
-                            ui_box_end(row);
-
-                            if (selection_changed && i == ctx->palette_selected_index)
-                            {
-                                scroll.scroll_hint.y = cumulative_y;
-                                scroll.scroll_hint_h = row_h;
-                            }
-
-                            cumulative_y += row_h;
                         }
-                    }
 
-                    f32 delta_y_before = scroll.last_area->scroll_delta.y;
-                    ui_scrollable_area_end(scroll);
-                    f32 delta_y_after = scroll.last_area->scroll_delta.y;
+                        f32 delta_y_before = scroll.last_area->scroll_delta.y;
+                        ui_scrollable_area_end(scroll);
+                        f32 delta_y_after = scroll.last_area->scroll_delta.y;
 
-                    /* sync viewport -> selected index (scrollbar drag only) */
-                    {
-                        b32 scrollbar_used = fabs(delta_y_after - delta_y_before) > 0.01f;
-                        if (!selection_changed && scrollbar_used && sr_count > 0 && row_h > 0)
+                        /* sync viewport -> selected index (scrollbar drag only) */
                         {
-                            f32 current_scroll = delta_y_after;
-                            f32 viewport_h = scroll.last_area->size.height;
-                            f32 item_top = (f32)ctx->palette_selected_index * row_h;
-                            f32 item_bottom = item_top + row_h;
-                            f32 visible_top = current_scroll;
-                            f32 visible_bottom = current_scroll + viewport_h;
-                            if (item_bottom <= visible_top || item_top >= visible_bottom)
+                            b32 scrollbar_used = fabs(delta_y_after - delta_y_before) > 0.01f;
+                            if (!selection_changed && scrollbar_used && sr_count > 0 && row_h > 0)
                             {
-                                i32 new_idx;
-                                if (item_bottom <= visible_top)
-                                    new_idx = (i32)((visible_top + row_h * 0.5f) / row_h);
-                                else
-                                    new_idx = (i32)((visible_bottom - row_h * 0.5f) / row_h);
-                                new_idx = max(0, min(new_idx, sr_count - 1));
-                                if (new_idx != ctx->palette_selected_index)
-                                    ctx->palette_selected_index = new_idx;
+                                f32 current_scroll = delta_y_after;
+                                f32 viewport_h = scroll.last_area->size.height;
+                                f32 item_top = (f32)ctx->palette_selected_index * row_h;
+                                f32 item_bottom = item_top + row_h;
+                                f32 visible_top = current_scroll;
+                                f32 visible_bottom = current_scroll + viewport_h;
+                                if (item_bottom <= visible_top || item_top >= visible_bottom)
+                                {
+                                    i32 new_idx;
+                                    if (item_bottom <= visible_top)
+                                        new_idx = (i32)((visible_top + row_h * 0.5f) / row_h);
+                                    else
+                                        new_idx = (i32)((visible_bottom - row_h * 0.5f) / row_h);
+                                    new_idx = max(0, min(new_idx, sr_count - 1));
+                                    if (new_idx != ctx->palette_selected_index)
+                                        ctx->palette_selected_index = new_idx;
+                                }
                             }
                         }
-                    }
 
-                    ctx->palette_prev_selected_index = ctx->palette_selected_index;
+                        ctx->palette_prev_selected_index = ctx->palette_selected_index;
 
-                    /* close popup only if the click wasn't consumed by the scrollbar */
-                    if (result_clicked && ui_ctx->mouse_captured_by_hash != scroll.hash)
-                    {
-                        ctx->palette_popup.open = False;
-                        ctx->palette_selected_index = -1;
-                        ctx->palette_prev_selected_index = -1;
+                        /* close popup only if click wasn't consumed by scrollbar */
+                        if (result_clicked && ui_ctx->mouse_captured_by_hash != scroll.hash)
+                        {
+                            ctx->palette_popup.open = False;
+                            ctx->palette_selected_index = -1;
+                            ctx->palette_prev_selected_index = -1;
+                        }
                     }
+                    ui_box_end(scroll_container);
                 }
-                ui_box_end(scroll_container);
+                break;
+
+                case PALETTE_VIEW_LOADING:
+                {
+                    UIBox* loading_row = ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fit({}) },
+                                                                    .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+                                                                    .padding = { 20, 20, 20, 20 } });
+                    {
+                        ui_text(str("Searching..."), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                                                    .font_size = 12.f,
+                                                                    .color = theme->accent_weak_fg });
+                    }
+                    ui_box_end(loading_row);
+                }
+                break;
+
+                case PALETTE_VIEW_NO_MATCH:
+                {
+                    UIBox* no_match_row = ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fit({}) },
+                                                                     .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+                                                                     .padding = { 20, 20, 20, 20 } });
+                    {
+                        ui_text(str("No matches"), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                                                  .font_size = 12.f,
+                                                                  .color = theme->accent_weak_fg });
+                    }
+                    ui_box_end(no_match_row);
+                }
+                break;
             }
         }
         ui_box_end(vbox);
@@ -3559,6 +3720,12 @@ i32 WinMainCRTStartup()
     shared.word_search.score_adjust = dict_freq_weight;
     search_start(&shared.word_search);
 
+    /* Initialize and start palette search worker (same corpus, initially word-only) */
+    search_init(&shared.palette_search, shared.dict_db.words, (i32)shared.dict_db.hdr->word_count,
+                sizeof(DictWordIndex), s_dict_fields, countof(s_dict_fields), dict_word_extract);
+    shared.palette_search.score_adjust = dict_freq_weight;
+    search_start(&shared.palette_search);
+
     /* Pre-compute focus hashes for popup input routing */
     s_search_input_hash = fnv1a_64(SEARCH_INPUT_HASH_STR, (isize)strlen(SEARCH_INPUT_HASH_STR));
     s_search_palette_input_hash = fnv1a_64(SEARCH_PALETTE_INPUT_HASH_STR, (isize)strlen(SEARCH_PALETTE_INPUT_HASH_STR));
@@ -3809,6 +3976,9 @@ i32 WinMainCRTStartup()
 
     /* Stop word search worker */
     search_stop(&shared.word_search);
+
+    /* Stop palette search worker */
+    search_stop(&shared.palette_search);
 
     arena_release(&shared.search_aux_arena);
 
