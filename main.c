@@ -87,6 +87,12 @@ typedef enum
 
 typedef struct
 {
+    SearchPaletteMode mode;
+    String stripped;
+} ParsedPrefix;
+
+typedef struct
+{
     b32 open;
     f32 t;
     Rect rect;
@@ -1968,6 +1974,63 @@ static void decoration_overlay(WindowContext* ctx)
     }
 }
 
+//
+// Parse a mode-switching prefix from the query text.
+// Returns the detected mode and the query with the prefix (and any trailing
+// whitespace) stripped.  Points into `raw.data` — no allocation.
+//
+//   (no prefix)     → PALETTE_MODE_WORD
+//   d:  or def:     → PALETTE_MODE_DEF
+//   e:  or ex:      → PALETTE_MODE_EXAMPLE
+//   a:  or all:     → PALETTE_MODE_ALL
+//
+static ParsedPrefix parse_search_prefix(String raw)
+{
+    ParsedPrefix result = { PALETTE_MODE_WORD, raw };
+    if (raw.len == 0)
+        return result;
+
+    SearchPaletteMode mode = PALETTE_MODE_WORD;
+    isize prefix_len = 0;
+    u8 c0 = raw.data[0];
+
+#define PREFIX_MATCH(lower, upper, short, long, short_len, long_len, m) \
+    if (c0 == (u8)(lower) || c0 == (u8)(upper))                         \
+    {                                                                    \
+        if (raw.len >= (short_len) && raw.data[1] == ':')               \
+        {                                                                \
+            mode = (m);                                                  \
+            prefix_len = (short_len);                                    \
+        }                                                                \
+        else if (raw.len >= (long_len) && memcmp(raw.data + 1, long, (usize)((long_len)-1)) == 0 && \
+                 raw.data[(long_len)-1] == ':')                          \
+        {                                                                \
+            mode = (m);                                                  \
+            prefix_len = (long_len);                                     \
+        }                                                                \
+    }
+
+    PREFIX_MATCH('d', 'D', "d", "ef", 2, 4, PALETTE_MODE_DEF);
+    PREFIX_MATCH('e', 'E', "e", "x",  2, 3, PALETTE_MODE_EXAMPLE);
+    PREFIX_MATCH('a', 'A', "a", "ll", 2, 4, PALETTE_MODE_ALL);
+
+#undef PREFIX_MATCH
+
+    if (prefix_len > 0)
+    {
+        result.mode = mode;
+        result.stripped.data = raw.data + prefix_len;
+        result.stripped.len = raw.len - prefix_len;
+        /* strip leading whitespace after prefix */
+        while (result.stripped.len > 0 && result.stripped.data[0] == ' ')
+        {
+            result.stripped.data++;
+            result.stripped.len--;
+        }
+    }
+    return result;
+}
+
 static void search_palette_render(WindowContext* ctx)
 {
     if (!ctx->palette_popup.open)
@@ -1989,9 +2052,10 @@ static void search_palette_render(WindowContext* ctx)
     /* build query from text edit state */
     String raw_query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
 
-    /* ── Mode determination (Phase 3 will add prefix parsing) ── */
-    SearchPaletteMode mode = PALETTE_MODE_WORD;
-    String query = raw_query;
+    /* ── Parse mode-switching prefix ── */
+    ParsedPrefix pp = parse_search_prefix(raw_query);
+    SearchPaletteMode mode = pp.mode;
+    String query = pp.stripped;
     b32 mode_changed = (mode != ctx->palette_search_mode);
 
     if (mode_changed)
@@ -2124,7 +2188,17 @@ static void search_palette_render(WindowContext* ctx)
                 UIBox* tf_container = ui_box_begin(
                     &(BoxConfig){ .sizing = { grow({}), fit({}) }, .alignment = { ALIGN_START, ALIGN_CENTER } });
                 {
-                    ui_text_field(&ctx->palette_text_edit, str("Search###" SEARCH_PALETTE_INPUT_HASH_STR),
+                    const char* placeholder;
+                    switch (mode)
+                    {
+                        default:
+                        case PALETTE_MODE_WORD:    placeholder = "Search word...";    break;
+                        case PALETTE_MODE_DEF:     placeholder = "Search definition..."; break;
+                        case PALETTE_MODE_EXAMPLE: placeholder = "Search example..."; break;
+                        case PALETTE_MODE_ALL:     placeholder = "Search all...";     break;
+                    }
+                    ui_text_field(&ctx->palette_text_edit,
+                                  str_fmt(128, "%s###" SEARCH_PALETTE_INPUT_HASH_STR, placeholder),
                                   &shared->fonts[FONT_INDEX_UI], font_size, (SizingAxis)fit_grow({}), s_padding_medium,
                                   theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
                                   theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash,
