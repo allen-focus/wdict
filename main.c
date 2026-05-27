@@ -87,12 +87,6 @@ typedef enum
 
 typedef struct
 {
-    SearchPaletteMode mode;
-    String stripped;
-} ParsedPrefix;
-
-typedef struct
-{
     b32 open;
     f32 t;
     Rect rect;
@@ -243,6 +237,7 @@ struct WindowContext
     isize palette_prev_query_len;
     b32 palette_activate_pending;
     SearchPaletteMode palette_search_mode;
+    SearchPaletteMode palette_effective_mode;
     volatile LONG palette_switch_version;
 
     /* guards */
@@ -719,6 +714,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     ctx->palette_prev_query_len = 0;
     ctx->palette_activate_pending = False;
     ctx->palette_search_mode = PALETTE_MODE_WORD;
+    ctx->palette_effective_mode = PALETTE_MODE_WORD;
     ctx->palette_switch_version = 0;
 
     /* Add to window list */
@@ -1012,6 +1008,7 @@ static void cmd_palette_toggle(void* userdata, String cmd_text)
         ctx->ui.focused_hash = s_search_palette_input_hash;
         ctx->palette_selected_index = 0;
         ctx->palette_search_mode = PALETTE_MODE_WORD;
+        ctx->palette_effective_mode = PALETTE_MODE_WORD;
         ctx->palette_switch_version = 0;
     }
     else
@@ -1021,6 +1018,7 @@ static void cmd_palette_toggle(void* userdata, String cmd_text)
         ctx->palette_prev_selected_index = -1;
         ctx->palette_activate_pending = False;
         ctx->palette_search_mode = PALETTE_MODE_WORD;
+        ctx->palette_effective_mode = PALETTE_MODE_WORD;
         ctx->palette_switch_version = 0;
     }
     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
@@ -1974,63 +1972,6 @@ static void decoration_overlay(WindowContext* ctx)
     }
 }
 
-//
-// Parse a mode-switching prefix from the query text.
-// Returns the detected mode and the query with the prefix (and any trailing
-// whitespace) stripped.  Points into `raw.data` — no allocation.
-//
-//   (no prefix)     → PALETTE_MODE_WORD
-//   d:  or def:     → PALETTE_MODE_DEF
-//   e:  or ex:      → PALETTE_MODE_EXAMPLE
-//   a:  or all:     → PALETTE_MODE_ALL
-//
-static ParsedPrefix parse_search_prefix(String raw)
-{
-    ParsedPrefix result = { PALETTE_MODE_WORD, raw };
-    if (raw.len == 0)
-        return result;
-
-    SearchPaletteMode mode = PALETTE_MODE_WORD;
-    isize prefix_len = 0;
-    u8 c0 = raw.data[0];
-
-#define PREFIX_MATCH(lower, upper, short, long, short_len, long_len, m) \
-    if (c0 == (u8)(lower) || c0 == (u8)(upper))                         \
-    {                                                                    \
-        if (raw.len >= (short_len) && raw.data[1] == ':')               \
-        {                                                                \
-            mode = (m);                                                  \
-            prefix_len = (short_len);                                    \
-        }                                                                \
-        else if (raw.len >= (long_len) && memcmp(raw.data + 1, long, (usize)((long_len)-1)) == 0 && \
-                 raw.data[(long_len)-1] == ':')                          \
-        {                                                                \
-            mode = (m);                                                  \
-            prefix_len = (long_len);                                     \
-        }                                                                \
-    }
-
-    PREFIX_MATCH('d', 'D', "d", "ef", 2, 4, PALETTE_MODE_DEF);
-    PREFIX_MATCH('e', 'E', "e", "x",  2, 3, PALETTE_MODE_EXAMPLE);
-    PREFIX_MATCH('a', 'A', "a", "ll", 2, 4, PALETTE_MODE_ALL);
-
-#undef PREFIX_MATCH
-
-    if (prefix_len > 0)
-    {
-        result.mode = mode;
-        result.stripped.data = raw.data + prefix_len;
-        result.stripped.len = raw.len - prefix_len;
-        /* strip leading whitespace after prefix */
-        while (result.stripped.len > 0 && result.stripped.data[0] == ' ')
-        {
-            result.stripped.data++;
-            result.stripped.len--;
-        }
-    }
-    return result;
-}
-
 static void search_palette_render(WindowContext* ctx)
 {
     if (!ctx->palette_popup.open)
@@ -2050,13 +1991,11 @@ static void search_palette_render(WindowContext* ctx)
     f32 font_size = 12.f;
 
     /* build query from text edit state */
-    String raw_query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
+    String query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
 
-    /* ── Parse mode-switching prefix ── */
-    ParsedPrefix pp = parse_search_prefix(raw_query);
-    SearchPaletteMode mode = pp.mode;
-    String query = pp.stripped;
-    b32 mode_changed = (mode != ctx->palette_search_mode);
+    /* ── Mode (set by Ctrl+D/E/W shortcuts) ── */
+    SearchPaletteMode mode = ctx->palette_search_mode;
+    b32 mode_changed = (mode != ctx->palette_effective_mode);
 
     if (mode_changed)
     {
@@ -2083,7 +2022,7 @@ static void search_palette_render(WindowContext* ctx)
                 break;
         }
         search_reconfigure(&shared->palette_search, fields, field_count);
-        ctx->palette_search_mode = mode;
+        ctx->palette_effective_mode = mode;
     }
 
     /* ── Run search (against palette_search) ── */
@@ -2189,7 +2128,7 @@ static void search_palette_render(WindowContext* ctx)
                     &(BoxConfig){ .sizing = { grow({}), fit({}) }, .alignment = { ALIGN_START, ALIGN_CENTER } });
                 {
                     const char* placeholder;
-                    switch (mode)
+                    switch (ctx->palette_search_mode)
                     {
                         default:
                         case PALETTE_MODE_WORD:    placeholder = "Search word...";    break;
@@ -3417,6 +3356,47 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 DestroyWindow(window);
                 return 0;
             }
+
+            /* Palette mode switching — intercept before shortcut lookup
+               so Ctrl+W switches to word mode instead of closing a tab. */
+            if (ctx && ctrl && ctx->palette_popup.open &&
+                ctx->ui.focused_hash == s_search_palette_input_hash)
+            {
+                SearchPaletteMode new_mode = ctx->palette_search_mode;
+                switch (wparam)
+                {
+                    case 'D': new_mode = PALETTE_MODE_DEF;     break;
+                    case 'E': new_mode = PALETTE_MODE_EXAMPLE; break;
+                    case 'W': new_mode = PALETTE_MODE_WORD;    break;
+                    default: goto check_shortcuts;
+                }
+
+                if (new_mode != ctx->palette_search_mode)
+                {
+                    const FieldDef* fields;
+                    i32 field_count;
+                    switch (new_mode)
+                    {
+                        default:
+                        case PALETTE_MODE_WORD:   fields = s_dict_fields;     field_count = countof(s_dict_fields);     break;
+                        case PALETTE_MODE_DEF:    fields = s_dict_fields_def; field_count = countof(s_dict_fields_def); break;
+                        case PALETTE_MODE_EXAMPLE: fields = s_dict_fields_ex;  field_count = countof(s_dict_fields_ex);  break;
+                        case PALETTE_MODE_ALL:    fields = s_dict_fields_all;  field_count = countof(s_dict_fields_all); break;
+                    }
+                    search_reconfigure(&shared->palette_search, fields, field_count);
+                    ctx->palette_search_mode = new_mode;
+                    /* Re-issue current query with new fields */
+                    String cur_query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
+                    if (cur_query.len > 0)
+                    {
+                        search_set_query(&shared->palette_search, cur_query);
+                        ctx->palette_switch_version = shared->palette_search.query_version;
+                    }
+                }
+                ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                return 0;
+            }
+        check_shortcuts:
 
             /* Check registered shortcuts */
             {
