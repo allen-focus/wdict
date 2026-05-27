@@ -477,13 +477,6 @@ void search_set_query(SearchState* state, String query)
     if (same)
         return;
 
-    /* Invalidate old results immediately so the UI never reads stale data
-       while the new search is in flight. */
-    AcquireSRWLockExclusive(&state->results_lock);
-    state->result_count = 0;
-    state->published_version = 0;
-    ReleaseSRWLockExclusive(&state->results_lock);
-
     /* Write query under exclusive lock so the worker never sees
        a torn write (partial query_buf with mismatched query_len). */
     AcquireSRWLockExclusive(&state->query_lock);
@@ -573,15 +566,11 @@ i32 search_get_results(SearchState* state, SearchResult* out, i32 max_count)
     }
 
     AcquireSRWLockShared(&state->results_lock);
-    i32 count = 0;
-    if (state->published_version == cur_ver)
-    {
-        count = state->result_count;
-        if (count > max_count)
-            count = max_count;
-        if (count > 0)
-            memcpy(out, state->results, (usize)count * sizeof(SearchResult));
-    }
+    i32 count = state->result_count;
+    if (count > max_count)
+        count = max_count;
+    if (count > 0)
+        memcpy(out, state->results, (usize)count * sizeof(SearchResult));
     ReleaseSRWLockShared(&state->results_lock);
     return count;
 }
