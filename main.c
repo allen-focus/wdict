@@ -48,6 +48,7 @@
 
 #define SEARCH_INPUT_HASH_STR         "search input"
 #define SEARCH_PALETTE_INPUT_HASH_STR "search palette input"
+#define PALETTE_CONTEXT_MAX_CHARS     64
 
 typedef enum
 {
@@ -402,15 +403,16 @@ static f32 dict_freq_weight(const void* entry, f32 raw)
 
     // freq is a rank: lower value = more frequent word.
     u32 freq = w->freq;
+    f32 freq_score;
 
     // Missing frequency data → treat as extremely rare
     if (freq == 0xFFFFFFFF)
-        return raw + 2.0f;
+        freq_score = 5.0f;
+    else
+        freq_score = log2f(1.0f + (f32)freq) * 0.8f;
 
-    if (freq > 0)
-        return raw + log2f(1.0f + (f32)freq) * 0.2f;
-
-    return raw;
+    const f32 freq_weight = 0.3f;
+    return raw * (1.0f - freq_weight) + freq_score * freq_weight;
 }
 
 static const char* s_pos_names[] = {
@@ -1684,6 +1686,8 @@ static i32 palette_build_display_items(const SearchResult* sr, i32 sr_count, Sea
                 local_start = 0;
             if (local_end > (i32)seg->len)
                 local_end = (i32)seg->len;
+            if (local_end == (i32)seg->len && local_end > 0)
+                local_end--; /* never point at the terminating \0 */
 
             /* Snap to UTF-8 character boundaries — byte-level clipping may
                split a multi-byte codepoint (common with CJK in example text). */
@@ -1719,12 +1723,12 @@ static void render_highlighted_text(String text, i32 range_count, const FuzzyRan
         isize prev = 0;
         for (i32 r = 0; r < range_count; r++)
         {
-            if (ranges[r].start > (i32)prev)
+            if (ranges[r].start > (i32)prev && prev < (i32)text.len)
             {
                 String seg = { text.data + prev, ranges[r].start - (i32)prev };
                 ui_text(seg, normal_cfg);
             }
-            if (ranges[r].end > ranges[r].start)
+            if (ranges[r].end > ranges[r].start && ranges[r].start < (i32)text.len)
             {
                 String seg = { text.data + ranges[r].start, ranges[r].end - ranges[r].start };
                 ui_text(seg, highlight_cfg);
@@ -2217,7 +2221,7 @@ static void search_palette_render(WindowContext* ctx)
     f32 popup_x = (client_w - popup_w) / 2.f;
     f32 popup_y = (client_h - popup_h) / 2.f;
     f32 pad = 6.f;
-    f32 font_size = 12.f;
+    f32 font_size = 13.f;
 
     /* build query from text edit state */
     String query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
@@ -2374,15 +2378,16 @@ static void search_palette_render(WindowContext* ctx)
                     ui_text_field(
                         &ctx->palette_text_edit, str_fmt(128, "%s###" SEARCH_PALETTE_INPUT_HASH_STR, placeholder),
                         &shared->fonts[FONT_INDEX_ZH], font_size, (SizingAxis)fit_grow({}), s_padding_medium,
-                        theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb, theme->cursor_bar,
+                        theme->palette_bg, (Color){ 0 }, theme->panel_fg, theme->scrollbar_thumb, theme->cursor_bar,
                         theme->cursor_trail, theme->selection, theme->selection_flash, True);
                 }
                 ui_box_end(tf_container);
 
                 /* mode indicator */
                 {
-                    UIBox* indicator = ui_box_begin(&(BoxConfig){ .sizing = { fixed(100), fit_grow({}) },
-                                                                  .color = theme->border,
+                    UIBox* indicator = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit_grow({}) },
+                                                                  .padding = s_padding_medium,
+                                                                  .color = theme->hover_bg,
                                                                   .rect_style = { .corner_radius = 4 },
                                                                   .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
                     {
@@ -2390,11 +2395,11 @@ static void search_palette_render(WindowContext* ctx)
                         // clang-format off
                         switch (ctx->palette_search_mode)
                         {
-                            case PALETTE_MODE_WORD:    label  = str("[mode: word]");    break;
-                            case PALETTE_MODE_DEF:     label  = str("[mode: def]");     break;
-                            case PALETTE_MODE_EXAMPLE: label  = str("[mode: example]"); break;
-                            case PALETTE_MODE_ALL:     label  = str("[mode: all]");     break;
-                            default:                   label  = str("[mode: word]");    break;
+                            case PALETTE_MODE_WORD:    label = str("Word");       break;
+                            case PALETTE_MODE_DEF:     label = str("Definition"); break;
+                            case PALETTE_MODE_EXAMPLE: label = str("Example");    break;
+                            case PALETTE_MODE_ALL:     label = str("All");        break;
+                            default:                   label = str("Word");       break;
                         }
                         // clang-format on
                         ui_text(label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
@@ -2467,10 +2472,10 @@ static void search_palette_render(WindowContext* ctx)
                                                          .font_size = font_size,
                                                          .color = theme->accent_bg };
                             TextConfig context_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
-                                                       .font_size = 10.f,
-                                                       .color = theme->accent_weak_fg };
+                                                       .font_size = 11.f,
+                                                       .color = theme->hover_fg };
                             TextConfig context_hl_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
-                                                          .font_size = 10.f,
+                                                          .font_size = 11.f,
                                                           .color = theme->accent_bg };
 
                             for (i32 i = 0; i < item_count; i++)
@@ -2480,7 +2485,8 @@ static void search_palette_render(WindowContext* ctx)
                                 UIBox* row = ui_box_begin(&(BoxConfig){
                                     .sizing = { fit_grow({}), fit({}) },
                                     .direction = LAYOUT_TOP_TO_BOTTOM,
-                                    .padding = { 6, 8, 6, 8 },
+                                    .padding = { 8, 8, 8, 8 },
+                                    .child_gap = 6,
                                     .color = (Color){ 0, 0, 0, 0 },
                                     .rect_style = { .corner_radius = 4 },
                                 });
@@ -2519,8 +2525,8 @@ static void search_palette_render(WindowContext* ctx)
 
                                     /* word line — always shown, in horizontal box */
                                     {
-                                        UIBox* word_line = ui_box_begin(&(BoxConfig){
-                                            .sizing = { fit_grow({}), fit({}) }, .direction = LAYOUT_LEFT_TO_RIGHT });
+                                        UIBox* word_line =
+                                            ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) } });
                                         {
                                             render_highlighted_text(item->word_text, item->word_range_count,
                                                                     item->word_ranges, &normal_cfg, &highlight_cfg);
@@ -2528,19 +2534,70 @@ static void search_palette_render(WindowContext* ctx)
                                         ui_box_end(word_line);
                                     }
 
-                                    /* context line — shown for def/ex/all modes, in horizontal box */
+                                    /* context line — shown for def/ex/all modes, truncated to 2 lines */
                                     if (item->has_context && item->display_context.len > 0)
                                     {
-                                        UIBox* ctx_line = ui_box_begin(&(BoxConfig){
-                                            .sizing = { fit_grow({}), fit({}) }, .direction = LAYOUT_LEFT_TO_RIGHT });
+                                        String ctx_text = item->display_context;
+                                        i32 ctx_rc = item->ctx_range_count;
+                                        FuzzyRange ctx_r[FUZZY_MAX_RANGES];
+                                        memcpy(ctx_r, item->ctx_ranges, (usize)ctx_rc * sizeof(FuzzyRange));
+                                        b32 ctx_trunc = False;
+                                        isize trunc_byte = ctx_text.len;
+
+                                        /* Count UTF-8 characters; truncate at PALETTE_CONTEXT_MAX_CHARS */
                                         {
-                                            render_highlighted_text(item->display_context, item->ctx_range_count,
-                                                                    item->ctx_ranges, &context_cfg, &context_hl_cfg);
+                                            const u8* p = ctx_text.data;
+                                            const u8* end = ctx_text.data + ctx_text.len;
+                                            isize char_count = 0;
+                                            while (p < end && char_count < PALETTE_CONTEXT_MAX_CHARS)
+                                            {
+                                                UnicodeDecode ud = utf8_decode(p);
+                                                if (ud.codepoint == 0)
+                                                    break;
+                                                p = (const u8*)ud.next_p;
+                                                char_count++;
+                                            }
+                                            if (p < end)
+                                            {
+                                                trunc_byte = (isize)(p - ctx_text.data);
+                                                ctx_trunc = True;
+                                            }
+                                        }
+
+                                        /* Filter ranges past the truncation point */
+                                        if (ctx_trunc)
+                                        {
+                                            i32 keep = 0;
+                                            for (i32 r = 0; r < ctx_rc; r++)
+                                            {
+                                                if (ctx_r[r].start >= (i32)trunc_byte)
+                                                    continue;
+                                                if (ctx_r[r].end > (i32)trunc_byte)
+                                                    ctx_r[r].end = (i32)trunc_byte;
+                                                if (ctx_r[r].end > ctx_r[r].start)
+                                                    ctx_r[keep++] = ctx_r[r];
+                                            }
+                                            ctx_rc = keep;
+                                        }
+
+                                        UIBox* ctx_line = ui_box_begin(&(BoxConfig){
+                                            .sizing = { fit_grow({}), fit({}) }, .padding = { 2, 0, 2, 0 } });
+                                        {
+                                            String display = { ctx_text.data, trunc_byte };
+                                            render_highlighted_text(display, ctx_rc, ctx_r, &context_cfg,
+                                                                    &context_hl_cfg);
+                                            if (ctx_trunc)
+                                                ui_text(str("..."), &context_cfg);
                                         }
                                         ui_box_end(ctx_line);
                                     }
                                 }
                                 ui_box_end(row);
+
+                                /* splitter */
+                                if (item->has_context && item->display_context.len > 0)
+                                    ui_box_end(ui_box_begin(
+                                        &(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->hover_bg }));
 
                                 if (selection_changed && i == ctx->palette_selected_index)
                                 {
