@@ -170,8 +170,6 @@ struct SearchState
     SRWLOCK results_lock;
 
     // Worker control
-    HANDLE wake_event;
-    HANDLE thread_handle;
     volatile LONG running;
 
     // Active field configuration (set by search_init)
@@ -186,29 +184,30 @@ struct SearchState
     ScoreAdjustFn score_adjust;
 
     //
-    // Multi-thread worker pool (coordinator + K parallel workers)
+    // Multi-thread worker pool (K parallel workers, no coordinator)
     //
-    // Coordinator builds QueryNode tree, slices corpus, wakes each worker
-    // via its own worker_events[i], waits for done_event, version‑checks,
-    // K‑way merges, and publishes.
-    // Workers process their pre‑assigned slice with per‑entry checkpoint
-    // version‑abort.  Per‑worker event eliminates token‑theft and done_count
-    // mismatch bugs inherent in semaphore‑based broadcast.
+    // search_set_query (UI thread) slices corpus, wakes each worker via
+    // its own worker_events[i], then returns immediately.
+    // Each worker snapshots the query, builds its own QueryNode tree,
+    // processes its pre‑assigned slice with per‑entry checkpoint
+    // version‑abort, and writes results to its per‑slot buffer.
+    // search_get_results (UI thread) non‑blockingly polls worker_done_rounds;
+    // when all workers finished their round, K‑way merges and publishes under
+    // results_lock.  Per‑worker events eliminate dispatch scheduling
+    // hops inherent in a separate coordinator thread.
     //
 
     HANDLE worker_handles[SEARCH_MAX_WORKERS];
-    HANDLE worker_events[SEARCH_MAX_WORKERS]; // coordinator → worker[i]: one shot per round (auto‑reset)
-    HANDLE done_event; // last worker → coordinator: all‑done signal
-    volatile LONG done_count; // workers finished this round
+    HANDLE worker_events[SEARCH_MAX_WORKERS]; // UI → worker[i]: one shot per round (auto‑reset)
+    __declspec(align(64)) volatile LONG worker_done_rounds[SEARCH_MAX_WORKERS]; // per‑worker last completed round
     volatile LONG search_round; // generation counter: invalidates stale workers
     volatile LONG query_version_snapshot; // stable version ref for worker checkpoint
-    const QueryNode* active_query_tree; // coordinator builds; workers read‑only
 
     struct
     {
         i32 start;
         i32 end;
-    } slices[SEARCH_MAX_WORKERS]; // coordinator writes per round; workers read own slot
+    } slices[SEARCH_MAX_WORKERS]; // search_set_query writes per round; workers read own slot
 
     // Per‑worker result buffers — heap‑allocated in search_init, freed in search_stop.
     // DO NOT stack‑allocate SearchState: sizeof(SearchResult[K][200]) ~ 900 KB.

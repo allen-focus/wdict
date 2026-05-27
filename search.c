@@ -145,19 +145,23 @@ QueryNode* qn_or(Arena* a, QueryNode* l, QueryNode* r)
 }
 
 //
-// Multi-thread worker pool — coordinator + K parallel workers
+// Multi-thread worker pool — K parallel workers, no coordinator
 //
-// Coordinator: waits on wake_event → snapshots query → builds tree →
-//   slices corpus → SetEvent(worker_events[i]) per worker → waits done_event →
-//   version check → K‑way merge → publish.
+// search_set_query (UI thread): slices corpus → SetEvent(worker_events[i])
+//   per worker → returns immediately (no blocking).
 //
 // Workers (K threads): WaitForSingleObject(worker_events[worker_id]) →
+//   snapshot query from query_buf → build own QueryNode tree →
 //   process own pre‑assigned slice with checkpoint version‑abort →
-//   write results to per‑slot buffer → InterlockedIncrement done_count;
-//   last worker SetEvent(done_event).
+//   write results to per‑slot buffer → InterlockedExchange worker_done_rounds[i].
 //
-// Arena isolation: coordinator's arena holds the tree (immutable during
-// search pass), each worker has its own arena for fuzzy_match DP tables.
+// search_get_results (UI thread): non‑blocking poll of worker_done_rounds;
+//   when every worker's round matches search_round, K‑way merge + publish
+//   under results_lock.  Per‑slot round counters eliminate the done_count
+//   reset race (old workers cannot pollute new round counters).
+//
+// Arena isolation: each worker has its own arena — tree is built in the
+// low region, fuzzy_match DP tables reuse the tail per‑entry.
 //
 
 #define SEARCH_CHECKPOINT_INTERVAL 8
@@ -200,7 +204,7 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
     SearchState* state = wp->state;
     i32 my_id = wp->worker_id;
 
-    /* Per-worker arena — isolated from coordinator and other workers. */
+    /* Per-worker arena — tree in low region, fuzzy_match DP tables reuse the tail. */
     Arena scratch = arena_new(MB(SEARCH_SCRATCH_MB));
 
     while (state->running)
@@ -209,32 +213,38 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
         if (!state->running)
             break;
 
-        /* Coordinator directly assigned this worker's slice before signalling.
-           No self‑assignment — eliminates token theft and done_count mismatch. */
         i32 my_index = my_id;
         i32 start = state->slices[my_index].start;
         i32 end = state->slices[my_index].end;
         i32 snapshot_version = InterlockedOr(&state->query_version_snapshot, 0);
-        const QueryNode* root = state->active_query_tree;
         i32 my_round = InterlockedOr(&state->search_round, 0);
 
+        /* Snapshot query — each worker reads query_buf independently
+           so no shared tree pointer or arena reuse race. */
+        byte local_query[SEARCH_QUERY_BUF];
+        isize local_len = 0;
+        AcquireSRWLockShared(&state->query_lock);
         {
-            char dbg[160];
-            snprintf(dbg, sizeof(dbg), "[SRCH] worker[%d]: slice [%d..%d) round=%ld root=%d\n",
-                (int)my_id, (int)start, (int)end, (long)my_round, root != NULL);
-            OutputDebugStringA(dbg);
+            local_len = state->query_len;
+            if (local_len > 0)
+                memcpy(local_query, state->query_buf, (usize)local_len);
         }
+        ReleaseSRWLockShared(&state->query_lock);
 
-        if (!root)
+        if (local_len == 0)
         {
             if (InterlockedOr(&state->search_round, 0) == my_round)
-            {
                 state->worker_result_counts[my_index] = 0;
-                if (InterlockedIncrement(&state->done_count) == state->worker_count)
-                    SetEvent(state->done_event);
-            }
+            InterlockedExchange(&state->worker_done_rounds[my_index], my_round);
             continue;
         }
+
+        /* Build QueryNode tree in the worker's own arena.  Tree sits at the
+           bottom; per‑entry fuzzy_match scratch reuses remaining arena. */
+        scratch.pos = 0;
+        String qs = { local_query, local_len };
+        QueryNode* root = qn_term(&scratch, qs, state->active_fields, state->active_field_count);
+        isize tree_pos = scratch.pos;
 
         SearchResult local_results[SEARCH_MAX_RESULTS];
         i32 local_count = 0;
@@ -242,9 +252,10 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
 
         for (i32 i = start; i < end; i++)
         {
-            scratch.pos = 0;
+            /* Roll back arena past the tree so fuzzy_match has the full
+               remainder to use for its DP tables. */
+            scratch.pos = tree_pos;
 
-            /* Checkpoint abort: bail if a newer query arrived mid-search. */
             if (++checkpoint >= SEARCH_CHECKPOINT_INTERVAL)
             {
                 checkpoint = 0;
@@ -272,7 +283,8 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
                     local_count++;
                 i32 to_move = local_count - 1 - pos;
                 if (to_move > 0)
-                    memmove(&local_results[pos + 1], &local_results[pos], (usize)to_move * sizeof(SearchResult));
+                    memmove(&local_results[pos + 1], &local_results[pos],
+                            (usize)to_move * sizeof(SearchResult));
 
                 local_results[pos] = (SearchResult){
                     .entry = entry,
@@ -281,211 +293,27 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
                     .score = agg.score,
                     .range_count = agg.range_count,
                 };
-                memcpy(local_results[pos].ranges, agg.ranges, (usize)agg.range_count * sizeof(FuzzyRange));
+                memcpy(local_results[pos].ranges, agg.ranges,
+                       (usize)agg.range_count * sizeof(FuzzyRange));
             }
         }
 
     worker_done:
-        /* Commit results only if still in our round; stale workers discard.
-           But ALWAYS signal done_count — coordinator must know workers drained
-           before it resets scratch arena / done_count for the next round. */
         if (InterlockedOr(&state->search_round, 0) == my_round)
         {
             state->worker_result_counts[my_index] = local_count;
             if (local_count > 0)
-                memcpy(state->worker_results[my_index], local_results, (usize)local_count * sizeof(SearchResult));
+                memcpy(state->worker_results[my_index], local_results,
+                       (usize)local_count * sizeof(SearchResult));
         }
         else
         {
             state->worker_result_counts[my_index] = 0;
         }
 
-        {
-            LONG dc = InterlockedOr(&state->done_count, 0);
-            LONG sr = InterlockedOr(&state->search_round, 0);
-            char dbg[160];
-            snprintf(dbg, sizeof(dbg), "[SRCH] worker[%d]: DONE local=%d round_chk=%d(dc_was=%ld sr=%ld mr=%ld)\n",
-                (int)my_id, (int)local_count, sr == my_round, (long)dc, (long)sr, (long)my_round);
-            OutputDebugStringA(dbg);
-        }
-
-        if (InterlockedIncrement(&state->done_count) == state->worker_count)
-            SetEvent(state->done_event);
-    }
-
-    arena_release(&scratch);
-    return 0;
-}
-
-// Coordinator thread: receives queries, builds the QueryNode tree,
-// dispatches work to the worker pool, merges results, and publishes.
-//
-// The version check runs BEFORE any blocking wait, so when the inner
-// WaitForMultipleObjects consumes wake_event, the outer loop sees
-// got_new==True on re-entry and skips the blocking Wait.
-static DWORD WINAPI search_coordinator(LPVOID param)
-{
-    SearchState* state = (SearchState*)param;
-    i32 last_version = 0;
-    Arena scratch = arena_new(MB(SEARCH_SCRATCH_MB));
-
-    while (state->running)
-    {
-        /* Check for new query FIRST.  Only block when there genuinely
-           is no pending work. */
-        byte local_query[SEARCH_QUERY_BUF];
-        isize local_len = 0;
-        b32 got_new = False;
-
-        AcquireSRWLockShared(&state->query_lock);
-        {
-            i32 cur = state->query_version;
-            if (cur != last_version)
-            {
-                last_version = cur;
-                local_len = state->query_len;
-                if (local_len > 0)
-                    memcpy(local_query, state->query_buf, (usize)local_len);
-                got_new = True;
-            }
-        }
-        ReleaseSRWLockShared(&state->query_lock);
-
-        if (got_new)
-        {
-            char dbg[160];
-            snprintf(dbg, sizeof(dbg), "[SRCH] coord: GOT_NEW last_ver=%ld cur_ver=%ld len=%lld\n",
-                (long)last_version, (long)InterlockedOr(&state->query_version, 0), (long long)local_len);
-            OutputDebugStringA(dbg);
-        }
-
-        if (!got_new)
-        {
-            WaitForSingleObject(state->wake_event, INFINITE);
-            if (!state->running)
-                break;
-            continue;
-        }
-
-        if (local_len == 0)
-        {
-            {
-                char dbg[128];
-                snprintf(dbg, sizeof(dbg), "[SRCH] coord: EMPTY query pub_ver=%ld\n", (long)last_version);
-                OutputDebugStringA(dbg);
-            }
-            AcquireSRWLockExclusive(&state->results_lock);
-            state->result_count = 0;
-            state->published_version = last_version;
-            ReleaseSRWLockExclusive(&state->results_lock);
-            continue;
-        }
-
-        String query = { local_query, local_len };
-        scratch.pos = 0;
-        QueryNode* root = qn_term(&scratch, query, state->active_fields, state->active_field_count);
-
-        i32 total = state->corpus_size;
-        i32 k = state->worker_count;
-        i32 base = 0;
-        for (i32 wi = 0; wi < k; wi++)
-        {
-            i32 remaining = total - base;
-            i32 workers_left = k - wi;
-            i32 chunk = remaining / workers_left;
-            state->slices[wi].start = base;
-            base += chunk;
-            state->slices[wi].end = base;
-            state->worker_result_counts[wi] = 0;
-        }
-
-        // Drain any stale wake_event left over from a prior spurious wakeup.
-        // Without this, WaitForMultipleObjects below can fire immediately on
-        // the stale event, aborting the round before results are published.
-        WaitForSingleObject(state->wake_event, 0);
-
-        InterlockedIncrement(&state->search_round);
-        {
-            char dbg[160];
-            snprintf(dbg, sizeof(dbg), "[SRCH] coord: START round=%ld k=%d ver=%ld\n",
-                (long)InterlockedOr(&state->search_round, 0), (int)k, (long)last_version);
-            OutputDebugStringA(dbg);
-        }
-        ResetEvent(state->done_event);
-        InterlockedExchange(&state->done_count, 0);
-        // Slice assignment: coordinator writes each worker's slice directly,
-        // then signals its dedicated event.  No self‑assignment, no token theft.
-        state->active_query_tree = root;
-        InterlockedExchange(&state->query_version_snapshot, last_version);
-        for (i32 wi = 0; wi < k; wi++)
-            SetEvent(state->worker_events[wi]);
-
-        HANDLE handles[2] = { state->done_event, state->wake_event };
-        DWORD r = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
-        if (!state->running)
-            break;
-
-        {
-            char dbg[128];
-            snprintf(dbg, sizeof(dbg), "[SRCH] coord: WAIT ret=%d (0=DONE 1=WAKE)\n",
-                (int)(r - WAIT_OBJECT_0));
-            OutputDebugStringA(dbg);
-        }
-
-        if (r == WAIT_OBJECT_0 + 1)
-        {
-            {
-                char dbg[128];
-                snprintf(dbg, sizeof(dbg), "[SRCH] coord: WAKE path, waiting for done_event\n");
-                OutputDebugStringA(dbg);
-            }
-            // New query or stop.  Workers will abort at their next checkpoint,
-            // but we must wait until every worker has signalled done_count
-            // before resetting scratch arena / done_count for the next round.
-            if (state->running)
-                WaitForSingleObject(state->done_event, INFINITE);
-            continue;
-        }
-
-        if (InterlockedOr(&state->query_version, 0) != last_version)
-        {
-            {
-                char dbg[128];
-                snprintf(dbg, sizeof(dbg), "[SRCH] coord: DISCARD ver_chk1: ver=%ld last=%ld\n",
-                    (long)InterlockedOr(&state->query_version, 0), (long)last_version);
-                OutputDebugStringA(dbg);
-            }
-            continue;
-        }
-
-        SearchResult merged_results[SEARCH_MAX_RESULTS];
-        i32 merged_count = merge_k_sorted(state, merged_results, SEARCH_MAX_RESULTS);
-
-        AcquireSRWLockExclusive(&state->results_lock);
-        // Re-check under the lock — query_version may have advanced between the
-        // first check and here (after merge_k_sorted, which can be slow).
-        if (InterlockedOr(&state->query_version, 0) != last_version)
-        {
-            {
-                char dbg[128];
-                snprintf(dbg, sizeof(dbg), "[SRCH] coord: DISCARD ver_chk2: ver=%ld last=%ld\n",
-                    (long)InterlockedOr(&state->query_version, 0), (long)last_version);
-                OutputDebugStringA(dbg);
-            }
-            ReleaseSRWLockExclusive(&state->results_lock);
-            continue;
-        }
-        if (merged_count > 0)
-            memcpy(state->results, merged_results, (usize)merged_count * sizeof(SearchResult));
-        state->result_count = merged_count;
-        state->published_version = last_version;
-        {
-            char dbg[128];
-            snprintf(dbg, sizeof(dbg), "[SRCH] coord: PUBLISH count=%d pub_ver=%ld\n",
-                (int)merged_count, (long)last_version);
-            OutputDebugStringA(dbg);
-        }
-        ReleaseSRWLockExclusive(&state->results_lock);
+        /* Mark completion unconditionally — round mismatch is naturally
+           filtered by search_get_results which checks against search_round. */
+        InterlockedExchange(&state->worker_done_rounds[my_index], my_round);
     }
 
     arena_release(&scratch);
@@ -513,30 +341,12 @@ b32 search_init(SearchState* state, const void* corpus, i32 corpus_size, isize e
     InitializeSRWLock(&state->query_lock);
     InitializeSRWLock(&state->results_lock);
 
-    /* Wake event: UI → coordinator (auto‑reset). */
-    state->wake_event = CreateEventExW(NULL, NULL, 0, EVENT_ALL_ACCESS);
-    if (!state->wake_event)
-        return False;
-
-    /* Done event: last worker → coordinator (auto‑reset). */
-    state->done_event = CreateEventExW(NULL, NULL, 0, EVENT_ALL_ACCESS);
-    if (!state->done_event)
-    {
-        CloseHandle(state->wake_event);
-        state->wake_event = NULL;
-        return False;
-    }
-
-    /* Per-worker wake events: coordinator → worker[i] (auto‑reset). */
+    /* Per-worker wake events: UI → worker[i] (auto‑reset). */
     for (i32 i = 0; i < SEARCH_MAX_WORKERS; i++)
     {
         state->worker_events[i] = CreateEventExW(NULL, NULL, 0, EVENT_ALL_ACCESS);
         if (!state->worker_events[i])
         {
-            CloseHandle(state->wake_event);
-            CloseHandle(state->done_event);
-            state->wake_event = NULL;
-            state->done_event = NULL;
             for (i32 j = 0; j < i; j++)
             {
                 CloseHandle(state->worker_events[j]);
@@ -559,10 +369,6 @@ b32 search_init(SearchState* state, const void* corpus, i32 corpus_size, isize e
     state->worker_results = malloc((usize)state->worker_count * sizeof(state->worker_results[0]));
     if (!state->worker_results)
     {
-        CloseHandle(state->wake_event);
-        CloseHandle(state->done_event);
-        state->wake_event = NULL;
-        state->done_event = NULL;
         for (i32 i = 0; i < SEARCH_MAX_WORKERS; i++)
         {
             if (state->worker_events[i])
@@ -583,37 +389,25 @@ b32 search_init(SearchState* state, const void* corpus, i32 corpus_size, isize e
 
 b32 search_start(SearchState* state)
 {
-    if (state->running || state->thread_handle)
+    if (state->running)
         return True;
 
     state->running = 1;
-
-    state->thread_handle = CreateThread(NULL, 0, search_coordinator, state, 0, NULL);
-    if (!state->thread_handle)
-    {
-        state->running = 0;
-        return False;
-    }
-
     i32 k = state->worker_count;
+
     for (i32 i = 0; i < k; i++)
     {
         state->worker_params[i].state = state;
         state->worker_params[i].worker_id = i;
-        state->worker_handles[i] = CreateThread(NULL, 0, search_worker_thread, &state->worker_params[i], 0, NULL);
+        state->worker_handles[i] = CreateThread(
+            NULL, 0, search_worker_thread, &state->worker_params[i], 0, NULL);
         if (!state->worker_handles[i])
         {
             state->running = 0;
-            SetEvent(state->wake_event);
 
             // Wake only the workers we successfully created (i of them, not k).
             for (i32 j = 0; j < i; j++)
                 SetEvent(state->worker_events[j]);
-
-            // Join coordinator.
-            WaitForSingleObject(state->thread_handle, INFINITE);
-            CloseHandle(state->thread_handle);
-            state->thread_handle = NULL;
 
             // Join any workers that were already created.
             for (i32 j = 0; j < i; j++)
@@ -636,23 +430,11 @@ void search_stop(SearchState* state)
 {
     state->running = 0;
 
-    /* Wake coordinator and all workers so they see running=0 and exit. */
-    if (state->wake_event)
-        SetEvent(state->wake_event);
-    if (state->done_event)
-        SetEvent(state->done_event);
+    /* Wake all workers so they see running=0 and exit. */
     for (i32 i = 0; i < state->worker_count; i++)
     {
         if (state->worker_events[i])
             SetEvent(state->worker_events[i]);
-    }
-
-    /* Join coordinator. */
-    if (state->thread_handle)
-    {
-        WaitForSingleObject(state->thread_handle, INFINITE);
-        CloseHandle(state->thread_handle);
-        state->thread_handle = NULL;
     }
 
     /* Join all workers. */
@@ -667,16 +449,6 @@ void search_stop(SearchState* state)
     }
 
     /* Destroy synchronization objects. */
-    if (state->wake_event)
-    {
-        CloseHandle(state->wake_event);
-        state->wake_event = NULL;
-    }
-    if (state->done_event)
-    {
-        CloseHandle(state->done_event);
-        state->done_event = NULL;
-    }
     for (i32 i = 0; i < SEARCH_MAX_WORKERS; i++)
     {
         if (state->worker_events[i])
@@ -719,21 +491,88 @@ void search_set_query(SearchState* state, String query)
         memcpy(state->query_buf, query.data, (usize)len);
     state->query_len = len;
     InterlockedIncrement(&state->query_version);
-    {
-        char dbg[128];
-        snprintf(dbg, sizeof(dbg), "[SRCH] set_query: len=%lld ver=%ld\n",
-            (long long)len, (long)state->query_version);
-        OutputDebugStringA(dbg);
-    }
     ReleaseSRWLockExclusive(&state->query_lock);
 
-    SetEvent(state->wake_event);
+    /* Empty query: publish immediately, no workers to wake. */
+    if (len == 0)
+    {
+        AcquireSRWLockExclusive(&state->results_lock);
+        state->result_count = 0;
+        state->published_version = InterlockedOr(&state->query_version, 0);
+        ReleaseSRWLockExclusive(&state->results_lock);
+        return;
+    }
+
+    /* Slice corpus + dispatch workers — all on the UI thread inline,
+       eliminating the coordinator scheduling hop. */
+    i32 total = state->corpus_size;
+    i32 k = state->worker_count;
+    i32 base = 0;
+    for (i32 wi = 0; wi < k; wi++)
+    {
+        i32 remaining = total - base;
+        i32 workers_left = k - wi;
+        i32 chunk = remaining / workers_left;
+        state->slices[wi].start = base;
+        base += chunk;
+        state->slices[wi].end = base;
+        state->worker_result_counts[wi] = 0;
+    }
+
+    InterlockedIncrement(&state->search_round);
+    InterlockedExchange(&state->query_version_snapshot,
+                        InterlockedOr(&state->query_version, 0));
+
+    for (i32 wi = 0; wi < k; wi++)
+        SetEvent(state->worker_events[wi]);
 }
 
 i32 search_get_results(SearchState* state, SearchResult* out, i32 max_count)
 {
-    AcquireSRWLockShared(&state->results_lock);
     LONG cur_ver = InterlockedOr(&state->query_version, 0);
+
+    /* Non‑blocking: if all workers reached the current round but we haven't
+       merged yet, do it here on the UI thread.  Per‑slot round counters
+       eliminate the done_count reset race. */
+    LONG cur_round = InterlockedOr(&state->search_round, 0);
+    b32 all_done = True;
+    for (i32 i = 0; i < state->worker_count; i++)
+    {
+        if (InterlockedOr(&state->worker_done_rounds[i], 0) != cur_round)
+        {
+            all_done = False;
+            break;
+        }
+    }
+
+    if (all_done && InterlockedOr(&state->published_version, 0) != cur_ver)
+    {
+        AcquireSRWLockExclusive(&state->results_lock);
+        /* Re‑check under the lock — another thread may have merged between
+           the worker_done_rounds check and acquiring the exclusive lock. */
+        all_done = True;
+        for (i32 i = 0; i < state->worker_count; i++)
+        {
+            if (InterlockedOr(&state->worker_done_rounds[i], 0) != cur_round)
+            {
+                all_done = False;
+                break;
+            }
+        }
+        if (all_done && InterlockedOr(&state->published_version, 0) != cur_ver)
+        {
+            SearchResult merged_results[SEARCH_MAX_RESULTS];
+            i32 merged_count = merge_k_sorted(state, merged_results, SEARCH_MAX_RESULTS);
+            if (merged_count > 0)
+                memcpy(state->results, merged_results,
+                       (usize)merged_count * sizeof(SearchResult));
+            state->result_count = merged_count;
+            state->published_version = cur_ver;
+        }
+        ReleaseSRWLockExclusive(&state->results_lock);
+    }
+
+    AcquireSRWLockShared(&state->results_lock);
     i32 count = 0;
     if (state->published_version == cur_ver)
     {
@@ -742,14 +581,6 @@ i32 search_get_results(SearchState* state, SearchResult* out, i32 max_count)
             count = max_count;
         if (count > 0)
             memcpy(out, state->results, (usize)count * sizeof(SearchResult));
-    }
-    {
-        char dbg[128];
-        snprintf(dbg, sizeof(dbg), "[SRCH] get_results: pub_ver=%ld cur_ver=%ld -> %s count=%d\n",
-            (long)state->published_version, (long)cur_ver,
-            state->published_version == cur_ver ? "MATCH" : "MISS",
-            count);
-        OutputDebugStringA(dbg);
     }
     ReleaseSRWLockShared(&state->results_lock);
     return count;
