@@ -348,205 +348,6 @@ static f32 s_child_gap_medium  = 10;
 // clang-format on
 
 //
-// Dictionary Callbacks
-//
-
-static String dict_word_extract(const void* entry)
-{
-    if (!g_dict_db)
-        return (String){ 0 };
-    const DictWordIndex* w = (const DictWordIndex*)entry;
-    const char* s = DICT_STR(g_dict_db, w->word_stroff);
-    return (String){ (u8*)s, (isize)strlen(s) };
-}
-
-static String dict_def_extract(const void* entry)
-{
-    if (!g_dict_db || !g_search_aux)
-        return (String){ 0 };
-    const DictWordIndex* w = (const DictWordIndex*)entry;
-    i32 idx = (i32)(w - g_dict_db->words);
-    return (String){ (u8*)g_search_aux[idx].def_search_text, g_search_aux[idx].def_len };
-}
-
-static String dict_ex_extract(const void* entry)
-{
-    if (!g_dict_db || !g_search_aux)
-        return (String){ 0 };
-    const DictWordIndex* w = (const DictWordIndex*)entry;
-    i32 idx = (i32)(w - g_dict_db->words);
-    return (String){ (u8*)g_search_aux[idx].ex_search_text, g_search_aux[idx].ex_len };
-}
-
-static FieldDef s_dict_fields[] = { { "word", dict_word_extract, 1.0f } };
-
-static FieldDef s_dict_fields_def[] = {
-    { "def", dict_def_extract, 1.0f },
-};
-
-static FieldDef s_dict_fields_ex[] = {
-    { "ex", dict_ex_extract, 1.0f },
-};
-
-static f32 dict_freq_weight(const void* entry, f32 raw)
-{
-    const DictWordIndex* w = (const DictWordIndex*)entry;
-
-    // freq is a rank: lower value = more frequent word.
-    u32 freq = w->freq;
-    f32 freq_score;
-
-    // Missing frequency data → treat as extremely rare
-    if (freq == 0xFFFFFFFF)
-        freq_score = 5.0f;
-    else
-        freq_score = log2f(1.0f + (f32)freq) * 0.8f;
-
-    const f32 freq_weight = 0.3f;
-    return raw * (1.0f - freq_weight) + freq_score * freq_weight;
-}
-
-static const char* s_pos_names[] = {
-    [POS_NOUN] = "n.",
-    [POS_VERB] = "v.",
-    [POS_NOUN_VERB] = "n., v.",
-    [POS_ADJ] = "adj.",
-    [POS_ADV] = "adv.",
-    [POS_ADJ_ADV] = "adj., adv.",
-    [POS_CONJ] = "conj.",
-    [POS_DET] = "det.",
-    [POS_INDEF_ART] = "indef. art.",
-    [POS_INTERJ] = "interj.",
-    [POS_MODAL] = "modal v.",
-    [POS_NUM] = "num.",
-    [POS_PREDET] = "predet.",
-    [POS_PREP] = "prep.",
-    [POS_ADV_PREP] = "adv., prep.",
-    [POS_PRON] = "pron.",
-    [POS_SUFFIX] = "suf.",
-    [POS_PREFIX] = "pref.",
-    [POS_AUX_VERB] = "aux. v.",
-    [POS_PHRASAL_VERB] = "phr. v.",
-    [POS_DEF_ART] = "def. art.",
-};
-
-static void render_dict_content(const void* data, void* ctx)
-{
-    i32 word_idx = (i32)(isize)data;
-    AppShared* shared = (AppShared*)ctx;
-    const DictDB* db = &shared->dict_db;
-    if (!db->hdr)
-        return;
-    const Theme* theme = &shared->theme;
-    const DictWordIndex* w = &db->words[word_idx];
-    const char* word = DICT_STR(db, w->word_stroff);
-
-    /* word title */
-    ui_text((String){ (u8*)word, (isize)strlen(word) },
-            &(TextConfig){
-                .font = &shared->fonts[FONT_INDEX_UI], .font_size = 20, .color = theme->accent_bg, .line_height = 28 });
-
-    const u8* p = db->entdata + w->entdata_off;
-
-    /* freq */
-    p += 4;
-
-    /* brief_en */
-    {
-        u8 cnt = dict_rd_u8(&p);
-        TextConfig cfg = {
-            .font = &shared->fonts[FONT_INDEX_UI], .font_size = 13, .color = theme->panel_fg, .line_height = 20
-        };
-        for (u8 i = 0; i < cnt; i++)
-        {
-            u32 off = dict_rd_u32(&p);
-            ui_text((String){ (u8*)DICT_STR(db, off), (isize)strlen(DICT_STR(db, off)) }, &cfg);
-        }
-    }
-
-    /* brief_zh */
-    {
-        u8 cnt = dict_rd_u8(&p);
-        TextConfig cfg = {
-            .font = &shared->fonts[FONT_INDEX_ZH], .font_size = 13, .color = theme->panel_fg, .line_height = 20
-        };
-        for (u8 i = 0; i < cnt; i++)
-        {
-            u32 off = dict_rd_u32(&p);
-            ui_text((String){ (u8*)DICT_STR(db, off), (isize)strlen(DICT_STR(db, off)) }, &cfg);
-        }
-    }
-
-    /* POS sections */
-    u8 pos_count = dict_rd_u8(&p);
-    for (u8 pi = 0; pi < pos_count; pi++)
-    {
-        u8 pos_kind = dict_rd_u8(&p);
-        u32 pron_off = dict_rd_u32(&p);
-
-        /* POS label + pronunciation on one line */
-        if (pos_kind < countof(s_pos_names) && s_pos_names[pos_kind])
-        {
-            UIBox* row = ui_box_begin(
-                &(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_LEFT_TO_RIGHT, .child_gap = 4 });
-            {
-                const char* label = s_pos_names[pos_kind];
-                ui_text((String){ (u8*)label, (isize)strlen(label) },
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
-                                       .font_size = 12,
-                                       .color = theme->accent_subtle_bg,
-                                       .line_height = 18 });
-                if (pron_off)
-                    ui_text((String){ (u8*)DICT_STR(db, pron_off), (isize)strlen(DICT_STR(db, pron_off)) },
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
-                                           .font_size = 12,
-                                           .color = theme->accent_subtle_bg,
-                                           .line_height = 18 });
-            }
-            ui_box_end(row);
-        }
-
-        u8 def_count = dict_rd_u8(&p);
-        for (u8 di = 0; di < def_count; di++)
-        {
-            u32 en_off = dict_rd_u32(&p);
-            u32 zh_off = dict_rd_u32(&p);
-
-            ui_text((String){ (u8*)DICT_STR(db, en_off), (isize)strlen(DICT_STR(db, en_off)) },
-                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                   .font_size = 13,
-                                   .color = theme->panel_fg,
-                                   .line_height = 20 });
-            ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
-                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
-                                   .font_size = 12,
-                                   .color = theme->panel_fg,
-                                   .line_height = 18 });
-
-            u8 ex_count = dict_rd_u8(&p);
-            for (u8 ei = 0; ei < ex_count; ei++)
-            {
-                u32 ex_en = dict_rd_u32(&p);
-                u32 ex_zh = dict_rd_u32(&p);
-
-                ui_text((String){ (u8*)DICT_STR(db, ex_en), (isize)strlen(DICT_STR(db, ex_en)) },
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
-                                       .font_size = 11,
-                                       .color = theme->panel_fg,
-                                       .line_height = 18,
-                                       .wrap = True });
-                ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
-                                       .font_size = 10,
-                                       .color = theme->panel_fg,
-                                       .line_height = 16,
-                                       .wrap = True });
-            }
-        }
-    }
-}
-
-//
 // Window Creation
 //
 
@@ -1645,6 +1446,205 @@ static i32 palette_build_display_items(const SearchResult* sr, i32 sr_count, Sea
     }
 
     return count;
+}
+
+//
+// Dictionary Callbacks
+//
+
+static String dict_word_extract(const void* entry)
+{
+    if (!g_dict_db)
+        return (String){ 0 };
+    const DictWordIndex* w = (const DictWordIndex*)entry;
+    const char* s = DICT_STR(g_dict_db, w->word_stroff);
+    return (String){ (u8*)s, (isize)strlen(s) };
+}
+
+static String dict_def_extract(const void* entry)
+{
+    if (!g_dict_db || !g_search_aux)
+        return (String){ 0 };
+    const DictWordIndex* w = (const DictWordIndex*)entry;
+    i32 idx = (i32)(w - g_dict_db->words);
+    return (String){ (u8*)g_search_aux[idx].def_search_text, g_search_aux[idx].def_len };
+}
+
+static String dict_ex_extract(const void* entry)
+{
+    if (!g_dict_db || !g_search_aux)
+        return (String){ 0 };
+    const DictWordIndex* w = (const DictWordIndex*)entry;
+    i32 idx = (i32)(w - g_dict_db->words);
+    return (String){ (u8*)g_search_aux[idx].ex_search_text, g_search_aux[idx].ex_len };
+}
+
+static FieldDef s_dict_fields[] = { { "word", dict_word_extract, 1.0f } };
+
+static FieldDef s_dict_fields_def[] = {
+    { "def", dict_def_extract, 1.0f },
+};
+
+static FieldDef s_dict_fields_ex[] = {
+    { "ex", dict_ex_extract, 1.0f },
+};
+
+static f32 dict_freq_weight(const void* entry, f32 raw)
+{
+    const DictWordIndex* w = (const DictWordIndex*)entry;
+
+    // freq is a rank: lower value = more frequent word.
+    u32 freq = w->freq;
+    f32 freq_score;
+
+    // Missing frequency data → treat as extremely rare
+    if (freq == 0xFFFFFFFF)
+        freq_score = 5.0f;
+    else
+        freq_score = log2f(1.0f + (f32)freq) * 0.8f;
+
+    const f32 freq_weight = 0.3f;
+    return raw * (1.0f - freq_weight) + freq_score * freq_weight;
+}
+
+static const char* s_pos_names[] = {
+    [POS_NOUN] = "n.",
+    [POS_VERB] = "v.",
+    [POS_NOUN_VERB] = "n., v.",
+    [POS_ADJ] = "adj.",
+    [POS_ADV] = "adv.",
+    [POS_ADJ_ADV] = "adj., adv.",
+    [POS_CONJ] = "conj.",
+    [POS_DET] = "det.",
+    [POS_INDEF_ART] = "indef. art.",
+    [POS_INTERJ] = "interj.",
+    [POS_MODAL] = "modal v.",
+    [POS_NUM] = "num.",
+    [POS_PREDET] = "predet.",
+    [POS_PREP] = "prep.",
+    [POS_ADV_PREP] = "adv., prep.",
+    [POS_PRON] = "pron.",
+    [POS_SUFFIX] = "suf.",
+    [POS_PREFIX] = "pref.",
+    [POS_AUX_VERB] = "aux. v.",
+    [POS_PHRASAL_VERB] = "phr. v.",
+    [POS_DEF_ART] = "def. art.",
+};
+
+static void render_dict_content(const void* data, void* ctx)
+{
+    i32 word_idx = (i32)(isize)data;
+    AppShared* shared = (AppShared*)ctx;
+    const DictDB* db = &shared->dict_db;
+    if (!db->hdr)
+        return;
+    const Theme* theme = &shared->theme;
+    const DictWordIndex* w = &db->words[word_idx];
+    const char* word = DICT_STR(db, w->word_stroff);
+
+    /* word title */
+    ui_text((String){ (u8*)word, (isize)strlen(word) },
+            &(TextConfig){
+                .font = &shared->fonts[FONT_INDEX_UI], .font_size = 20, .color = theme->accent_bg, .line_height = 28 });
+
+    const u8* p = db->entdata + w->entdata_off;
+
+    /* freq */
+    p += 4;
+
+    /* brief_en */
+    {
+        u8 cnt = dict_rd_u8(&p);
+        TextConfig cfg = {
+            .font = &shared->fonts[FONT_INDEX_UI], .font_size = 13, .color = theme->panel_fg, .line_height = 20
+        };
+        for (u8 i = 0; i < cnt; i++)
+        {
+            u32 off = dict_rd_u32(&p);
+            ui_text((String){ (u8*)DICT_STR(db, off), (isize)strlen(DICT_STR(db, off)) }, &cfg);
+        }
+    }
+
+    /* brief_zh */
+    {
+        u8 cnt = dict_rd_u8(&p);
+        TextConfig cfg = {
+            .font = &shared->fonts[FONT_INDEX_ZH], .font_size = 13, .color = theme->panel_fg, .line_height = 20
+        };
+        for (u8 i = 0; i < cnt; i++)
+        {
+            u32 off = dict_rd_u32(&p);
+            ui_text((String){ (u8*)DICT_STR(db, off), (isize)strlen(DICT_STR(db, off)) }, &cfg);
+        }
+    }
+
+    /* POS sections */
+    u8 pos_count = dict_rd_u8(&p);
+    for (u8 pi = 0; pi < pos_count; pi++)
+    {
+        u8 pos_kind = dict_rd_u8(&p);
+        u32 pron_off = dict_rd_u32(&p);
+
+        /* POS label + pronunciation on one line */
+        if (pos_kind < countof(s_pos_names) && s_pos_names[pos_kind])
+        {
+            UIBox* row = ui_box_begin(
+                &(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_LEFT_TO_RIGHT, .child_gap = 4 });
+            {
+                const char* label = s_pos_names[pos_kind];
+                ui_text((String){ (u8*)label, (isize)strlen(label) },
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
+                                       .font_size = 12,
+                                       .color = theme->accent_subtle_bg,
+                                       .line_height = 18 });
+                if (pron_off)
+                    ui_text((String){ (u8*)DICT_STR(db, pron_off), (isize)strlen(DICT_STR(db, pron_off)) },
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
+                                           .font_size = 12,
+                                           .color = theme->accent_subtle_bg,
+                                           .line_height = 18 });
+            }
+            ui_box_end(row);
+        }
+
+        u8 def_count = dict_rd_u8(&p);
+        for (u8 di = 0; di < def_count; di++)
+        {
+            u32 en_off = dict_rd_u32(&p);
+            u32 zh_off = dict_rd_u32(&p);
+
+            ui_text((String){ (u8*)DICT_STR(db, en_off), (isize)strlen(DICT_STR(db, en_off)) },
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = 13,
+                                   .color = theme->panel_fg,
+                                   .line_height = 20 });
+            ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                   .font_size = 12,
+                                   .color = theme->panel_fg,
+                                   .line_height = 18 });
+
+            u8 ex_count = dict_rd_u8(&p);
+            for (u8 ei = 0; ei < ex_count; ei++)
+            {
+                u32 ex_en = dict_rd_u32(&p);
+                u32 ex_zh = dict_rd_u32(&p);
+
+                ui_text((String){ (u8*)DICT_STR(db, ex_en), (isize)strlen(DICT_STR(db, ex_en)) },
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                       .font_size = 11,
+                                       .color = theme->panel_fg,
+                                       .line_height = 18,
+                                       .wrap = True });
+                ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                       .font_size = 10,
+                                       .color = theme->panel_fg,
+                                       .line_height = 16,
+                                       .wrap = True });
+            }
+        }
+    }
 }
 
 //
@@ -3519,7 +3519,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 if (!(ctx->palette_popup.open && ctx->ui.focused_hash == s_search_palette_input_hash))
                 {
-                    cmd_queue_push(&shared->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "palette.toggle window=%u", ctx->id));
+                    cmd_queue_push(&shared->cmd_queue,
+                                   str_fmt(CMD_STR_MAX_LENGTH, "palette.toggle window=%u", ctx->id));
                     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
                     return 0;
                 }
