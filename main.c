@@ -4187,15 +4187,19 @@ i32 WinMainCRTStartup()
     renderer_shared_init(&shared.renderer_shared);
     perf_mark("D3D11CreateDevice");
 
-    /* Register fonts */
-    font_register_from_system(&shared.dwrite, L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                              &shared.fonts[FONT_INDEX_UI]);
-    font_register_from_system(&shared.dwrite, L"Microsoft YaHei", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                              &shared.fonts[FONT_INDEX_ZH]);
-    font_register_from_system(&shared.dwrite, L"Consolas", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                              &shared.fonts[FONT_INDEX_MONO]);
-    font_register_from_system(&shared.dwrite, L"Segoe MDL2 Assets", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                              &shared.fonts[FONT_INDEX_MDL]);
+    /* Register fonts (batch register from file paths, single font collection) */
+    // clang-format off
+    font_register_system_fonts(
+        &shared.dwrite,
+        (FontRegEntry[]){
+            { .file_path = L"C:\\Windows\\Fonts\\segoeui.ttf", .family_name = L"Segoe UI",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_UI]   },
+            { .file_path = L"C:\\Windows\\Fonts\\msyh.ttc",    .family_name = L"Microsoft YaHei",   .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_ZH]   },
+            { .file_path = L"C:\\Windows\\Fonts\\consola.ttf", .family_name = L"Consolas",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_MONO] },
+            { .file_path = L"C:\\Windows\\Fonts\\segmdl2.ttf", .family_name = L"Segoe MDL2 Assets", .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_MDL]  },
+        },
+        4
+    );
+    // clang-format on
     font_register_from_resource(&shared.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                                 &shared.fonts[FONT_INDEX_ICON]);
     perf_mark("font_register");

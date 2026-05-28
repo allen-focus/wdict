@@ -130,20 +130,49 @@ static void font_register(IDWriteFontCollection1* collection, u32 family_index, 
 void font_register_from_system(DWriteContext* dwrite, wchar_t* font_name, DWRITE_FONT_WEIGHT weight,
                                DWRITE_FONT_STYLE style, Font* font)
 {
-    /* Get font collection from system */
     IDWriteFontCollection1* font_collection = NULL;
     IDWriteFactory5_GetSystemFontCollection1(dwrite->factory, False, &font_collection, False);
 
-    /* Find font family by family name */
     u32 family_index = 0;
     b32 family_exists = False;
     IDWriteFontCollection1_FindFamilyName(font_collection, font_name, &family_index, &family_exists);
     Assert(family_exists);
 
-    /* Register font */
     font_register(font_collection, family_index, weight, style, font);
 
-    /* Clean */
+    IDWriteFontCollection1_Release(font_collection);
+}
+
+void font_register_system_fonts(DWriteContext* dwrite, const FontRegEntry* entries, isize count)
+{
+    IDWriteFontSetBuilder1* font_set_builder = NULL;
+    IDWriteFactory5_CreateFontSetBuilder1(dwrite->factory, &font_set_builder);
+
+    for (isize i = 0; i < count; i++)
+    {
+        IDWriteFontFile* font_file = NULL;
+        IDWriteFactory5_CreateFontFileReference(dwrite->factory, entries[i].file_path, NULL, &font_file);
+        IDWriteFontSetBuilder1_AddFontFile(font_set_builder, font_file);
+        IDWriteFontFile_Release(font_file);
+    }
+
+    IDWriteFontSet* font_set = NULL;
+    IDWriteFontSetBuilder1_CreateFontSet(font_set_builder, &font_set);
+    IDWriteFontSetBuilder1_Release(font_set_builder);
+
+    IDWriteFontCollection1* font_collection = NULL;
+    IDWriteFactory5_CreateFontCollectionFromFontSet(dwrite->factory, font_set, &font_collection);
+    IDWriteFontSet_Release(font_set);
+
+    for (isize i = 0; i < count; i++)
+    {
+        u32 family_index = 0;
+        b32 family_exists = False;
+        IDWriteFontCollection1_FindFamilyName(font_collection, entries[i].family_name, &family_index, &family_exists);
+        Assert(family_exists);
+        font_register(font_collection, family_index, entries[i].weight, entries[i].style, entries[i].font);
+    }
+
     IDWriteFontCollection1_Release(font_collection);
 }
 

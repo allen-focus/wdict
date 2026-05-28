@@ -51,6 +51,15 @@ typedef struct
     IDWriteFontFace3* face3;
 } Font;
 
+typedef struct
+{
+    wchar_t* file_path;
+    wchar_t* family_name;
+    DWRITE_FONT_WEIGHT weight;
+    DWRITE_FONT_STYLE style;
+    Font* font;
+} FontRegEntry;
+
 // Glyph identity for raster cache: (font, size, dpi, codepoint) since
 // rasterization depends on physical pixel size which varies by DPI.
 typedef struct
@@ -129,6 +138,7 @@ void dwrite_deinit(DWriteContext* dwrite);
 
 void font_register_from_system(DWriteContext* dwrite, wchar_t* font_name, DWRITE_FONT_WEIGHT weight,
                                DWRITE_FONT_STYLE style, Font* font);
+void font_register_system_fonts(DWriteContext* dwrite, const FontRegEntry* entries, isize count);
 void font_register_from_local_file(DWriteContext* dwrite, wchar_t* font_file_path, DWRITE_FONT_WEIGHT weight,
                                    DWRITE_FONT_STYLE style, Font* font);
 void font_register_from_malloc_heap_memory(DWriteContext* dwrite, void* data, u32 size, DWRITE_FONT_WEIGHT weight,
