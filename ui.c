@@ -2310,7 +2310,12 @@ void ui_panel_end(PanelContext* panel_ctx)
             ui_box_interact(bottom_bar, str_fmt(HASH_STR_MAX_LENGTH, "bottom_bar_%u", panel_ctx->panel->id));
 
         if (res.last_box)
+        {
             update_transition(&res.last_box->hot_t, panel_ctx->show_bottom_bar ? 1.f : 0.f, 18.f);
+            // Disable transition animation if this is just a new window
+            if (g_ui_ctx->frame_index < 4)
+                res.last_box->hot_t = 1.f;
+        }
 
         f32 t = res.last_box ? res.last_box->hot_t : 0.f;
         f32 bh = t * 30;

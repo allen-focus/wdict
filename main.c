@@ -696,7 +696,10 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
         .draw_rect = renderer_draw_rect,
         .draw_text = renderer_draw_text,
     };
-    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, width, height, dpi, render_fn);
+
+    // NOTE: Client width/height have been initialized in WM_NCCALCSIZE, so we just pass it
+    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, ctx->ui.client_width, ctx->ui.client_height,
+            dpi, render_fn);
     ctx->ui.clipboard_copy = win32_clipboard_copy;
     ctx->ui.clipboard_paste = win32_clipboard_paste;
     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
@@ -2932,7 +2935,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
 
 static void process_frame(WindowContext* ctx)
 {
-    if (IsIconic(ctx->window) || !IsWindowVisible(ctx->window))
+    if (IsIconic(ctx->window))
         return;
 
     /* Guard against re-entrant ShowWindow calls (e.g., maximize/restore triggering
@@ -3208,14 +3211,14 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
             u32 dpi = ui_ctx->dpi ? ui_ctx->dpi : GetDpiForWindow(window);
 
-            // Standard resize border thickness provided by Windows.
+            /* Standard resize border thickness provided by Windows. */
             i32 frame_x = GetSystemMetricsForDpi(SM_CXFRAME, dpi);
             i32 frame_y = GetSystemMetricsForDpi(SM_CYFRAME, dpi);
 
-            // Extra invisible padding added by DWM for resizing/shadows/snap.
+            /* Extra invisible padding added by DWM for resizing/shadows/snap. */
             i32 padding = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
 
-            // rc initially represents the full window rect, not the final client rect.
+            /* rc initially represents the full window rect, not the final client rect. */
             NCCALCSIZE_PARAMS* params = (NCCALCSIZE_PARAMS*)lparam;
             RECT* rc = params->rgrc;
 
@@ -3238,6 +3241,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             rc->bottom -= frame_y + padding;
             if (IsZoomed(window))
                 rc->top += frame_y + padding;
+
+            /* Update ui context client width/height */
+            f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+            ui_ctx->client_width = (u32)ceil((rc->right - rc->left) / dpi_scale);
+            ui_ctx->client_height = (u32)ceil((rc->bottom - rc->top) / dpi_scale);
 
             // Returning 0 tells Windows that we fully handled the non-client size
             // calculation ourselves, so the default title bar and frame should not
@@ -3918,7 +3926,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_SIZE:
         {
-            if (wparam == SIZE_MINIMIZED)
+            if (wparam == SIZE_MINIMIZED || !IsWindowVisible(ctx->window))
                 return 0;
 
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
