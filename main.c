@@ -76,7 +76,6 @@ typedef enum
     PALETTE_MODE_WORD,
     PALETTE_MODE_DEF,
     PALETTE_MODE_EXAMPLE,
-    PALETTE_MODE_ALL,
 } SearchPaletteMode;
 
 typedef enum
@@ -399,12 +398,6 @@ static FieldDef s_dict_fields_def[] = {
 
 static FieldDef s_dict_fields_ex[] = {
     { "ex", dict_ex_extract, 1.0f },
-};
-
-static FieldDef s_dict_fields_all[] = {
-    { "word", dict_word_extract, 1.0f },
-    { "def", dict_def_extract, 0.8f },
-    { "ex", dict_ex_extract, 0.5f },
 };
 
 static f32 dict_freq_weight(const void* entry, f32 raw)
@@ -1598,67 +1591,44 @@ static i32 palette_build_display_items(const SearchResult* sr, i32 sr_count, Sea
             /* ranges are byte offsets into the word string */
             item->word_range_count = sr[i].range_count;
             memcpy(item->word_ranges, sr[i].ranges, (usize)sr[i].range_count * sizeof(FuzzyRange));
-            item->has_context = False;
+
+            /* Set display_context to first brief_zh entry if available */
+            {
+                const u8* p = db->entdata + w->entdata_off;
+                p += 4; /* skip freq */
+                dict_skip_brief_array(&p); /* skip brief_en */
+                u8 zh_cnt = dict_rd_u8(&p);
+                if (zh_cnt > 0)
+                {
+                    u32 zh_off = dict_rd_u32(&p);
+                    const char* zh_str = DICT_STR(db, zh_off);
+                    item->display_context = (String){ (u8*)zh_str, (isize)strlen(zh_str) };
+                    item->has_context = True;
+                    item->ctx_range_count = 0;
+                }
+            }
             continue;
         }
 
-        /* ── All non-word modes: determine which field matched, then locate context segment ── */
+        /* ── DEF / EXAMPLE modes: determine which field matched, then locate context segment ── */
         const AuxSegment* segs;
         i32 seg_count;
         const u8* search_text;
-        i32 search_text_len;
 
         if (mode == PALETTE_MODE_DEF)
         {
             segs = aux[idx].def_segs;
             seg_count = aux[idx].def_seg_count;
             search_text = (const u8*)aux[idx].def_search_text;
-            search_text_len = aux[idx].def_len;
         }
-        else if (mode == PALETTE_MODE_EXAMPLE)
+        else /* PALETTE_MODE_EXAMPLE */
         {
             segs = aux[idx].ex_segs;
             seg_count = aux[idx].ex_seg_count;
             search_text = (const u8*)aux[idx].ex_search_text;
-            search_text_len = aux[idx].ex_len;
-        }
-        else /* PALETTE_MODE_ALL */
-        {
-            const char* word_ptr = DICT_STR(db, w->word_stroff);
-            if (sr[i].text.data == (const u8*)word_ptr)
-            {
-                /* hit was in the word field — treat like WORD mode */
-                item->word_range_count = sr[i].range_count;
-                memcpy(item->word_ranges, sr[i].ranges, (usize)sr[i].range_count * sizeof(FuzzyRange));
-                item->has_context = False;
-                continue;
-            }
-            const u8* def_ptr = (const u8*)aux[idx].def_search_text;
-            const u8* ex_ptr = (const u8*)aux[idx].ex_search_text;
-            if (sr[i].text.data == def_ptr)
-            {
-                segs = aux[idx].def_segs;
-                seg_count = aux[idx].def_seg_count;
-                search_text = def_ptr;
-                search_text_len = aux[idx].def_len;
-            }
-            else if (sr[i].text.data == ex_ptr)
-            {
-                segs = aux[idx].ex_segs;
-                seg_count = aux[idx].ex_seg_count;
-                search_text = ex_ptr;
-                search_text_len = aux[idx].ex_len;
-            }
-            else
-            {
-                /* unexpected ref_text — show word only */
-                item->has_context = False;
-                continue;
-            }
         }
 
-        /* Verify the result's ref_text matches what we expect.
-           (In ALL mode the hit might be in the word field — handled above.) */
+        /* Verify the result's ref_text matches what we expect. */
         if (sr[i].range_count == 0 || seg_count == 0)
         {
             item->has_context = False;
@@ -2265,10 +2235,6 @@ static void search_palette_render(WindowContext* ctx)
                 fields = s_dict_fields_ex;
                 field_count = countof(s_dict_fields_ex);
                 break;
-            case PALETTE_MODE_ALL:
-                fields = s_dict_fields_all;
-                field_count = countof(s_dict_fields_all);
-                break;
         }
         search_reconfigure(&shared->palette_search, fields, field_count);
         ctx->palette_effective_mode = mode;
@@ -2388,7 +2354,6 @@ static void search_palette_render(WindowContext* ctx)
                         case PALETTE_MODE_WORD:    placeholder = "Search word...";       break;
                         case PALETTE_MODE_DEF:     placeholder = "Search definition..."; break;
                         case PALETTE_MODE_EXAMPLE: placeholder = "Search example...";    break;
-                        case PALETTE_MODE_ALL:     placeholder = "Search all...";        break;
                     }
                     // clang-format on
                     ui_text_field(
@@ -2414,7 +2379,6 @@ static void search_palette_render(WindowContext* ctx)
                             case PALETTE_MODE_WORD:    label = str("Word");       break;
                             case PALETTE_MODE_DEF:     label = str("Definition"); break;
                             case PALETTE_MODE_EXAMPLE: label = str("Example");    break;
-                            case PALETTE_MODE_ALL:     label = str("All");        break;
                             default:                   label = str("Word");       break;
                         }
                         // clang-format on
@@ -3717,7 +3681,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         case PALETTE_MODE_WORD:    fields  = s_dict_fields;     field_count = countof(s_dict_fields);     break;
                         case PALETTE_MODE_DEF:     fields  = s_dict_fields_def; field_count = countof(s_dict_fields_def); break;
                         case PALETTE_MODE_EXAMPLE: fields  = s_dict_fields_ex;  field_count = countof(s_dict_fields_ex);  break;
-                        case PALETTE_MODE_ALL:     fields  = s_dict_fields_all; field_count = countof(s_dict_fields_all); break;
                     }
                     // clang-format on
                     search_reconfigure(&shared->palette_search, fields, field_count);
