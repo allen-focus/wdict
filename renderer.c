@@ -8,6 +8,7 @@
 #include <d3dcompiler.h>
 #include <dxgi1_3.h>
 #include <dxgidebug.h>
+#include <stdio.h>
 #include <windows.h>
 
 #include "glyph_cache.h"
@@ -713,6 +714,15 @@ void renderer_draw_text(Renderer* renderer, GlyphRasterCache* raster_cache, Stri
         u16 atlas_x = 0, atlas_y = 0;
         if (res.codepoint != ' ')
         {
+            if (!result.info->w || !result.info->h)
+            {
+                char dbg_str[256];
+                snprintf(dbg_str, sizeof(dbg_str), "[Warning]: Somehow, codepoint %d has no width or height.\n",
+                         res.codepoint);
+                OutputDebugStringA(dbg_str);
+                goto end;
+            }
+
             GlyphKey key = { font, font_size, dpi, res.codepoint };
             AtlasGlyphPosition pos = renderer_ensure_glyph_in_atlas(renderer, result.info, &key);
             atlas_x = pos.atlas_x;
@@ -741,5 +751,7 @@ void renderer_draw_text(Renderer* renderer, GlyphRasterCache* raster_cache, Stri
         /* Update x position for next char */
         next_position_x += (f32)result.info->xadvance;
     }
+
+end:
     TracyCZoneEnd(ctx_dt);
 }
