@@ -746,7 +746,7 @@ static void cmd_toggle_theme(void* userdata, String cmd_text)
     shared->theme = (shared->theme.border.r == s_theme_dark.border.r) ? s_theme_light : s_theme_dark;
 }
 
-static void cmd_menu_toggle(void* userdata, String cmd_text)
+static void cmd_toggle_menu(void* userdata, String cmd_text)
 {
     (void)cmd_text;
     AppShared* shared = (AppShared*)userdata;
@@ -759,7 +759,7 @@ static void cmd_menu_toggle(void* userdata, String cmd_text)
     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
 }
 
-static void cmd_palette_toggle(void* userdata, String cmd_text)
+static void cmd_toggle_palette(void* userdata, String cmd_text)
 {
     (void)cmd_text;
     AppShared* shared = (AppShared*)userdata;
@@ -777,6 +777,10 @@ static void cmd_palette_toggle(void* userdata, String cmd_text)
         ctx->palette_selected_index = 0;
         ctx->palette_search_mode = PALETTE_MODE_WORD;
         ctx->palette_switch_version = 0;
+
+        // Auto select all text
+        ctx->palette_text_edit.cursor = ctx->palette_text_edit.text_len;
+        ctx->palette_text_edit.mark = 0;
     }
     else
     {
@@ -3721,8 +3725,8 @@ i32 WinMainCRTStartup()
         /* Register commands */
         cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_create_window,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("menu.toggle"),            str("Toggle Menu Popup"),        str(""), cmd_menu_toggle,            &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.toggle"),         str("Toggle Search Palette"),    str(""), cmd_palette_toggle,         &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("menu.toggle"),            str("Toggle Menu Popup"),        str(""), cmd_toggle_menu,            &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.toggle"),         str("Toggle Search Palette"),    str(""), cmd_toggle_palette,         &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),          str("Split Panel Horizontally"), str(""), cmd_split_panel_h,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_v"),          str("Split Panel Vertically"),   str(""), cmd_split_panel_v,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.close"),            str("Close Panel"),              str(""), cmd_close_panel,            &shared });
