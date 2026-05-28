@@ -3354,48 +3354,83 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             }
 
             /* Palette mode switching — intercept before shortcut lookup
-               so Ctrl+W switches to word mode instead of closing a tab. */
-            if (ctx && ctrl && ctx->palette_popup.open && ctx->ui.focused_hash == s_search_palette_input_hash)
+               so Ctrl+W switches to word mode instead of closing a tab.
+               Tab/Shift+Tab cycles forward/backward through modes. */
+            if (ctx && ctx->palette_popup.open && ctx->ui.focused_hash == s_search_palette_input_hash)
             {
                 SearchPaletteMode new_mode = ctx->palette_search_mode;
+                b32 handled = True;
+
                 // clang-format off
-                switch (wparam)
+                if (ctrl)
                 {
-                    case 'D': new_mode = PALETTE_MODE_DEF;     break;
-                    case 'E': new_mode = PALETTE_MODE_EXAMPLE; break;
-                    case 'W': new_mode = PALETTE_MODE_WORD;    break;
-                    default: goto check_shortcuts;
+                    switch (wparam)
+                    {
+                        case 'D': new_mode = PALETTE_MODE_DEF;     break;
+                        case 'E': new_mode = PALETTE_MODE_EXAMPLE; break;
+                        case 'W': new_mode = PALETTE_MODE_WORD;    break;
+                        default:  handled = False;                 break;
+                    }
+                }
+                else if (wparam == VK_TAB)
+                {
+                    if (shift)
+                    {
+                        switch (ctx->palette_search_mode)
+                        {
+                            case PALETTE_MODE_WORD:    new_mode = PALETTE_MODE_EXAMPLE; break;
+                            case PALETTE_MODE_DEF:     new_mode = PALETTE_MODE_WORD;    break;
+                            case PALETTE_MODE_EXAMPLE: new_mode = PALETTE_MODE_DEF;     break;
+                            default:                   new_mode = PALETTE_MODE_WORD;    break;
+                        }
+                    }
+                    else
+                    {
+                        switch (ctx->palette_search_mode)
+                        {
+                            case PALETTE_MODE_WORD:    new_mode = PALETTE_MODE_DEF;     break;
+                            case PALETTE_MODE_DEF:     new_mode = PALETTE_MODE_EXAMPLE; break;
+                            case PALETTE_MODE_EXAMPLE: new_mode = PALETTE_MODE_WORD;    break;
+                            default:                   new_mode = PALETTE_MODE_WORD;    break;
+                        }
+                    }
+                }
+                else
+                {
+                    handled = False;
                 }
                 // clang-format on
 
-                if (new_mode != ctx->palette_search_mode)
+                if (handled)
                 {
-                    const FieldDef* fields;
-                    i32 field_count;
-                    // clang-format off
-                    switch (new_mode)
+                    if (new_mode != ctx->palette_search_mode)
                     {
-                        default:
-                        case PALETTE_MODE_WORD:    fields  = s_dict_fields;     field_count = countof(s_dict_fields);     break;
-                        case PALETTE_MODE_DEF:     fields  = s_dict_fields_def; field_count = countof(s_dict_fields_def); break;
-                        case PALETTE_MODE_EXAMPLE: fields  = s_dict_fields_ex;  field_count = countof(s_dict_fields_ex);  break;
+                        const FieldDef* fields;
+                        i32 field_count;
+                        // clang-format off
+                        switch (new_mode)
+                        {
+                            default:
+                            case PALETTE_MODE_WORD:    fields = s_dict_fields;     field_count = countof(s_dict_fields);     break;
+                            case PALETTE_MODE_DEF:     fields = s_dict_fields_def; field_count = countof(s_dict_fields_def); break;
+                            case PALETTE_MODE_EXAMPLE: fields = s_dict_fields_ex;  field_count = countof(s_dict_fields_ex);  break;
+                        }
+                        // clang-format on
+                        search_reconfigure(&shared->palette_search, fields, field_count);
+                        ctx->palette_search_mode = new_mode;
+                        ctx->palette_effective_mode = new_mode;
+                        /* Re-issue current query with new fields */
+                        String cur_query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
+                        if (cur_query.len > 0)
+                        {
+                            search_set_query(&shared->palette_search, cur_query);
+                            ctx->palette_switch_version = shared->palette_search.query_version;
+                        }
                     }
-                    // clang-format on
-                    search_reconfigure(&shared->palette_search, fields, field_count);
-                    ctx->palette_search_mode = new_mode;
-                    ctx->palette_effective_mode = new_mode;
-                    /* Re-issue current query with new fields */
-                    String cur_query = { ctx->palette_text_buf, ctx->palette_text_edit.text_len };
-                    if (cur_query.len > 0)
-                    {
-                        search_set_query(&shared->palette_search, cur_query);
-                        ctx->palette_switch_version = shared->palette_search.query_version;
-                    }
+                    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                    return 0;
                 }
-                ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
-                return 0;
             }
-        check_shortcuts:
 
             /* Check registered shortcuts */
             {
