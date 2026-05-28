@@ -3535,8 +3535,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             wchar_t c = (wchar_t)wparam;
 
-            /* '/' key opens or focuses the search palette */
-            if (c == '/' && ctx)
+            /* '/' or 's' key opens or focuses the search palette */
+            if ((c == '/' || c == 's') && ctx)
             {
                 if (!(ctx->palette_popup.open && ctx->ui.focused_hash == s_search_palette_input_hash))
                 {
