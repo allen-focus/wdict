@@ -103,6 +103,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/tracy/public/TracyClient.cpp")
 endif()
 
 #
+# zstd decompression  (embedded — dictionary is stored compressed in the .exe)
+#
+
+file(GLOB ZSTD_SOURCES
+    "thirdparty/zstd/common/*.c"
+    "thirdparty/zstd/decompress/*.c")
+list(FILTER ZSTD_SOURCES EXCLUDE REGEX "\\.S$")
+add_library(zstd STATIC ${ZSTD_SOURCES})
+target_include_directories(zstd PUBLIC "thirdparty/zstd")
+target_compile_options(zstd PRIVATE /W0)
+target_link_libraries(${PROJECT_NAME} PRIVATE zstd)
+
+#
 # Manifest  (embedded, optional)
 #
 

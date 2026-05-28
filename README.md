@@ -24,7 +24,14 @@ cmake --build build --config release
 
 ## Dictionary Data
 
-The application embeds an English–Chinese dictionary as a binary blob (`data/dict.bin`) via `resource.rc` (`DICT_DATA RCDATA`). At runtime, `DictDB` (see `dict.h`) opens the blob with zero-copy parsing — all pointers point directly into the embedded binary, requiring no heap allocation.
+The application embeds an English–Chinese dictionary as a compressed zstd binary blob (`data/dict.bin.zstd`) via `resource.rc` (`DICT_DATA RCDATA`). At startup, `startup_dict_thread` decompresses it (≈70 ms) into an arena-allocated buffer, then `DictDB` (see `dict.h`) opens it with zero-copy parsing — all pointers point directly into the decompressed memory, requiring no additional heap allocation.
+
+To compress the dictionary after building:
+```
+python scripts/compress_dict.py data/dict.bin data/dict.bin.zstd
+```
+
+The compressed binary reduces the `.exe` size by ≈67%.
 
 The blob is little-endian and consists of four contiguous sections:
 
@@ -176,6 +183,7 @@ Field notes:
 
 **Dependencies**
 
-- [Tracy](https://github.com/wolfpld/tracy) (trimmed to `public/` only, version 0.13.1): Licensed under the BSD 3‑Clause License. See the full terms in `third_party/tracy/LICENSE`.
+- [Zstandard](https://github.com/facebook/zstd) (trimmed to `common/`, `decompress/`, `zstd.h`, `zstd_errors.h`, `LICENSE` only, version 1.5.7): Licensed under the BSD 3-Clause License. See the full terms in `thirdparty/zstd/LICENSE`.
+- [Tracy](https://github.com/wolfpld/tracy) (trimmed to `public/` only, version 0.13.1): Licensed under the BSD 3‑Clause License. See the full terms in `thirdparty/tracy/LICENSE`.
 - Icon fonts: Generated using [Fontello](https://fontello.com/). Contains icons from:
-  - MFG Labs: Licensed under the [SIL Open Font License](http://scripts.sil.org/OFL). See the full terms in `third_party/fontello/LICENSE.txt`.
+  - MFG Labs: Licensed under the [SIL Open Font License](http://scripts.sil.org/OFL). See the full terms in `thirdparty/fontello/LICENSE.txt`.

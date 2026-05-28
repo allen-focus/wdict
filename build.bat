@@ -61,7 +61,7 @@ where /Q cl.exe || (
 :: NOTE: Comment sanitize flag as it is too slow
 :: set CompilerDebugFlags=/Od /Zi /RTC1 /fsanitize=address
 
-set CommonCompilerFlags=/nologo /W3 /WX /MP /utf-8 /D_CRT_SECURE_NO_WARNINGS
+set CommonCompilerFlags=/nologo /W3 /WX /MP /utf-8 /D_CRT_SECURE_NO_WARNINGS /Ithirdparty\zstd
 set CompilerDebugFlags=/Od /Zi /RTC1
 set CompilerReleaseFlags=/O2 /GS- /DNDEBUG
 
@@ -82,6 +82,9 @@ if %IsRelease%==1 (
 
 set SourceFiles=
 for %%f in (*.c) do (
+    set SourceFiles=!SourceFiles! %%f
+)
+for /r thirdparty\zstd %%f in (*.c) do (
     set SourceFiles=!SourceFiles! %%f
 )
 if exist "resource.rc" (

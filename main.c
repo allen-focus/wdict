@@ -10,6 +10,7 @@
 #include "renderer.h"
 #include "search.h"
 #include "shortcut.h"
+#include "thirdparty/zstd/zstd.h"
 #include "ui.h"
 #include "utils.h"
 #include "win32_helper.h"
@@ -166,6 +167,7 @@ typedef struct
     SearchState word_search;
     SearchState palette_search;
     DictDB dict_db;
+    Arena dict_arena;
     DictSearchAuxEntry* search_aux;
     Arena search_aux_arena;
 
@@ -4041,6 +4043,29 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
     StartupThreadParam* p = (StartupThreadParam*)param;
     AppShared* shared = p->shared;
 
+    /* Decompress dictionary from embedded zstd resource */
+    {
+        HRSRC h_res = FindResourceW(NULL, L"DICT_DATA", (LPCWSTR)RT_RCDATA);
+        Assert(h_res);
+        HGLOBAL h_global = LoadResource(NULL, h_res);
+        Assert(h_global);
+        const void* compressed = LockResource(h_global);
+        DWORD compressed_size = SizeofResource(NULL, h_res);
+
+        u64 dsize = ZSTD_getFrameContentSize(compressed, compressed_size);
+        Assert(dsize != ZSTD_CONTENTSIZE_ERROR && dsize != ZSTD_CONTENTSIZE_UNKNOWN);
+
+        shared->dict_arena = arena_new((isize)dsize);
+        arena_push(&shared->dict_arena, (isize)dsize, 1, 1);
+
+        usize result = ZSTD_decompress(shared->dict_arena.base, (size_t)dsize, compressed, compressed_size);
+        Assert(!ZSTD_isError(result));
+
+        shared->dict_db = dict_open(shared->dict_arena.base);
+        Assert(shared->dict_db.hdr);
+        g_dict_db = &shared->dict_db;
+    }
+
     shared->search_aux_arena = arena_new(MB(20));
     shared->search_aux = dict_build_search_aux(&shared->dict_db, &shared->search_aux_arena);
     Assert(shared->search_aux);
@@ -4170,19 +4195,6 @@ i32 WinMainCRTStartup()
     }
     // clang-format on
     perf_mark("cmd_register");
-
-    /* Load dictionary blob from embedded RC resource */
-    {
-        HRSRC h_res = FindResourceW(NULL, L"DICT_DATA", (LPCWSTR)RT_RCDATA);
-        Assert(h_res);
-        HGLOBAL h_global = LoadResource(NULL, h_res);
-        Assert(h_global);
-        const void* blob = LockResource(h_global);
-        shared.dict_db = dict_open(blob);
-        Assert(shared.dict_db.hdr);
-        g_dict_db = &shared.dict_db;
-    }
-    perf_mark("dict_open");
 
     /* Pre-compute focus hashes for popup input routing */
     s_search_input_hash = fnv1a_64(SEARCH_INPUT_HASH_STR, (isize)strlen(SEARCH_INPUT_HASH_STR));
@@ -4433,6 +4445,8 @@ i32 WinMainCRTStartup()
     search_stop(&shared.palette_search);
 
     arena_release(&shared.search_aux_arena);
+    if (shared.dict_arena.base)
+        arena_release(&shared.dict_arena);
 
     font_unregister(&shared.fonts[FONT_INDEX_UI]);
     font_unregister(&shared.fonts[FONT_INDEX_ZH]);
