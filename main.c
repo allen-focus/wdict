@@ -794,6 +794,26 @@ static void cmd_toggle_palette(void* userdata, String cmd_text)
     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
 }
 
+static void cmd_close_palette(void* userdata, String cmd_text)
+{
+    (void)cmd_text;
+    AppShared* shared = (AppShared*)userdata;
+
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* ctx = find_window_by_id(shared, window_id);
+    if (!ctx)
+        return;
+
+    ctx->palette_popup.open = False;
+    ctx->ui.focused_hash = 0;
+    ctx->palette_selected_index = -1;
+    ctx->palette_prev_selected_index = -1;
+    ctx->palette_activate_pending = False;
+    ctx->palette_search_mode = PALETTE_MODE_WORD;
+    ctx->palette_switch_version = 0;
+    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+}
+
 static void cmd_split_panel_h(void* userdata, String cmd_text)
 {
     AppShared* shared = (AppShared*)userdata;
@@ -3323,11 +3343,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         if (popups[i]->open)
                         {
                             popups[i]->open = False;
-                            ctx->palette_selected_index = -1;
-                            ctx->palette_prev_selected_index = -1;
-                            ctx->palette_activate_pending = False;
-                            ctx->ui.focused_hash = 0;
-                            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                            cmd_queue_push(&ctx->shared->cmd_queue,
+                                           str_fmt(CMD_STR_MAX_LENGTH, "palette.close window=%u", ctx->id));
                             return 0;
                         }
                     }
@@ -3727,6 +3744,7 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("menu.toggle"),            str("Toggle Menu Popup"),        str(""), cmd_toggle_menu,            &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.toggle"),         str("Toggle Search Palette"),    str(""), cmd_toggle_palette,         &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.close"),          str("Close Search Palette"),     str(""), cmd_close_palette,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),          str("Split Panel Horizontally"), str(""), cmd_split_panel_h,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_v"),          str("Split Panel Vertically"),   str(""), cmd_split_panel_v,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.close"),            str("Close Panel"),              str(""), cmd_close_panel,            &shared });
@@ -3737,24 +3755,24 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),      str("Move Tab To Next Panel"),   str(""), cmd_tab_move_to_panel,      &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"), str("Move Tab To New Window"),   str(""), cmd_tab_move_to_new_window, &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.to_new_panel"),       str("Move Tab To New Panel"),    str(""), cmd_tab_to_new_panel,       &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_next"),      str("Focus Next Panel"),         str(""), cmd_panel_focus_next,       &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_prev"),      str("Focus Previous Panel"),     str(""), cmd_panel_focus_prev,       &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_left"),      str("Focus Panel Left"),         str(""), cmd_panel_focus_left,       &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_down"),      str("Focus Panel Down"),         str(""), cmd_panel_focus_down,       &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_up"),        str("Focus Panel Up"),           str(""), cmd_panel_focus_up,         &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_right"),     str("Focus Panel Right"),        str(""), cmd_panel_focus_right,      &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_left"),     str("Resize Panel Left"),        str(""), cmd_panel_resize_left,      &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_down"),     str("Resize Panel Down"),        str(""), cmd_panel_resize_down,      &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_up"),       str("Resize Panel Up"),          str(""), cmd_panel_resize_up,        &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_right"),    str("Resize Panel Right"),       str(""), cmd_panel_resize_right,     &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_next"),       str("Focus Next Panel"),         str(""), cmd_panel_focus_next,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_prev"),       str("Focus Previous Panel"),     str(""), cmd_panel_focus_prev,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_left"),       str("Focus Panel Left"),         str(""), cmd_panel_focus_left,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_down"),       str("Focus Panel Down"),         str(""), cmd_panel_focus_down,       &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_up"),         str("Focus Panel Up"),           str(""), cmd_panel_focus_up,         &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.focus_right"),      str("Focus Panel Right"),        str(""), cmd_panel_focus_right,      &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_left"),      str("Resize Panel Left"),        str(""), cmd_panel_resize_left,      &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_down"),      str("Resize Panel Down"),        str(""), cmd_panel_resize_down,      &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_up"),        str("Resize Panel Up"),          str(""), cmd_panel_resize_up,        &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_right"),     str("Resize Panel Right"),       str(""), cmd_panel_resize_right,     &shared });
 
         /* Bind shortcuts */
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },          str("tab.new"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'W' },          str("tab.close"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  VK_OEM_MINUS }, str("panel.split_h"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  VK_OEM_PLUS },  str("panel.split_v"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_LEFT },      str("tab.move delta=-1"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_RIGHT },     str("tab.move delta=+1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'H' },          str("tab.move delta=-1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'L' },          str("tab.move delta=+1"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },          str("tab.move_to_panel"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },          str("tab.to_new_panel axis=X"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },          str("tab.to_new_panel axis=Y"));
@@ -3769,7 +3787,7 @@ i32 WinMainCRTStartup()
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'K' },          str("panel.resize_up"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'L' },          str("panel.resize_right"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                      VK_F11 },       str("app.toggle_theme"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'L' },          str("palette.toggle"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      VK_OEM_4 },     str("palette.close")); // ctrl+[
         Assert(!shortcut_detect_conflicts(&shared.shortcuts));
 
         /* Load cursors */
