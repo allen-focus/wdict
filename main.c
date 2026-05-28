@@ -4363,5 +4363,5 @@ i32 WinMainCRTStartup()
     arena_release(&shared.cmd_arena);
     arena_release(&shared.cfg_arena);
 
-    return 0;
+    ExitProcess(0);
 }
