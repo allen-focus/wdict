@@ -47,7 +47,6 @@
 #define CMD_ARENA_SIZE        KB(64)
 #define SEARCH_DISPLAY_MAX    100
 
-#define SEARCH_INPUT_HASH_STR         "search input"
 #define SEARCH_PALETTE_INPUT_HASH_STR "search palette input"
 #define PALETTE_CONTEXT_MAX_CHARS     64
 
@@ -163,7 +162,6 @@ typedef struct
     CmdRegistry cmd_registry;
     ShortcutRegistry shortcuts;
     CmdQueue cmd_queue;
-    SearchState word_search;
     SearchState palette_search;
     DictDB dict_db;
     Arena dict_arena;
@@ -221,17 +219,8 @@ struct WindowContext
     TitleBarHot tb_hovered_button;
 
     /* overlay popups */
-    OverlayPopup search_popup;
     OverlayPopup menu_popup;
     OverlayPopup palette_popup;
-
-    /* search popup state */
-    u8 search_text_buf[SEARCH_QUERY_BUF];
-    TextEditState search_text_edit;
-    i32 search_selected_index;
-    i32 search_prev_selected_index;
-    isize search_prev_query_len;
-    b32 search_activate_pending;
 
     /* palette state */
     u8 palette_text_buf[SEARCH_QUERY_BUF];
@@ -252,7 +241,6 @@ struct WindowContext
 static DictDB* g_dict_db; /* set at startup, used by extract callbacks */
 static DictSearchAuxEntry* g_search_aux; /* set at startup, used by extract callbacks */
 
-static u64 s_search_input_hash;
 static u64 s_search_palette_input_hash;
 static u32 s_window_next_id = 1; /* 0 reserved for none */
 static u16 s_utf16_pending_high = 0;
@@ -709,13 +697,6 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     ctx->text_edit_2.base = ctx->text_buf_2;
     ctx->text_edit_2.size = TEXT_BUFFER_SIZE;
 
-    ctx->search_text_edit.base = ctx->search_text_buf;
-    ctx->search_text_edit.size = SEARCH_QUERY_BUF;
-    ctx->search_selected_index = -1;
-    ctx->search_prev_selected_index = -1;
-    ctx->search_prev_query_len = 0;
-    ctx->search_activate_pending = False;
-
     ctx->palette_text_edit.base = ctx->palette_text_buf;
     ctx->palette_text_edit.size = SEARCH_QUERY_BUF;
     ctx->palette_selected_index = -1;
@@ -962,33 +943,6 @@ static void cmd_toggle_theme(void* userdata, String cmd_text)
     (void)cmd_text;
     AppShared* shared = (AppShared*)userdata;
     shared->theme = (shared->theme.border.r == s_theme_dark.border.r) ? s_theme_light : s_theme_dark;
-}
-
-static void cmd_search_toggle(void* userdata, String cmd_text)
-{
-    (void)cmd_text;
-    AppShared* shared = (AppShared*)userdata;
-    if (!shared->dict_ready)
-        return;
-    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
-    WindowContext* ctx = find_window_by_id(shared, window_id);
-    if (!ctx)
-        return;
-
-    ctx->search_popup.open = !ctx->search_popup.open;
-    if (ctx->search_popup.open)
-    {
-        ctx->ui.focused_hash = s_search_input_hash;
-        ctx->search_selected_index = 0;
-    }
-    else
-    {
-        ctx->ui.focused_hash = 0;
-        ctx->search_selected_index = -1;
-        ctx->search_prev_selected_index = -1;
-        ctx->search_activate_pending = False;
-    }
-    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
 }
 
 static void cmd_menu_toggle(void* userdata, String cmd_text)
@@ -1803,9 +1757,9 @@ static void decoration_overlay(WindowContext* ctx)
                 UIBoxInteractResult ir = ui_box_interact(btn, str("decoration_search"));
                 if (ir.last_box)
                 {
-                    update_transition(&ctx->search_popup.t, ctx->search_popup.open ? 1.f : 0.f, 15.f);
+                    update_transition(&ctx->palette_popup.t, ctx->palette_popup.open ? 1.f : 0.f, 15.f);
                     Color base_color = is_hovered ? theme->press_bg : (Color){ 0, 0, 0, 0 };
-                    btn->cfg.color = lerp_color(base_color, theme->accent_weak_bg, ctx->search_popup.t);
+                    btn->cfg.color = lerp_color(base_color, theme->accent_weak_bg, ctx->palette_popup.t);
                     ctx->decoration_search = (Rect){ ir.last_box->position.x, ir.last_box->position.y,
                                                      ir.last_box->position.x + ir.last_box->size.width,
                                                      ir.last_box->position.y + ir.last_box->size.height };
@@ -1853,267 +1807,6 @@ static void decoration_overlay(WindowContext* ctx)
                 };
             }
             /* TODO: popup content goes here */
-        }
-        ui_box_end(popup);
-    }
-
-    /* search popup with fuzzy word search */
-    if (ctx->search_popup.open)
-    {
-        f32 popup_w = 240.f;
-        f32 popup_h = 350.f;
-        f32 gap = 4.f;
-        f32 pad = 6.f;
-        f32 font_size = 12.f;
-        f32 popup_x = ctx->decoration_search.xmin;
-        f32 popup_y = ctx->decoration_search.ymax + gap;
-
-        /* build query from text edit state and run search */
-        String query = { ctx->search_text_buf, ctx->search_text_edit.text_len };
-
-        SearchResult sr[SEARCH_DISPLAY_MAX];
-        i32 sr_count = 0;
-        if (query.len > 0)
-        {
-            search_set_query(&shared->word_search, query);
-            sr_count = search_get_results(&shared->word_search, sr, SEARCH_DISPLAY_MAX);
-        }
-        else
-        {
-            /* empty query: show first words in alphabetical order */
-            u32 total = shared->dict_db.hdr->word_count;
-            i32 n = total < SEARCH_DISPLAY_MAX ? (i32)total : SEARCH_DISPLAY_MAX;
-            for (i32 i = 0; i < n; i++)
-            {
-                const DictWordIndex* w = &shared->dict_db.words[i];
-                sr[i].entry = (void*)w;
-                const char* word = DICT_STR(&shared->dict_db, w->word_stroff);
-                sr[i].key = (String){ (u8*)word, (isize)strlen(word) };
-                sr[i].text = sr[i].key;
-                sr[i].score = 0.f;
-                sr[i].range_count = 0;
-            }
-            sr_count = n;
-        }
-
-        /* Detect query change: reset to first match so user always sees the best result */
-        b32 query_changed = (query.len != ctx->search_prev_query_len);
-        ctx->search_prev_query_len = query.len;
-        if (query_changed)
-            ctx->search_selected_index = 0;
-
-        /* auto-select first item when results transition from empty to non-empty
-           (e.g. first keystroke while async search workers are still running) */
-        if (sr_count > 0 && ctx->search_selected_index < 0)
-            ctx->search_selected_index = 0;
-
-        /* wrap selected index (true modulo for bidirectional wrap) */
-        if (sr_count > 0)
-            ctx->search_selected_index = (ctx->search_selected_index % sr_count + sr_count) % sr_count;
-        else
-            ctx->search_selected_index = -1;
-
-        UIBox* popup = ui_box_begin(&(BoxConfig) {
-            .sizing = { fixed(popup_w), fixed(popup_h) }, .flags = BoxFlag_Float,
-            .float_offset = { popup_x, -(client_h - 1) + popup_y }, .color = theme->palette_bg,
-            .rect_style = {
-                .corner_radius = 8,
-                .shadow_color = theme->shadow,
-                .shadow_offset = { 0, 2 },
-                .shadow_sigma = 4,
-                .border_color = theme->border,
-                .border_thickness = 1,
-            },
-        });
-        {
-            UIBoxInteractResult ir = ui_box_interact(popup, str("##search_popup"));
-            if (ir.last_box)
-            {
-                ctx->search_popup.rect = (Rect){
-                    ir.last_box->position.x,
-                    ir.last_box->position.y,
-                    ir.last_box->position.x + ir.last_box->size.width,
-                    ir.last_box->position.y + ir.last_box->size.height,
-                };
-            }
-
-            UIBox* vbox = ui_box_begin(&(BoxConfig){
-                .sizing = { grow({}), grow({}) },
-                .padding = { 1, 0, 1, 0 },
-                .direction = LAYOUT_TOP_TO_BOTTOM,
-            });
-            {
-                /* text field */
-                UIBox* text_field_container =
-                    ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fit({}) }, .padding = { 0, pad, 0, pad } });
-                {
-                    ui_text_field(&ctx->search_text_edit, str("Search word###" SEARCH_INPUT_HASH_STR),
-                                  &shared->fonts[FONT_INDEX_UI], font_size, (SizingAxis)fixed(popup_w - pad * 2.f),
-                                  s_padding_medium, theme->palette_bg, (Color){ 0 }, theme->panel_fg,
-                                  theme->scrollbar_thumb, theme->cursor_bar, theme->cursor_trail, theme->selection,
-                                  theme->selection_flash, True);
-                }
-                ui_box_end(text_field_container);
-
-                /* splitter */
-                ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->border }));
-
-                /* results area */
-                if (sr_count > 0)
-                {
-                    b32 result_clicked = False;
-
-                    UIBox* scroll_container =
-                        ui_box_begin(&(BoxConfig){ .sizing = { grow({}), grow({}) }, .padding = { 0, 1, 0, 1 } });
-                    {
-                        /* Track selection state for scroll-sync */
-                        i32 selection_changed = (ctx->search_selected_index != ctx->search_prev_selected_index);
-                        f32 row_h = 0;
-
-                        ScrollContext scroll =
-                            ui_scrollable_area_begin(&(ScrollableAreaConfig){ .hash_str = str("##search_results"),
-                                                                              .sizing = { grow({}), grow({}) },
-                                                                              .corner_radius = 8,
-                                                                              .padding = { 5, 5, 5, 5 },
-                                                                              .bg = theme->palette_bg,
-                                                                              .thumb_color = theme->scrollbar_thumb,
-                                                                              .direction = LAYOUT_TOP_TO_BOTTOM,
-                                                                              .scroll_margin = font_size * 2.f });
-                        {
-                            /* Mouse wheel navigates items (fzf-style) */
-                            {
-                                PaletteNavAction scroll_action = palette_nav_from_scroll(ui_ctx->mouse_scroll_delta.y,
-                                                                                         ui_hovered(scroll.area_flags));
-                                if (scroll_action != PALETTE_NAV_NONE)
-                                {
-                                    ui_ctx->mouse_scroll_delta.y = 0;
-                                    ctx->search_selected_index =
-                                        palette_nav_apply(ctx->search_selected_index, sr_count, scroll_action, NULL);
-                                    selection_changed = 1;
-                                }
-                            }
-
-                            f32 cumulative_y = 0.f;
-
-                            for (i32 i = 0; i < sr_count; i++)
-                            {
-                                String word_text = sr[i].text;
-
-                                UIBox* row = ui_box_begin(&(BoxConfig){
-                                    .sizing = { fit_grow({}), fit({}) },
-                                    .direction = LAYOUT_LEFT_TO_RIGHT,
-                                    .alignment = { ALIGN_START, ALIGN_CENTER },
-                                    .padding = { 8, 8, 8, 8 },
-                                    .color = (Color){ 0, 0, 0, 0 },
-                                    .rect_style = { .corner_radius = 4 },
-                                });
-                                {
-                                    PaletteRowResult row_res = palette_row_interact(
-                                        row, str_fmt(HASH_STR_MAX_LENGTH, "search_result_%u_%d", ctx->id, i), theme,
-                                        i == ctx->search_selected_index);
-                                    row_h = row_res.height;
-
-                                    /* preview: auto-update tab content for selected item */
-                                    if (i == ctx->search_selected_index)
-                                    {
-                                        const DictWordIndex* w = (const DictWordIndex*)sr[i].entry;
-                                        PanelTab* active = panel_tab_get_active(ctx->focused_panel);
-                                        if (active)
-                                        {
-                                            const char* wrd = DICT_STR(&shared->dict_db, w->word_stroff);
-                                            isize wlen = strlen(wrd);
-                                            memcpy(active->name, wrd, wlen);
-                                            active->name_len = wlen;
-                                            active->content_data = (void*)(isize)(w - shared->dict_db.words);
-                                            active->render_fn = render_dict_content;
-                                        }
-                                    }
-
-                                    /* commit: close popup on click or Enter */
-                                    b32 commit_this = row_res.clicked;
-                                    if (!commit_this && ctx->search_activate_pending && i == ctx->search_selected_index)
-                                    {
-                                        ctx->search_activate_pending = False;
-                                        commit_this = True;
-                                    }
-                                    if (commit_this)
-                                        result_clicked = True;
-
-                                    /* render word with fuzzy-match highlighting */
-                                    TextConfig normal_cfg = {
-                                        .font = &shared->fonts[FONT_INDEX_UI],
-                                        .font_size = font_size,
-                                        .color = theme->panel_fg,
-                                    };
-                                    TextConfig highlight_cfg = {
-                                        .font = &shared->fonts[FONT_INDEX_UI],
-                                        .font_size = font_size,
-                                        .color = theme->accent_bg,
-                                    };
-                                    render_highlighted_text(word_text, sr[i].range_count, sr[i].ranges, &normal_cfg,
-                                                            &highlight_cfg);
-                                }
-                                ui_box_end(row);
-
-                                /* Set Y scroll hint so the selected row stays visible;
-                                   cumulative_y is the content-space top of this row. */
-                                if (selection_changed && i == ctx->search_selected_index)
-                                {
-                                    scroll.scroll_hint.y = cumulative_y;
-                                    scroll.scroll_hint_h = row_h;
-                                }
-
-                                cumulative_y += row_h;
-                            }
-                        }
-
-                        f32 delta_y_before = scroll.last_area->scroll_delta.y;
-                        ui_scrollable_area_end(scroll);
-                        f32 delta_y_after = scroll.last_area->scroll_delta.y;
-
-                        /* Sync viewport → selected index (scrollbar drag only) */
-                        {
-                            b32 scrollbar_used = fabs(delta_y_after - delta_y_before) > 0.01f;
-                            if (!selection_changed && scrollbar_used && sr_count > 0 && row_h > 0)
-                            {
-                                f32 current_scroll = delta_y_after;
-                                f32 viewport_h = scroll.last_area->size.height;
-
-                                f32 item_top = (f32)ctx->search_selected_index * row_h;
-                                f32 item_bottom = item_top + row_h;
-                                f32 visible_top = current_scroll;
-                                f32 visible_bottom = current_scroll + viewport_h;
-
-                                /* only update selection when item scrolls out of view */
-                                if (item_bottom <= visible_top || item_top >= visible_bottom)
-                                {
-                                    i32 new_idx;
-                                    if (item_bottom <= visible_top)
-                                        new_idx = (i32)((visible_top + row_h * 0.5f) / row_h);
-                                    else
-                                        new_idx = (i32)((visible_bottom - row_h * 0.5f) / row_h);
-
-                                    new_idx = max(0, min(new_idx, sr_count - 1));
-                                    if (new_idx != ctx->search_selected_index)
-                                        ctx->search_selected_index = new_idx;
-                                }
-                            }
-                        }
-
-                        ctx->search_prev_selected_index = ctx->search_selected_index;
-
-                        /* close popup only if the click wasn't consumed by the scrollbar */
-                        if (result_clicked && ui_ctx->mouse_captured_by_hash != scroll.hash)
-                        {
-                            ctx->search_popup.open = False;
-                            ctx->search_selected_index = -1;
-                            ctx->search_prev_selected_index = -1;
-                        }
-                    }
-                    ui_box_end(scroll_container);
-                }
-            }
-            ui_box_end(vbox);
         }
         ui_box_end(popup);
     }
@@ -2927,7 +2620,7 @@ static void process_frame(WindowContext* ctx)
         {
             f32 mx = ui_ctx->mouse_pos.x;
             f32 my = ui_ctx->mouse_pos.y;
-            OverlayPopup* popups[] = { &ctx->search_popup, &ctx->menu_popup, &ctx->palette_popup };
+            OverlayPopup* popups[] = { &ctx->menu_popup, &ctx->palette_popup };
             for (isize i = 0; i < countof(popups); i++)
             {
                 OverlayPopup* p = popups[i];
@@ -3311,13 +3004,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 if (ctx->menu_popup.open && ctx->tb_hovered_button != TitleBarHot_Menu)
                     ctx->menu_popup.open = False;
-                if (ctx->search_popup.open && ctx->tb_hovered_button != TitleBarHot_Search)
-                {
-                    ctx->search_popup.open = False;
-                    ctx->search_selected_index = -1;
-                    ctx->search_prev_selected_index = -1;
-                    ctx->search_activate_pending = False;
-                }
                 if (ctx->palette_popup.open && ctx->tb_hovered_button != TitleBarHot_None)
                 {
                     ctx->palette_popup.open = False;
@@ -3356,7 +3042,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         break;
                     case TitleBarHot_Search:
                         cmd_queue_push(&ctx->shared->cmd_queue,
-                                       str_fmt(CMD_STR_MAX_LENGTH, "search.toggle window=%u", ctx->id));
+                                       str_fmt(CMD_STR_MAX_LENGTH, "palette.toggle window=%u", ctx->id));
                         break;
                     case TitleBarHot_None:
                     default:
@@ -3486,7 +3172,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_ctx->last_lclick_pos.y = (f32)click_y;
 
             /* Handle Overlay Popup */
-            OverlayPopup* popups[] = { &ctx->menu_popup, &ctx->search_popup, &ctx->palette_popup };
+            OverlayPopup* popups[] = { &ctx->menu_popup, &ctx->palette_popup };
             f32 dpi_scale = (f32)ctx->ui.dpi / USER_DEFAULT_SCREEN_DPI;
             f32 lx = click_x / dpi_scale;
             f32 ly = click_y / dpi_scale;
@@ -3497,12 +3183,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     if (!(lx >= p->rect.xmin && lx < p->rect.xmax && ly >= p->rect.ymin && ly < p->rect.ymax))
                     {
                         p->open = False;
-                        if (p == &ctx->search_popup)
-                        {
-                            ctx->search_selected_index = -1;
-                            ctx->search_prev_selected_index = -1;
-                            ctx->search_activate_pending = False;
-                        }
                         if (p == &ctx->palette_popup)
                         {
                             ctx->palette_selected_index = -1;
@@ -3633,15 +3313,12 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 /* Close open overlays before destroying the window */
                 if (ctx)
                 {
-                    OverlayPopup* popups[] = { &ctx->search_popup, &ctx->menu_popup, &ctx->palette_popup };
+                    OverlayPopup* popups[] = { &ctx->menu_popup, &ctx->palette_popup };
                     for (isize i = 0; i < (isize)countof(popups); i++)
                     {
                         if (popups[i]->open)
                         {
                             popups[i]->open = False;
-                            ctx->search_selected_index = -1;
-                            ctx->search_prev_selected_index = -1;
-                            ctx->search_activate_pending = False;
                             ctx->palette_selected_index = -1;
                             ctx->palette_prev_selected_index = -1;
                             ctx->palette_activate_pending = False;
@@ -3766,12 +3443,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 PaletteNavAction action = palette_nav_from_key((u32)wparam, ctrl);
                 if (action != PALETTE_NAV_NONE)
                 {
-                    if (ctx && ctx->search_popup.open && ctx->ui.focused_hash == s_search_input_hash)
-                    {
-                        ctx->search_selected_index =
-                            palette_nav_apply(ctx->search_selected_index, 0, action, &ctx->search_activate_pending);
-                        return 0;
-                    }
                     if (ctx && ctx->palette_popup.open && ctx->ui.focused_hash == s_search_palette_input_hash)
                     {
                         ctx->palette_selected_index =
@@ -3843,12 +3514,12 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             wchar_t c = (wchar_t)wparam;
 
-            /* '/' key opens or focuses the search popup */
+            /* '/' key opens or focuses the search palette */
             if (c == '/' && ctx)
             {
-                if (!(ctx->search_popup.open && ctx->ui.focused_hash == s_search_input_hash))
+                if (!(ctx->palette_popup.open && ctx->ui.focused_hash == s_search_palette_input_hash))
                 {
-                    cmd_queue_push(&shared->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "search.toggle window=%u", ctx->id));
+                    cmd_queue_push(&shared->cmd_queue, str_fmt(CMD_STR_MAX_LENGTH, "palette.toggle window=%u", ctx->id));
                     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
                     return 0;
                 }
@@ -4005,11 +3676,6 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
     Assert(shared->search_aux);
     g_search_aux = shared->search_aux;
 
-    search_init(&shared->word_search, shared->dict_db.words, (i32)shared->dict_db.hdr->word_count,
-                sizeof(DictWordIndex), s_dict_fields, countof(s_dict_fields), dict_word_extract);
-    shared->word_search.score_adjust = dict_freq_weight;
-    search_start(&shared->word_search);
-
     search_init(&shared->palette_search, shared->dict_db.words, (i32)shared->dict_db.hdr->word_count,
                 sizeof(DictWordIndex), s_dict_fields, countof(s_dict_fields), dict_word_extract);
     shared->palette_search.score_adjust = dict_freq_weight;
@@ -4054,7 +3720,6 @@ i32 WinMainCRTStartup()
         /* Register commands */
         cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_create_window,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("search.toggle"),          str("Toggle Search Popup"),      str(""), cmd_search_toggle,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("menu.toggle"),            str("Toggle Menu Popup"),        str(""), cmd_menu_toggle,            &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.toggle"),         str("Toggle Search Palette"),    str(""), cmd_palette_toggle,         &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),          str("Split Panel Horizontally"), str(""), cmd_split_panel_h,          &shared });
@@ -4112,8 +3777,7 @@ i32 WinMainCRTStartup()
     }
     // clang-format on
 
-    /* Pre-compute focus hashes for popup input routing */
-    s_search_input_hash = fnv1a_64(SEARCH_INPUT_HASH_STR, (isize)strlen(SEARCH_INPUT_HASH_STR));
+    /* Pre-compute focus hash for palette input routing */
     s_search_palette_input_hash = fnv1a_64(SEARCH_PALETTE_INPUT_HASH_STR, (isize)strlen(SEARCH_PALETTE_INPUT_HASH_STR));
 
     /* Tell the DWM not to perform any automatic DPI scaling (Windows 10, v1607) */
@@ -4366,9 +4030,6 @@ i32 WinMainCRTStartup()
         free(popup);
         shared.drag_popup = NULL;
     }
-
-    /* Stop word search worker */
-    search_stop(&shared.word_search);
 
     /* Stop palette search worker */
     search_stop(&shared.palette_search);
