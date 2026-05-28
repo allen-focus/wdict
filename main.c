@@ -4031,6 +4031,60 @@ static b32 any_window_needs_frames(const AppShared* shared)
     return False;
 }
 
+typedef struct
+{
+    AppShared* shared;
+} StartupThreadParam;
+
+static DWORD WINAPI startup_dict_thread(LPVOID param)
+{
+    StartupThreadParam* p = (StartupThreadParam*)param;
+    AppShared* shared = p->shared;
+
+    shared->search_aux_arena = arena_new(MB(20));
+    shared->search_aux = dict_build_search_aux(&shared->dict_db, &shared->search_aux_arena);
+    Assert(shared->search_aux);
+    g_search_aux = shared->search_aux;
+
+    search_init(&shared->word_search, shared->dict_db.words, (i32)shared->dict_db.hdr->word_count,
+                sizeof(DictWordIndex), s_dict_fields, countof(s_dict_fields), dict_word_extract);
+    shared->word_search.score_adjust = dict_freq_weight;
+    search_start(&shared->word_search);
+
+    search_init(&shared->palette_search, shared->dict_db.words, (i32)shared->dict_db.hdr->word_count,
+                sizeof(DictWordIndex), s_dict_fields, countof(s_dict_fields), dict_word_extract);
+    shared->palette_search.score_adjust = dict_freq_weight;
+    search_start(&shared->palette_search);
+
+    return 0;
+}
+
+static DWORD WINAPI startup_raster_renderer_thread(LPVOID param)
+{
+    StartupThreadParam* p = (StartupThreadParam*)param;
+    AppShared* shared = p->shared;
+
+    dwrite_init(&shared->dwrite);
+    raster_cache_init(&shared->dwrite, &shared->raster_cache, GLYPHS_LENGTH);
+    renderer_shared_init(&shared->renderer_shared);
+
+    // clang-format off
+    font_register_system_fonts(
+        &shared->dwrite,
+        (FontRegEntry[]){
+            { .file_path = L"C:\\Windows\\Fonts\\segoeui.ttf", .family_name = L"Segoe UI",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared->fonts[FONT_INDEX_UI]   },
+            { .file_path = L"C:\\Windows\\Fonts\\msyh.ttc",    .family_name = L"Microsoft YaHei",   .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared->fonts[FONT_INDEX_ZH]   },
+            { .file_path = L"C:\\Windows\\Fonts\\consola.ttf", .family_name = L"Consolas",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared->fonts[FONT_INDEX_MONO] },
+            { .file_path = L"C:\\Windows\\Fonts\\segmdl2.ttf", .family_name = L"Segoe MDL2 Assets", .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared->fonts[FONT_INDEX_MDL]  },
+        },
+        4
+    );
+    // clang-format on
+    font_register_from_resource(&shared->dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                &shared->fonts[FONT_INDEX_ICON]);
+    return 0;
+}
+
 #if !defined(NDEBUG) || defined(TRACY_ENABLE)
 i32 WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, i32 nShowCmd)
 #else
@@ -4130,28 +4184,6 @@ i32 WinMainCRTStartup()
     }
     perf_mark("dict_open");
 
-    /* Build search auxiliary data (pre-concatenated definition/example text for multi-field fuzzy search) */
-    {
-        shared.search_aux_arena = arena_new(MB(20));
-        shared.search_aux = dict_build_search_aux(&shared.dict_db, &shared.search_aux_arena);
-        Assert(shared.search_aux);
-        g_search_aux = shared.search_aux;
-    }
-    perf_mark("dict_build_aux");
-
-    /* Initialize and start word search worker (corpus = DictDB word index, fixed stride = 12) */
-    search_init(&shared.word_search, shared.dict_db.words, (i32)shared.dict_db.hdr->word_count, sizeof(DictWordIndex),
-                s_dict_fields, countof(s_dict_fields), dict_word_extract);
-    shared.word_search.score_adjust = dict_freq_weight;
-    search_start(&shared.word_search);
-
-    /* Initialize and start palette search worker (same corpus, initially word-only) */
-    search_init(&shared.palette_search, shared.dict_db.words, (i32)shared.dict_db.hdr->word_count,
-                sizeof(DictWordIndex), s_dict_fields, countof(s_dict_fields), dict_word_extract);
-    shared.palette_search.score_adjust = dict_freq_weight;
-    search_start(&shared.palette_search);
-    perf_mark("search_init");
-
     /* Pre-compute focus hashes for popup input routing */
     s_search_input_hash = fnv1a_64(SEARCH_INPUT_HASH_STR, (isize)strlen(SEARCH_INPUT_HASH_STR));
     s_search_palette_input_hash = fnv1a_64(SEARCH_PALETTE_INPUT_HASH_STR, (isize)strlen(SEARCH_PALETTE_INPUT_HASH_STR));
@@ -4176,33 +4208,17 @@ i32 WinMainCRTStartup()
     RegisterClassW(&dp_wc);
     perf_mark("misc");
 
-    /* Initialize font rasterizer */
-    dwrite_init(&shared.dwrite);
-
-    /* Initialize shared raster cache */
-    raster_cache_init(&shared.dwrite, &shared.raster_cache, GLYPHS_LENGTH);
-
-    /* Initialize shared renderer state */
-    perf_mark("dwrite_raster");
-    renderer_shared_init(&shared.renderer_shared);
-    perf_mark("D3D11CreateDevice");
-
-    /* Register fonts (batch register from file paths, single font collection) */
-    // clang-format off
-    font_register_system_fonts(
-        &shared.dwrite,
-        (FontRegEntry[]){
-            { .file_path = L"C:\\Windows\\Fonts\\segoeui.ttf", .family_name = L"Segoe UI",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_UI]   },
-            { .file_path = L"C:\\Windows\\Fonts\\msyh.ttc",    .family_name = L"Microsoft YaHei",   .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_ZH]   },
-            { .file_path = L"C:\\Windows\\Fonts\\consola.ttf", .family_name = L"Consolas",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_MONO] },
-            { .file_path = L"C:\\Windows\\Fonts\\segmdl2.ttf", .family_name = L"Segoe MDL2 Assets", .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_MDL]  },
-        },
-        4
-    );
-    // clang-format on
-    font_register_from_resource(&shared.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                                &shared.fonts[FONT_INDEX_ICON]);
-    perf_mark("font_register");
+    /* Launch parallel startup: dict/search on one thread, D3D11/fonts on another */
+    {
+        StartupThreadParam startup_param = { .shared = &shared };
+        HANDLE h_raster_renderer = CreateThread(NULL, 0, startup_raster_renderer_thread, &startup_param, 0, NULL);
+        HANDLE h_dict = CreateThread(NULL, 0, startup_dict_thread, &startup_param, 0, NULL);
+        HANDLE threads[] = { h_raster_renderer, h_dict };
+        WaitForMultipleObjects(2, threads, TRUE, INFINITE);
+        CloseHandle(h_raster_renderer);
+        CloseHandle(h_dict);
+    }
+    perf_mark("startup_parallel");
 
     /* Create first window */
     WindowContext* first =
