@@ -2271,6 +2271,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                      .padding = cfg->padding,
                                      .child_gap = cfg->child_gap,
                                      .direction = cfg->direction,
+                                     .alignment = cfg->alignment,
                                      .thumb_color = cfg->theme->scrollbar_thumb });
 
         PanelContext panel_ctx = { .panel = cfg->panel,

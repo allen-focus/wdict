@@ -136,6 +136,15 @@ typedef struct
     Color cursor_trail;
     Color selection;
     Color selection_flash;
+
+    /* dict content */
+    Color dict_word_fg;
+    Color dict_phonetic_fg;
+    Color dict_separator;
+    Color dict_card_bg;
+    Color dict_example_bg;
+    Color dict_example_fg;
+    Color dict_example_zh_fg;
 } Theme;
 
 typedef struct WindowContext WindowContext;
@@ -293,6 +302,14 @@ static const Theme s_theme_light = {
     .cursor_trail     = rgba(46,  46,  46,  255),
     .selection        = rgba(192, 191, 188, 255),
     .selection_flash  = rgba(144, 83,  0,   255),
+
+    .dict_word_fg       = rgba(34,  34,  38,  255),
+    .dict_phonetic_fg   = rgba(119, 118, 123, 255),
+    .dict_separator     = rgba(192, 191, 188, 255),
+    .dict_card_bg       = rgba(246, 245, 244, 255),
+    .dict_example_bg    = rgba(222, 221, 218, 255),
+    .dict_example_fg    = rgba(94,  92,  92,  255),
+    .dict_example_zh_fg = rgba(119, 118, 123, 255),
 };
 
 static const Theme s_theme_dark = {
@@ -338,13 +355,15 @@ static const Theme s_theme_dark = {
     .cursor_trail     = rgba(246, 245, 244, 255),
     .selection        = rgba(94,  92,  100, 255),
     .selection_flash  = rgba(255, 192, 87,  255),
+
+    .dict_word_fg       = rgba(255, 255, 255, 255),
+    .dict_phonetic_fg   = rgba(154, 153, 150, 255),
+    .dict_separator     = rgba(94,  92,  100, 255),
+    .dict_card_bg       = rgba(46,  46,  50,  255),
+    .dict_example_bg    = rgba(61,  61,  64,  255),
+    .dict_example_fg    = rgba(192, 191, 188, 255),
+    .dict_example_zh_fg = rgba(154, 153, 150, 255),
 };
-
-static Padding s_padding_big    = { 20, 20, 20, 20 };
-static Padding s_padding_medium = { 10, 10, 10, 10 };
-
-static f32 s_child_gap_big     = 20;
-static f32 s_child_gap_medium  = 10;
 // clang-format on
 
 //
@@ -1566,109 +1585,176 @@ static void render_dict_content(const void* data, void* ctx)
     const DictWordIndex* w = &db->words[word_idx];
     const char* word = DICT_STR(db, w->word_stroff);
 
-    /* word title */
-    ui_text((String){ (u8*)word, (isize)strlen(word) },
-            &(TextConfig){
-                .font = &shared->fonts[FONT_INDEX_UI], .font_size = 20, .color = theme->accent_bg, .line_height = 28 });
-
     const u8* p = db->entdata + w->entdata_off;
 
     /* freq */
     p += 4;
 
-    /* brief_en */
+    /* skip brief_en */
     {
         u8 cnt = dict_rd_u8(&p);
-        TextConfig cfg = {
-            .font = &shared->fonts[FONT_INDEX_UI], .font_size = 13, .color = theme->panel_fg, .line_height = 20
-        };
-        for (u8 i = 0; i < cnt; i++)
-        {
-            u32 off = dict_rd_u32(&p);
-            ui_text((String){ (u8*)DICT_STR(db, off), (isize)strlen(DICT_STR(db, off)) }, &cfg);
-        }
+        p += (usize)cnt * 4;
     }
 
-    /* brief_zh */
+    /* skip brief_zh */
     {
         u8 cnt = dict_rd_u8(&p);
-        TextConfig cfg = {
-            .font = &shared->fonts[FONT_INDEX_ZH], .font_size = 13, .color = theme->panel_fg, .line_height = 20
-        };
-        for (u8 i = 0; i < cnt; i++)
-        {
-            u32 off = dict_rd_u32(&p);
-            ui_text((String){ (u8*)DICT_STR(db, off), (isize)strlen(DICT_STR(db, off)) }, &cfg);
-        }
+        p += (usize)cnt * 4;
     }
 
-    /* POS sections */
     u8 pos_count = dict_rd_u8(&p);
-    for (u8 pi = 0; pi < pos_count; pi++)
-    {
-        u8 pos_kind = dict_rd_u8(&p);
-        u32 pron_off = dict_rd_u32(&p);
 
-        /* POS label + pronunciation on one line */
+    if (pos_count == 0)
+        return;
+
+    /* only render first POS */
+    u8 pos_kind = dict_rd_u8(&p);
+    u32 pron_off = dict_rd_u32(&p);
+
+    UIBox* container = ui_box_begin(&(BoxConfig){
+        .sizing = { fit_grow({}), fit({}) },
+        .padding = { 20, 28, 32, 28 },
+        .child_gap = 12,
+        .direction = LAYOUT_TOP_TO_BOTTOM,
+        .alignment = { ALIGN_START, ALIGN_START },
+    });
+    {
+        /* ── header row: word + phonetic ── */
+        {
+            UIBox* header = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+                                                       .direction = LAYOUT_LEFT_TO_RIGHT,
+                                                       .child_gap = 10,
+                                                       .alignment = { ALIGN_START, ALIGN_CENTER } });
+            {
+                ui_text((String){ (u8*)word, (isize)strlen(word) },
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                       .font_size = 18,
+                                       .color = theme->dict_word_fg,
+                                       .line_height = 24 });
+
+                if (pron_off)
+                {
+                    const char* pron = DICT_STR(db, pron_off);
+                    ui_text((String){ (u8*)pron, (isize)strlen(pron) },
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                           .font_size = 13,
+                                           .color = theme->dict_phonetic_fg,
+                                           .line_height = 24 });
+                }
+            }
+            ui_box_end(header);
+        }
+
+        /* ── separator ── */
+        ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->dict_separator }));
+
+        /* ── POS label + phonetic ── */
         if (pos_kind < countof(s_pos_names) && s_pos_names[pos_kind])
         {
-            UIBox* row = ui_box_begin(
-                &(BoxConfig){ .sizing = { fit({}), fit({}) }, .direction = LAYOUT_LEFT_TO_RIGHT, .child_gap = 4 });
+            UIBox* pos_row = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
+                                                        .direction = LAYOUT_LEFT_TO_RIGHT,
+                                                        .child_gap = 8,
+                                                        .padding = { 4, 0, 4, 0 } });
             {
                 const char* label = s_pos_names[pos_kind];
                 ui_text((String){ (u8*)label, (isize)strlen(label) },
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
-                                       .font_size = 12,
-                                       .color = theme->accent_subtle_bg,
-                                       .line_height = 18 });
+                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                       .font_size = 14,
+                                       .color = theme->dict_phonetic_fg,
+                                       .line_height = 20 });
+
                 if (pron_off)
                     ui_text((String){ (u8*)DICT_STR(db, pron_off), (isize)strlen(DICT_STR(db, pron_off)) },
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
-                                           .font_size = 12,
-                                           .color = theme->accent_subtle_bg,
-                                           .line_height = 18 });
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                           .font_size = 13,
+                                           .color = theme->dict_phonetic_fg,
+                                           .line_height = 20 });
             }
-            ui_box_end(row);
+            ui_box_end(pos_row);
         }
 
+        /* ── definitions ── */
         u8 def_count = dict_rd_u8(&p);
         for (u8 di = 0; di < def_count; di++)
         {
             u32 en_off = dict_rd_u32(&p);
             u32 zh_off = dict_rd_u32(&p);
 
-            ui_text((String){ (u8*)DICT_STR(db, en_off), (isize)strlen(DICT_STR(db, en_off)) },
-                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                   .font_size = 13,
-                                   .color = theme->panel_fg,
-                                   .line_height = 20 });
-            ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
-                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
-                                   .font_size = 12,
-                                   .color = theme->panel_fg,
-                                   .line_height = 18 });
-
-            u8 ex_count = dict_rd_u8(&p);
-            for (u8 ei = 0; ei < ex_count; ei++)
+            /* definition card */
+            UIBox* card = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+                                                     .color = theme->dict_card_bg,
+                                                     .rect_style = { .corner_radius = 4 },
+                                                     .padding = { 8, 18, 8, 18 },
+                                                     .child_gap = 8,
+                                                     .direction = LAYOUT_TOP_TO_BOTTOM });
             {
-                u32 ex_en = dict_rd_u32(&p);
-                u32 ex_zh = dict_rd_u32(&p);
+                UIBox* def_container = ui_box_begin(
+                    &(BoxConfig){ .sizing = { fit({}), fit({}) }, .child_gap = 2, .direction = LAYOUT_TOP_TO_BOTTOM });
+                {
+                    ui_text((String){ (u8*)DICT_STR(db, en_off), (isize)strlen(DICT_STR(db, en_off)) },
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                           .font_size = 12,
+                                           .color = theme->panel_fg,
+                                           .line_height = 20,
+                                           .wrap = True });
 
-                ui_text((String){ (u8*)DICT_STR(db, ex_en), (isize)strlen(DICT_STR(db, ex_en)) },
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
-                                       .font_size = 11,
-                                       .color = theme->panel_fg,
-                                       .line_height = 18,
-                                       .wrap = True });
-                ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
-                                       .font_size = 10,
-                                       .color = theme->panel_fg,
-                                       .line_height = 16,
-                                       .wrap = True });
+                    ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
+                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                           .font_size = 11,
+                                           .color = theme->panel_fg,
+                                           .line_height = 18,
+                                           .wrap = True });
+                }
+                ui_box_end(def_container);
+
+                UIBox* example_container = ui_box_begin(
+                    &(BoxConfig){ .sizing = { fit({}), fit({}) }, .child_gap = 6, .direction = LAYOUT_TOP_TO_BOTTOM });
+                {
+                    /* examples */
+                    u8 ex_count = dict_rd_u8(&p);
+                    for (u8 ei = 0; ei < ex_count; ei++)
+                    {
+                        u32 ex_en = dict_rd_u32(&p);
+                        u32 ex_zh = dict_rd_u32(&p);
+
+                        UIBox* ex_container = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) } });
+                        {
+                            // left spacer
+                            ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(10), grow({}) } }));
+
+                            UIBox* ex_box = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
+                                                                       .color = theme->dict_example_bg,
+                                                                       .rect_style = { .corner_radius = 3 },
+                                                                       .flags = BoxFlag_Clip,
+                                                                       .padding = { 5, 11, 5, 11 },
+                                                                       .child_gap = 3,
+                                                                       .direction = LAYOUT_TOP_TO_BOTTOM });
+                            {
+                                ui_text((String){ (u8*)DICT_STR(db, ex_en), (isize)strlen(DICT_STR(db, ex_en)) },
+                                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                                       .font_size = 11,
+                                                       .color = theme->dict_example_fg,
+                                                       .line_height = 17,
+                                                       .wrap = True });
+
+                                ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
+                                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                                       .font_size = 10,
+                                                       .color = theme->dict_example_zh_fg,
+                                                       .line_height = 16,
+                                                       .wrap = True });
+                            }
+                            ui_box_end(ex_box);
+                        }
+                        ui_box_end(ex_container);
+                    }
+                }
+                ui_box_end(example_container);
             }
+            ui_box_end(card);
         }
     }
+    ui_box_end(container);
 }
 
 //
@@ -2075,7 +2161,7 @@ static void search_palette_render(WindowContext* ctx)
                     // clang-format on
                     ui_text_field(
                         &ctx->palette_text_edit, str_fmt(128, "%s###" SEARCH_PALETTE_INPUT_HASH_STR, placeholder),
-                        &shared->fonts[FONT_INDEX_ZH], font_size, (SizingAxis)fit_grow({}), s_padding_medium,
+                        &shared->fonts[FONT_INDEX_ZH], font_size, (SizingAxis)fit_grow({}), (Padding){ 10, 10, 10, 10 },
                         theme->palette_bg, (Color){ 0 }, theme->panel_fg, theme->scrollbar_thumb, theme->cursor_bar,
                         theme->cursor_trail, theme->selection, theme->selection_flash, True);
                 }
@@ -2084,7 +2170,7 @@ static void search_palette_render(WindowContext* ctx)
                 /* mode indicator */
                 {
                     UIBox* indicator = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit_grow({}) },
-                                                                  .padding = s_padding_medium,
+                                                                  .padding = { 10, 10, 10, 10 },
                                                                   .color = theme->hover_bg,
                                                                   .rect_style = { .corner_radius = 4 },
                                                                   .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
@@ -2447,9 +2533,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             .font_size = 12,
             .cmd_queue = &shared->cmd_queue,
             .window_id = ctx->id,
-            .padding = s_padding_big,
-            .child_gap = s_child_gap_medium,
-            .direction = LAYOUT_TOP_TO_BOTTOM,
+            .alignment = { ALIGN_CENTER, ALIGN_START },
             .show_bottom_bar = (p == ctx->focused_panel),
         });
         {
@@ -2465,131 +2549,37 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 }
                 else
                 {
-                    String tab_label = { active->name, active->name_len };
-                    ui_text(tab_label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                                      .font_size = 14,
-                                                      .color = theme->accent_bg,
-                                                      .line_height = 20 });
-
-                    ui_text(str("   "), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MDL],
-                                                                   .font_size = 11,
-                                                                   .color = theme->panel_fg,
-                                                                   .line_height = 16 });
-                    ui_text(str("Ctrl+Shift+H / Ctrl+Shift+V to split horizontally / vertically."),
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                           .font_size = 11,
-                                           .color = theme->panel_fg,
-                                           .line_height = 16 });
-                    ui_text(str("Ctrl+T new tab. Ctrl+W close tab. F11 toggle theme."),
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                           .font_size = 11,
-                                           .color = theme->panel_fg,
-                                           .line_height = 16 });
-                    ui_text(str("Ctrl+Shift+Left/Right to reorder tabs."),
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                           .font_size = 11,
-                                           .color = theme->panel_fg,
-                                           .line_height = 16 });
-                    ui_text(str("Ctrl+Shift+N moves tab to next panel."),
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                           .font_size = 11,
-                                           .color = theme->panel_fg,
-                                           .line_height = 16 });
-                    ui_text(str("Ctrl+Shift+F/G to detach tab as new panel (H/V)."),
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                           .font_size = 11,
-                                           .color = theme->panel_fg,
-                                           .line_height = 16 });
-
-                    UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
-                                                            .child_gap = s_child_gap_medium,
-                                                            .direction = LAYOUT_LEFT_TO_RIGHT });
+                    UIBox* hint_container = ui_box_begin(
+                        &(BoxConfig){ .sizing = { fit({}), grow({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
                     {
-                        /* Button: create window */
-                        UISignalFlags cw_button_flags =
-                            ui_button(str_fmt(HASH_STR_MAX_LENGTH, "New Window##panel_cw_button_%u", p->id),
-                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_medium,
-                                      (Color){ 0 }, theme->hover_fg, theme->hover_bg);
-                        if (ui_lclicked(cw_button_flags))
-                            cmd_queue_push(&shared->cmd_queue, str("window.create w=600 h=600"));
+                        TextConfig hint_text_cfg = {
+                            .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->hint, .wrap = True
+                        };
+                        ui_text(str("Type "), &hint_text_cfg);
 
-                        /* Button: split horizontally */
-                        UISignalFlags sph_button_flags =
-                            ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Horizontally##panel_sph_button_%u", p->id),
-                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_medium,
-                                      (Color){ 0 }, theme->hover_fg, theme->hover_bg);
-                        if (ui_lclicked(sph_button_flags))
-                            cmd_queue_push(&shared->cmd_queue,
-                                           str_fmt(CMD_STR_MAX_LENGTH, "panel.split_h panel=%u", p->id));
+                        UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
+                                                                .color = theme->active_bg,
+                                                                .rect_style = { .corner_radius = 2 },
+                                                                .padding = { 3, 3, 3, 3 } });
+                        {
+                            ui_text(str("/"), &hint_text_cfg);
+                        }
+                        ui_box_end(box);
 
-                        /* Button: split vertically */
-                        UISignalFlags spv_button_flags =
-                            ui_button(str_fmt(HASH_STR_MAX_LENGTH, "Split Vertically##panel_spv_button_%u", p->id),
-                                      &shared->fonts[FONT_INDEX_UI], 12, (Sizing){ fit({}), fit({}) }, s_padding_medium,
-                                      (Color){ 0 }, theme->hover_fg, theme->hover_bg);
-                        if (ui_lclicked(spv_button_flags))
-                            cmd_queue_push(&shared->cmd_queue,
-                                           str_fmt(CMD_STR_MAX_LENGTH, "panel.split_v panel=%u", p->id));
+                        ui_text(str(" or "), &hint_text_cfg);
+
+                        box = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
+                                                         .color = theme->active_bg,
+                                                         .rect_style = { .corner_radius = 2 },
+                                                         .padding = { 3, 3, 3, 3 } });
+                        {
+                            ui_text(str("s"), &hint_text_cfg);
+                        }
+                        ui_box_end(box);
+
+                        ui_text(str(" to search"), &hint_text_cfg);
                     }
-                    ui_box_end(box);
-
-                    UIBox* box2 = ui_box_begin(&(BoxConfig){ .sizing = { fit_grow({}), fit({}) },
-                                                             .child_gap = s_child_gap_big,
-                                                             .alignment = { ALIGN_START, ALIGN_CENTER } });
-                    {
-                        ui_button(str_fmt(HASH_STR_MAX_LENGTH, "nothing##world_%u", p->id),
-                                  &shared->fonts[FONT_INDEX_MONO], 11, (Sizing){ fixed(80), fit({}) }, s_padding_medium,
-                                  (Color){ 0 }, theme->hover_fg, theme->hover_bg);
-                        ui_text_field(
-                            &ctx->text_edit_1, str_fmt(HASH_STR_MAX_LENGTH, "placeholder##text_field_%u", p->id),
-                            &shared->fonts[FONT_INDEX_ZH], 12, (SizingAxis)fixed(250), s_padding_medium,
-                            theme->palette_bg, theme->border, theme->panel_fg, theme->scrollbar_thumb,
-                            theme->cursor_bar, theme->cursor_trail, theme->selection, theme->selection_flash, False);
-                        UISignalFlags flags = ui_switchbox(
-                            str_fmt(HASH_STR_MAX_LENGTH, "switch box_%u", p->id), &shared->fonts[FONT_INDEX_ICON],
-                            &ctx->check, theme->hover_bg, theme->accent_bg, theme->accent_fg, theme->shadow);
-                        if (ui_lclicked(flags))
-                            ctx->check = !ctx->check;
-                    }
-                    ui_box_end(box2);
-
-                    /* Text test */
-                    // TODO(important):
-                    //       The current text width calculation is VERY heavy (and probably shouldn't be called so many
-                    //       times!). Just tried 10 rounds, and the FPS dropped to ~8 frames per second on my laptop.
-                    //       With
-                    //       `.wrap = False`, 10 rounds give ~70 FPS. With 0 rounds, ~110 FPS.
-                    // clang-format off
-                for (isize i = 0; i < 1; i++)
-                {
-                    ui_text(
-                            str("《红楼梦》也称《石头记》，中国古典长篇章回小说，被视为四大小说名著之一。《红楼梦》书内提及"
-                                "的别名，还有《情僧录》、《金玉缘》、《风月宝鉴》、《金陵十二钗》。故事是从女娲补天时所剩下"
-                                "的一块石头讲起，因无才补天而随神瑛侍者入世，幻化为贾宝玉与降世时口衔的美玉（贾宝玉即“假宝"
-                                "玉”）游历世间最后归彼大荒，因此又名《石头记》。乾隆四十九年甲辰（1784年）梦觉主人序本题为"
-                                "《红楼梦》（甲辰梦序抄本）。1791年在第一次活字印刷（程甲本）后，《红楼梦》便取代《石头记》"
-                                "成为通行的书名。"),
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
-                                           .font_size = 11,
-                                           .color = theme->panel_fg,
-                                           .line_height = 20,
-                                           .wrap = True });
-                    ui_text(
-                            str("Dream of the Red Chamber has a complicated textual history that scholars have long "
-                                "debated. It is known with certainty that Cao Xueqin began writing the novel in the 1740s. "
-                                "Cao was a member of a prominent Chinese family that had served the Manchu emperors of the "
-                                "Qing dynasty but whose fortunes had begun to decline. By the time of Cao's death in 1763 "
-                                "or 1764, hand-copied manuscripts of the novel's first 80 chapters had begun circulating, "
-                                "and he may have written drafts of the remaining chapters. These hand-copied manuscripts "
-                                "circulated first among his personal friends and a growing circle of aficionados, then "
-                                "eventually on the open market where they sold for large sums of money."),
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_MONO],
-                                           .font_size = 11,
-                                           .color = theme->panel_fg,
-                                           .line_height = 20,
-                                           .wrap = True });
-                }
-                    // clang-format on
+                    ui_box_end(hint_container);
                 }
             }
         }
