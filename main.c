@@ -611,6 +611,51 @@ static void window_list_remove(AppShared* shared, WindowContext* ctx)
 // Forward declarations for global lookup helpers used by handlers
 static void process_frame(WindowContext* ctx);
 
+/* Startup profiling markers */
+typedef struct
+{
+    LARGE_INTEGER ticks[32];
+    const char* labels[32];
+    i32 count;
+    LARGE_INTEGER freq;
+} StartupPerf;
+static StartupPerf s_startup_perf;
+
+static void perf_init(void)
+{
+    QueryPerformanceFrequency(&s_startup_perf.freq);
+    s_startup_perf.count = 0;
+}
+
+static void perf_mark(const char* label)
+{
+    Assert(s_startup_perf.count < (i32)countof(s_startup_perf.ticks));
+    s_startup_perf.labels[s_startup_perf.count] = label;
+    QueryPerformanceCounter(&s_startup_perf.ticks[s_startup_perf.count]);
+    s_startup_perf.count++;
+}
+
+static void perf_dump(void)
+{
+    f64 prev = (f64)s_startup_perf.ticks[0].QuadPart;
+    for (i32 i = 1; i < s_startup_perf.count; i++)
+    {
+        f64 t = (f64)s_startup_perf.ticks[i].QuadPart;
+        f64 ms = (t - prev) * 1000.0 / (f64)s_startup_perf.freq.QuadPart;
+        char buf[256];
+        i32 n = snprintf(buf, sizeof(buf), "[perf] %s: %.2fms\n", s_startup_perf.labels[i], ms);
+        if (n > 0)
+            OutputDebugStringA(buf);
+        prev = t;
+    }
+    f64 total_ms = (f64)(s_startup_perf.ticks[s_startup_perf.count - 1].QuadPart - s_startup_perf.ticks[0].QuadPart) *
+                   1000.0 / (f64)s_startup_perf.freq.QuadPart;
+    char buf[256];
+    i32 n = snprintf(buf, sizeof(buf), "[perf] TOTAL_to_ShowWindow: %.2fms\n", total_ms);
+    if (n > 0)
+        OutputDebugStringA(buf);
+}
+
 static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32 pos_x, i32 pos_y, u32 width,
                                     u32 height, b32 add_default_tab)
 {
@@ -662,6 +707,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
         free(ctx);
         return NULL;
     }
+    perf_mark("CreateWindowExW");
 
     /* Custom title bar needed things */
     {
@@ -692,6 +738,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
 
     /* Init per-window renderer */
     renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
+    perf_mark("renderer_init");
 
     /* Init per-window switch box check state */
     ctx->check = False;
@@ -733,10 +780,13 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
         panel_tab_declare(ctx->root_panel, (String){ name_buf, name_len });
     }
     ctx->focused_panel = ctx->root_panel;
+    perf_mark("panel_init");
 
     /* Render first frames to rasterize glyphs, then show */
     process_frame(ctx);
+    perf_mark("warmup_frame_0");
     process_frame(ctx);
+    perf_mark("warmup_frame_1");
     ShowWindow(ctx->window, SW_SHOWDEFAULT);
 
     return ctx;
@@ -3992,6 +4042,8 @@ i32 WinMainCRTStartup()
     AppShared shared = { 0 };
     shared.theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
     shared.has_accent_border = win32_get_accent_border_color(&shared.accent_border_color);
+    perf_init();
+    perf_mark("AppShared_init");
 
     /* Init command infrastructure */
     shared.cfg_arena = arena_new(KB(8));
@@ -3999,6 +4051,7 @@ i32 WinMainCRTStartup()
     cmd_registry_init(&shared.cmd_registry, &shared.cfg_arena, 32);
     shortcut_registry_init(&shared.shortcuts, &shared.cfg_arena, 64);
     cmd_queue_init(&shared.cmd_queue, &shared.cmd_arena);
+    perf_mark("cmd_infra");
 
     // clang-format off
     {
@@ -4062,6 +4115,7 @@ i32 WinMainCRTStartup()
         shared.cursors[UI_CURSOR_MOVE]       = LoadCursor(NULL, IDC_SIZEALL);
     }
     // clang-format on
+    perf_mark("cmd_register");
 
     /* Load dictionary blob from embedded RC resource */
     {
@@ -4074,6 +4128,7 @@ i32 WinMainCRTStartup()
         Assert(shared.dict_db.hdr);
         g_dict_db = &shared.dict_db;
     }
+    perf_mark("dict_open");
 
     /* Build search auxiliary data (pre-concatenated definition/example text for multi-field fuzzy search) */
     {
@@ -4082,6 +4137,7 @@ i32 WinMainCRTStartup()
         Assert(shared.search_aux);
         g_search_aux = shared.search_aux;
     }
+    perf_mark("dict_build_aux");
 
     /* Initialize and start word search worker (corpus = DictDB word index, fixed stride = 12) */
     search_init(&shared.word_search, shared.dict_db.words, (i32)shared.dict_db.hdr->word_count, sizeof(DictWordIndex),
@@ -4094,6 +4150,7 @@ i32 WinMainCRTStartup()
                 sizeof(DictWordIndex), s_dict_fields, countof(s_dict_fields), dict_word_extract);
     shared.palette_search.score_adjust = dict_freq_weight;
     search_start(&shared.palette_search);
+    perf_mark("search_init");
 
     /* Pre-compute focus hashes for popup input routing */
     s_search_input_hash = fnv1a_64(SEARCH_INPUT_HASH_STR, (isize)strlen(SEARCH_INPUT_HASH_STR));
@@ -4117,6 +4174,7 @@ i32 WinMainCRTStartup()
         .lpszClassName = L"UIDragPopup",
     };
     RegisterClassW(&dp_wc);
+    perf_mark("misc");
 
     /* Initialize font rasterizer */
     dwrite_init(&shared.dwrite);
@@ -4125,7 +4183,9 @@ i32 WinMainCRTStartup()
     raster_cache_init(&shared.dwrite, &shared.raster_cache, GLYPHS_LENGTH);
 
     /* Initialize shared renderer state */
+    perf_mark("dwrite_raster");
     renderer_shared_init(&shared.renderer_shared);
+    perf_mark("D3D11CreateDevice");
 
     /* Register fonts */
     font_register_from_system(&shared.dwrite, L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
@@ -4138,11 +4198,14 @@ i32 WinMainCRTStartup()
                               &shared.fonts[FONT_INDEX_MDL]);
     font_register_from_resource(&shared.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                                 &shared.fonts[FONT_INDEX_ICON]);
+    perf_mark("font_register");
 
     /* Create first window */
     WindowContext* first =
         create_window(&shared, L"App Title", CW_USEDEFAULT, CW_USEDEFAULT, CLIENT_WIDTH, CLIENT_HEIGHT, True);
     first->ui.requested_frames = IDLE_WAKE_FRAMES;
+    perf_mark("ShowWindow");
+    perf_dump();
 
     /* Run message loop */
     MSG message;
