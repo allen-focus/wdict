@@ -168,6 +168,8 @@ typedef struct
     SearchState palette_search;
     DictDB dict_db;
     Arena dict_arena;
+    volatile b32 dict_ready; // True = dict + search aux + search states fully initialized
+    DWORD main_thread_id; // used by startup_dict_thread to PostMessage wake-ups
     DictSearchAuxEntry* search_aux;
     Arena search_aux_arena;
 
@@ -364,6 +366,8 @@ static f32 s_child_gap_medium  = 10;
 
 static String dict_word_extract(const void* entry)
 {
+    if (!g_dict_db)
+        return (String){ 0 };
     const DictWordIndex* w = (const DictWordIndex*)entry;
     const char* s = DICT_STR(g_dict_db, w->word_stroff);
     return (String){ (u8*)s, (isize)strlen(s) };
@@ -371,6 +375,8 @@ static String dict_word_extract(const void* entry)
 
 static String dict_def_extract(const void* entry)
 {
+    if (!g_dict_db || !g_search_aux)
+        return (String){ 0 };
     const DictWordIndex* w = (const DictWordIndex*)entry;
     i32 idx = (i32)(w - g_dict_db->words);
     return (String){ (u8*)g_search_aux[idx].def_search_text, g_search_aux[idx].def_len };
@@ -378,6 +384,8 @@ static String dict_def_extract(const void* entry)
 
 static String dict_ex_extract(const void* entry)
 {
+    if (!g_dict_db || !g_search_aux)
+        return (String){ 0 };
     const DictWordIndex* w = (const DictWordIndex*)entry;
     i32 idx = (i32)(w - g_dict_db->words);
     return (String){ (u8*)g_search_aux[idx].ex_search_text, g_search_aux[idx].ex_len };
@@ -446,6 +454,8 @@ static void render_dict_content(const void* data, void* ctx)
     i32 word_idx = (i32)(isize)data;
     AppShared* shared = (AppShared*)ctx;
     const DictDB* db = &shared->dict_db;
+    if (!db->hdr)
+        return;
     const Theme* theme = &shared->theme;
     const DictWordIndex* w = &db->words[word_idx];
     const char* word = DICT_STR(db, w->word_stroff);
@@ -1013,6 +1023,8 @@ static void cmd_search_toggle(void* userdata, String cmd_text)
 {
     (void)cmd_text;
     AppShared* shared = (AppShared*)userdata;
+    if (!shared->dict_ready)
+        return;
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
     WindowContext* ctx = find_window_by_id(shared, window_id);
     if (!ctx)
@@ -1051,6 +1063,8 @@ static void cmd_palette_toggle(void* userdata, String cmd_text)
 {
     (void)cmd_text;
     AppShared* shared = (AppShared*)userdata;
+    if (!shared->dict_ready)
+        return;
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
     WindowContext* ctx = find_window_by_id(shared, window_id);
     if (!ctx)
@@ -4081,32 +4095,18 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
     shared->palette_search.score_adjust = dict_freq_weight;
     search_start(&shared->palette_search);
 
-    return 0;
-}
+    shared->dict_ready = True;
 
-static DWORD WINAPI startup_raster_renderer_thread(LPVOID param)
-{
-    StartupThreadParam* p = (StartupThreadParam*)param;
-    AppShared* shared = p->shared;
+    /* Wake rendering: force frame requests on all windows.
+       If the main thread is blocked on GetMessageW a mouse move or
+       keyboard event will unblock it — the flag transitions within a
+       single frame, so the loading screen is never stale for long. */
+    for (WindowContext* w = shared->first_window; w; w = w->next)
+    {
+        w->ui.requested_frames = IDLE_WAKE_FRAMES;
+        PostMessageW(w->window, WM_NULL, 0, 0);
+    }
 
-    dwrite_init(&shared->dwrite);
-    raster_cache_init(&shared->dwrite, &shared->raster_cache, GLYPHS_LENGTH);
-    renderer_shared_init(&shared->renderer_shared);
-
-    // clang-format off
-    font_register_system_fonts(
-        &shared->dwrite,
-        (FontRegEntry[]){
-            { .file_path = L"C:\\Windows\\Fonts\\segoeui.ttf", .family_name = L"Segoe UI",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared->fonts[FONT_INDEX_UI]   },
-            { .file_path = L"C:\\Windows\\Fonts\\msyh.ttc",    .family_name = L"Microsoft YaHei",   .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared->fonts[FONT_INDEX_ZH]   },
-            { .file_path = L"C:\\Windows\\Fonts\\consola.ttf", .family_name = L"Consolas",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared->fonts[FONT_INDEX_MONO] },
-            { .file_path = L"C:\\Windows\\Fonts\\segmdl2.ttf", .family_name = L"Segoe MDL2 Assets", .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared->fonts[FONT_INDEX_MDL]  },
-        },
-        4
-    );
-    // clang-format on
-    font_register_from_resource(&shared->dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                                &shared->fonts[FONT_INDEX_ICON]);
     return 0;
 }
 
@@ -4220,19 +4220,37 @@ i32 WinMainCRTStartup()
     RegisterClassW(&dp_wc);
     perf_mark("misc");
 
-    /* Launch parallel startup: dict/search on one thread, D3D11/fonts on another */
+    /* Launch dictionary thread (non-blocking — decompress + search init in background) */
+    shared.main_thread_id = GetCurrentThreadId();
     {
         StartupThreadParam startup_param = { .shared = &shared };
-        HANDLE h_raster_renderer = CreateThread(NULL, 0, startup_raster_renderer_thread, &startup_param, 0, NULL);
         HANDLE h_dict = CreateThread(NULL, 0, startup_dict_thread, &startup_param, 0, NULL);
-        HANDLE threads[] = { h_raster_renderer, h_dict };
-        WaitForMultipleObjects(2, threads, TRUE, INFINITE);
-        CloseHandle(h_raster_renderer);
-        CloseHandle(h_dict);
+        CloseHandle(h_dict); /* detached — OS reclaims thread stack on exit */
     }
-    perf_mark("startup_parallel");
+    perf_mark("dict_thread_spawned");
 
-    /* Create first window */
+    /* Init raster renderer synchronously on main thread */
+    dwrite_init(&shared.dwrite);
+    raster_cache_init(&shared.dwrite, &shared.raster_cache, GLYPHS_LENGTH);
+    renderer_shared_init(&shared.renderer_shared);
+
+    // clang-format off
+    font_register_system_fonts(
+        &shared.dwrite,
+        (FontRegEntry[]){
+            { .file_path = L"C:\\Windows\\Fonts\\segoeui.ttf", .family_name = L"Segoe UI",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_UI]   },
+            { .file_path = L"C:\\Windows\\Fonts\\msyh.ttc",    .family_name = L"Microsoft YaHei",   .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_ZH]   },
+            { .file_path = L"C:\\Windows\\Fonts\\consola.ttf", .family_name = L"Consolas",          .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_MONO] },
+            { .file_path = L"C:\\Windows\\Fonts\\segmdl2.ttf", .family_name = L"Segoe MDL2 Assets", .weight = DWRITE_FONT_WEIGHT_NORMAL, .style = DWRITE_FONT_STYLE_NORMAL, .font = &shared.fonts[FONT_INDEX_MDL]  },
+        },
+        4
+    );
+    // clang-format on
+    font_register_from_resource(&shared.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                &shared.fonts[FONT_INDEX_ICON]);
+    perf_mark("raster_init");
+
+    /* Create first window (warmup frames will show "Loading dictionary…" if dict not yet ready) */
     WindowContext* first =
         create_window(&shared, L"App Title", CW_USEDEFAULT, CW_USEDEFAULT, CLIENT_WIDTH, CLIENT_HEIGHT, True);
     first->ui.requested_frames = IDLE_WAKE_FRAMES;
