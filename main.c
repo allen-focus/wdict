@@ -623,51 +623,6 @@ static void window_list_remove(AppShared* shared, WindowContext* ctx)
 // Forward declarations for global lookup helpers used by handlers
 static void process_frame(WindowContext* ctx);
 
-/* Startup profiling markers */
-typedef struct
-{
-    LARGE_INTEGER ticks[32];
-    const char* labels[32];
-    i32 count;
-    LARGE_INTEGER freq;
-} StartupPerf;
-static StartupPerf s_startup_perf;
-
-static void perf_init(void)
-{
-    QueryPerformanceFrequency(&s_startup_perf.freq);
-    s_startup_perf.count = 0;
-}
-
-static void perf_mark(const char* label)
-{
-    Assert(s_startup_perf.count < (i32)countof(s_startup_perf.ticks));
-    s_startup_perf.labels[s_startup_perf.count] = label;
-    QueryPerformanceCounter(&s_startup_perf.ticks[s_startup_perf.count]);
-    s_startup_perf.count++;
-}
-
-static void perf_dump(void)
-{
-    f64 prev = (f64)s_startup_perf.ticks[0].QuadPart;
-    for (i32 i = 1; i < s_startup_perf.count; i++)
-    {
-        f64 t = (f64)s_startup_perf.ticks[i].QuadPart;
-        f64 ms = (t - prev) * 1000.0 / (f64)s_startup_perf.freq.QuadPart;
-        char buf[256];
-        i32 n = snprintf(buf, sizeof(buf), "[perf] %s: %.2fms\n", s_startup_perf.labels[i], ms);
-        if (n > 0)
-            OutputDebugStringA(buf);
-        prev = t;
-    }
-    f64 total_ms = (f64)(s_startup_perf.ticks[s_startup_perf.count - 1].QuadPart - s_startup_perf.ticks[0].QuadPart) *
-                   1000.0 / (f64)s_startup_perf.freq.QuadPart;
-    char buf[256];
-    i32 n = snprintf(buf, sizeof(buf), "[perf] TOTAL_to_ShowWindow: %.2fms\n", total_ms);
-    if (n > 0)
-        OutputDebugStringA(buf);
-}
-
 static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32 pos_x, i32 pos_y, u32 width,
                                     u32 height, b32 add_default_tab)
 {
@@ -719,8 +674,6 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
         free(ctx);
         return NULL;
     }
-    perf_mark("CreateWindowExW");
-
     /* Custom title bar needed things */
     {
         // Enable immersive dark mode — required to avoid white borders from DwmExtendFrameIntoClientArea.
@@ -750,7 +703,6 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
 
     /* Init per-window renderer */
     renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
-    perf_mark("renderer_init");
 
     /* Init per-window switch box check state */
     ctx->check = False;
@@ -792,13 +744,10 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
         panel_tab_declare(ctx->root_panel, (String){ name_buf, name_len });
     }
     ctx->focused_panel = ctx->root_panel;
-    perf_mark("panel_init");
 
     /* Render first frames to rasterize glyphs, then show */
     process_frame(ctx);
-    perf_mark("warmup_frame_0");
     process_frame(ctx);
-    perf_mark("warmup_frame_1");
     ShowWindow(ctx->window, SW_SHOWDEFAULT);
 
     return ctx;
@@ -4121,8 +4070,6 @@ i32 WinMainCRTStartup()
     AppShared shared = { 0 };
     shared.theme = win32_get_system_theme() == SYSTEM_THEME_LIGHT ? s_theme_light : s_theme_dark;
     shared.has_accent_border = win32_get_accent_border_color(&shared.accent_border_color);
-    perf_init();
-    perf_mark("AppShared_init");
 
     /* Init command infrastructure */
     shared.cfg_arena = arena_new(KB(8));
@@ -4130,7 +4077,6 @@ i32 WinMainCRTStartup()
     cmd_registry_init(&shared.cmd_registry, &shared.cfg_arena, 32);
     shortcut_registry_init(&shared.shortcuts, &shared.cfg_arena, 64);
     cmd_queue_init(&shared.cmd_queue, &shared.cmd_arena);
-    perf_mark("cmd_infra");
 
     // clang-format off
     {
@@ -4194,7 +4140,6 @@ i32 WinMainCRTStartup()
         shared.cursors[UI_CURSOR_MOVE]       = LoadCursor(NULL, IDC_SIZEALL);
     }
     // clang-format on
-    perf_mark("cmd_register");
 
     /* Pre-compute focus hashes for popup input routing */
     s_search_input_hash = fnv1a_64(SEARCH_INPUT_HASH_STR, (isize)strlen(SEARCH_INPUT_HASH_STR));
@@ -4218,7 +4163,6 @@ i32 WinMainCRTStartup()
         .lpszClassName = L"UIDragPopup",
     };
     RegisterClassW(&dp_wc);
-    perf_mark("misc");
 
     /* Launch dictionary thread (non-blocking — decompress + search init in background) */
     shared.main_thread_id = GetCurrentThreadId();
@@ -4227,7 +4171,6 @@ i32 WinMainCRTStartup()
         HANDLE h_dict = CreateThread(NULL, 0, startup_dict_thread, &startup_param, 0, NULL);
         CloseHandle(h_dict); /* detached — OS reclaims thread stack on exit */
     }
-    perf_mark("dict_thread_spawned");
 
     /* Init raster renderer synchronously on main thread */
     dwrite_init(&shared.dwrite);
@@ -4248,14 +4191,11 @@ i32 WinMainCRTStartup()
     // clang-format on
     font_register_from_resource(&shared.dwrite, L"ICON_FONT", DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                                 &shared.fonts[FONT_INDEX_ICON]);
-    perf_mark("raster_init");
 
     /* Create first window (warmup frames will show "Loading dictionary…" if dict not yet ready) */
     WindowContext* first =
         create_window(&shared, L"App Title", CW_USEDEFAULT, CW_USEDEFAULT, CLIENT_WIDTH, CLIENT_HEIGHT, True);
     first->ui.requested_frames = IDLE_WAKE_FRAMES;
-    perf_mark("ShowWindow");
-    perf_dump();
 
     /* Run message loop */
     MSG message;
