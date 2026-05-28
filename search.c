@@ -551,6 +551,18 @@ void search_reconfigure(SearchState* state, const FieldDef* fields, i32 field_co
     /* 5. Re-trigger search with current query */
     String current_query = { state->query_buf, state->query_len > 0 ? state->query_len : 0 };
     search_set_query(state, current_query);
+
+    /* 6. Force-sync snapshot and round: search_set_query may have deduped
+       (query_buf unchanged), leaving query_version_snapshot stale and
+       workers unwoken.  Sync unconditionally so workers see the correct
+       checkpoint version and actually start processing. */
+    InterlockedIncrement(&state->search_round);
+    InterlockedExchange(&state->query_version_snapshot,
+                        InterlockedOr(&state->query_version, 0));
+
+    /* 7. Wake workers */
+    for (i32 i = 0; i < state->worker_count; i++)
+        SetEvent(state->worker_events[i]);
 }
 
 i32 search_get_results(SearchState* state, SearchResult* out, i32 max_count)
