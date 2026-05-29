@@ -2532,7 +2532,10 @@ static void search_palette_render(WindowContext* ctx)
     if (query.len == 0)
         view_state = PALETTE_VIEW_EMPTY;
     else if (shared->palette_search.published_version < ctx->palette_switch_version)
+    {
         view_state = PALETTE_VIEW_LOADING;
+        ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+    }
     else if (item_count > 0)
         view_state = PALETTE_VIEW_RESULTS;
     else

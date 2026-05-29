@@ -548,13 +548,29 @@ void search_reconfigure(SearchState* state, const FieldDef* fields, i32 field_co
         state->worker_handles[i] = CreateThread(NULL, 0, search_worker_thread, &state->worker_params[i], 0, NULL);
     }
 
-    /* 5. Re-trigger search with current query */
-    String current_query = { state->query_buf, state->query_len > 0 ? state->query_len : 0 };
-    search_set_query(state, current_query);
+    /* 5. Re-trigger search with current query — inline slice setup
+       (search_set_query would dedup since we're comparing the same buffer). */
+    {
+        String current_query = { state->query_buf, state->query_len > 0 ? state->query_len : 0 };
+        if (current_query.len > 0)
+        {
+            i32 total = state->corpus_size;
+            i32 k = state->worker_count;
+            i32 base = 0;
+            for (i32 wi = 0; wi < k; wi++)
+            {
+                i32 remaining = total - base;
+                i32 workers_left = k - wi;
+                i32 chunk = remaining / workers_left;
+                state->slices[wi].start = base;
+                base += chunk;
+                state->slices[wi].end = base;
+                state->worker_result_counts[wi] = 0;
+            }
+        }
+    }
 
-    /* 6. Force-sync snapshot and round: search_set_query may have deduped
-       (query_buf unchanged), leaving query_version_snapshot stale and
-       workers unwoken.  Sync unconditionally so workers see the correct
+    /* 6. Force-sync snapshot and round so workers see the correct
        checkpoint version and actually start processing. */
     InterlockedIncrement(&state->search_round);
     InterlockedExchange(&state->query_version_snapshot,
