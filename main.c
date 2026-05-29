@@ -142,6 +142,7 @@ typedef struct
     Color dict_phonetic_fg;
     Color dict_separator;
     Color dict_card_bg;
+    Color dict_definition_fg;
     Color dict_example_bg;
     Color dict_example_fg;
     Color dict_example_zh_fg;
@@ -286,10 +287,10 @@ static const Theme s_theme_light = {
     .border           = rgba(192, 191, 188, 255),
     .scrollbar_thumb  = rgba(94,  92,  100, 80 ),
     .scrollbar_track  = rgba(192, 191, 188, 80 ),
-    .shadow           = rgba(192, 191, 188, 255),
+    .shadow           = rgba(205, 205, 207, 255),
 
     /* specific */
-    .bar_bg           = rgba(222, 221, 218, 255),
+    .bar_bg           = rgba(228, 227, 227, 255),
     .bar_fg           = rgba(0,   0,   0,   255),
 
     .panel_bg         = rgba(255, 255, 255, 255),
@@ -307,8 +308,9 @@ static const Theme s_theme_light = {
     .dict_phonetic_fg   = rgba(119, 118, 123, 255),
     .dict_separator     = rgba(192, 191, 188, 255),
     .dict_card_bg       = rgba(246, 245, 244, 255),
-    .dict_example_bg    = rgba(222, 221, 218, 255),
-    .dict_example_fg    = rgba(94,  92,  92,  255),
+    .dict_definition_fg = rgba(34,  34,  38,  255),
+    .dict_example_bg    = rgba(232, 232, 232, 255),
+    .dict_example_fg    = rgba(90,  90,  90,  255),
     .dict_example_zh_fg = rgba(119, 118, 123, 255),
 };
 
@@ -318,7 +320,7 @@ static const Theme s_theme_dark = {
     .accent_fg        = rgba(255, 255, 255, 255),
     .accent_subtle_bg = rgba(98,  160, 234, 255),
     .accent_subtle_fg = rgba(255, 255, 255, 255),
-    .accent_weak_bg   = rgba(153, 193, 241, 255),
+    .accent_weak_bg   = rgba(142, 182, 230, 255),
     .accent_weak_fg   = rgba(255, 255, 255, 255),
 
     .hover_bg         = rgba(61,  61,  64,  255),
@@ -342,13 +344,13 @@ static const Theme s_theme_dark = {
     .shadow           = rgba(0,   0,   0,   255),
 
     /* specific */
-    .bar_bg           = rgba(61,  61,  61,  255),
+    .bar_bg           = rgba(55,  55,  55,  255),
     .bar_fg           = rgba(255, 255, 255, 255),
 
     .panel_bg         = rgba(34,  34,  34,  255),
     .panel_fg         = rgba(255, 255, 255, 255),
 
-    .palette_bg       = rgba(46,  46,  50,  255),
+    .palette_bg       = rgba(46,  46,  47,  255),
     .palette_fg       = rgba(255, 255, 255, 255),
 
     .cursor_bar       = rgba(255, 255, 255, 255),
@@ -359,8 +361,9 @@ static const Theme s_theme_dark = {
     .dict_word_fg       = rgba(255, 255, 255, 255),
     .dict_phonetic_fg   = rgba(154, 153, 150, 255),
     .dict_separator     = rgba(94,  92,  100, 255),
-    .dict_card_bg       = rgba(46,  46,  50,  255),
-    .dict_example_bg    = rgba(61,  61,  64,  255),
+    .dict_card_bg       = rgba(46,  46,  46,  255),
+    .dict_definition_fg = rgba(246, 245, 244, 255),
+    .dict_example_bg    = rgba(55,  55,  55,  255),
     .dict_example_fg    = rgba(192, 191, 188, 255),
     .dict_example_zh_fg = rgba(154, 153, 150, 255),
 };
@@ -1694,14 +1697,14 @@ static void render_dict_content(const void* data, void* ctx)
                     ui_text((String){ (u8*)DICT_STR(db, en_off), (isize)strlen(DICT_STR(db, en_off)) },
                             &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                            .font_size = 12,
-                                           .color = theme->panel_fg,
+                                           .color = theme->dict_definition_fg,
                                            .line_height = 20,
                                            .wrap = True });
 
                     ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
                             &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
                                            .font_size = 11,
-                                           .color = theme->panel_fg,
+                                           .color = theme->dict_definition_fg,
                                            .line_height = 18,
                                            .wrap = True });
                 }
