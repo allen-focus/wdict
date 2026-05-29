@@ -2012,47 +2012,46 @@ static void render_dict_content(const void* data, void* ctx)
                     if (wctx->dict_word_block_count > block_before)
                     {
                         UIBoxInteractResult ir = ui_box_interact(
-                            en_def_box,
-                            str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_before));
+                            en_def_box, str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_before));
                         if (ui_hovered(ir.flags) && wctx->dict_word_block_count > 0)
                         {
                             DictWordBlock* block = &wctx->dict_word_blocks[block_before];
-                        f32 box_width = ir.last_box ? ir.last_box->size.width : 0.f;
-                        if (box_width > 0.f)
-                        {
-                            f32 spw = en_def_box->data.text.space_width;
-                            f32 lnh = en_def_box->data.text.line_height;
-                            dict_compute_token_positions(block, box_width, spw);
-
-                            f32 lx = wctx->ui.mouse_pos.x - ir.last_box->position.x;
-                            f32 ly = wctx->ui.mouse_pos.y - ir.last_box->position.y;
-                            i32 hit = dict_token_hit_test(block, lx, ly, lnh);
-
-                            if (hit >= 0 && block->tokens[hit].dict_word_idx > 0)
+                            f32 box_width = ir.last_box ? ir.last_box->size.width : 0.f;
+                            if (box_width > 0.f)
                             {
-                                DictWordToken* tok = &block->tokens[hit];
-                                ui_set_desired_cursor(UI_CURSOR_HAND);
+                                f32 spw = en_def_box->data.text.space_width;
+                                f32 lnh = en_def_box->data.text.line_height;
+                                dict_compute_token_positions(block, box_width, spw);
 
-                                if (ui_lclicked(ir.flags))
-                                    cmd_queue_push(&shared->cmd_queue,
-                                                   str_fmt(CMD_STR_MAX_LENGTH,
-                                                           "tab.open_word content_data=%d window=%u",
-                                                           (i32)((tok->dict_word_idx << 8) | (u32)pos_idx), wctx->id));
+                                f32 lx = wctx->ui.mouse_pos.x - ir.last_box->position.x;
+                                f32 ly = wctx->ui.mouse_pos.y - ir.last_box->position.y;
+                                i32 hit = dict_token_hit_test(block, lx, ly, lnh);
 
-                                i32 line_count = 0;
-                                for (i32 i = 0; i < block->token_count; i++)
-                                    if (block->tokens[i].line_index + 1 > line_count)
-                                        line_count = block->tokens[i].line_index + 1;
+                                if (hit >= 0 && block->tokens[hit].dict_word_idx > 0)
+                                {
+                                    DictWordToken* tok = &block->tokens[hit];
+                                    ui_set_desired_cursor(UI_CURSOR_HAND);
 
-                                f32 offset_y = (tok->line_index + 1 - line_count) * lnh - 1.f;
-                                f32 offset_x = tok->x_on_line + spw;
-                                ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
-                                                                      .color = theme->accent_bg,
-                                                                      .flags = BoxFlag_Float,
-                                                                      .float_offset = { offset_x, offset_y } }));
+                                    if (ui_lclicked(ir.flags))
+                                        cmd_queue_push(
+                                            &shared->cmd_queue,
+                                            str_fmt(CMD_STR_MAX_LENGTH, "tab.open_word content_data=%d window=%u",
+                                                    (i32)((tok->dict_word_idx << 8) | (u32)pos_idx), wctx->id));
+
+                                    i32 line_count = 0;
+                                    for (i32 i = 0; i < block->token_count; i++)
+                                        if (block->tokens[i].line_index + 1 > line_count)
+                                            line_count = block->tokens[i].line_index + 1;
+
+                                    f32 offset_y = (tok->line_index + 1 - line_count) * lnh - 1.f;
+                                    f32 offset_x = tok->x_on_line + spw;
+                                    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
+                                                                          .color = theme->accent_bg,
+                                                                          .flags = BoxFlag_Float,
+                                                                          .float_offset = { offset_x, offset_y } }));
+                                }
                             }
                         }
-                    }
                     }
 
                     ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
@@ -2098,51 +2097,52 @@ static void render_dict_content(const void* data, void* ctx)
                                 dict_build_tokens_for_block(wctx, ex_en_box, db);
                                 if (wctx->dict_word_block_count > block_before)
                                 {
-                                    UIBoxInteractResult ir_ex = ui_box_interact(
-                                        ex_en_box,
-                                        str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_before));
+                                    UIBoxInteractResult ir_ex =
+                                        ui_box_interact(ex_en_box, str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d",
+                                                                           wctx->id, block_before));
 
-                                if (ui_hovered(ir_ex.flags) && wctx->dict_word_block_count > 0)
-                                {
-                                    DictWordBlock* block = &wctx->dict_word_blocks[block_before];
-                                    f32 box_width = ir_ex.last_box ? ir_ex.last_box->size.width : 0.f;
-                                    if (box_width > 0.f)
+                                    if (ui_hovered(ir_ex.flags) && wctx->dict_word_block_count > 0)
                                     {
-                                        f32 spw = ex_en_box->data.text.space_width;
-                                        f32 lnh = ex_en_box->data.text.line_height;
-                                        dict_compute_token_positions(block, box_width, spw);
-
-                                        f32 lx = wctx->ui.mouse_pos.x - ir_ex.last_box->position.x;
-                                        f32 ly = wctx->ui.mouse_pos.y - ir_ex.last_box->position.y;
-                                        i32 hit = dict_token_hit_test(block, lx, ly, lnh);
-
-                                        if (hit >= 0 && block->tokens[hit].dict_word_idx > 0)
+                                        DictWordBlock* block = &wctx->dict_word_blocks[block_before];
+                                        f32 box_width = ir_ex.last_box ? ir_ex.last_box->size.width : 0.f;
+                                        if (box_width > 0.f)
                                         {
-                                            DictWordToken* tok = &block->tokens[hit];
-                                            ui_set_desired_cursor(UI_CURSOR_HAND);
+                                            f32 spw = ex_en_box->data.text.space_width;
+                                            f32 lnh = ex_en_box->data.text.line_height;
+                                            dict_compute_token_positions(block, box_width, spw);
 
-                                            if (ui_lclicked(ir_ex.flags))
-                                                cmd_queue_push(&shared->cmd_queue,
-                                                               str_fmt(CMD_STR_MAX_LENGTH,
-                                                                       "tab.open_word content_data=%d window=%u",
-                                                                       (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
-                                                                       wctx->id));
+                                            f32 lx = wctx->ui.mouse_pos.x - ir_ex.last_box->position.x;
+                                            f32 ly = wctx->ui.mouse_pos.y - ir_ex.last_box->position.y;
+                                            i32 hit = dict_token_hit_test(block, lx, ly, lnh);
 
-                                            i32 line_count = 0;
-                                            for (i32 i = 0; i < block->token_count; i++)
-                                                if (block->tokens[i].line_index + 1 > line_count)
-                                                    line_count = block->tokens[i].line_index + 1;
+                                            if (hit >= 0 && block->tokens[hit].dict_word_idx > 0)
+                                            {
+                                                DictWordToken* tok = &block->tokens[hit];
+                                                ui_set_desired_cursor(UI_CURSOR_HAND);
 
-                                            f32 offset_y = (tok->line_index + 1 - line_count) * lnh - 1.f;
-                                            f32 offset_x = tok->x_on_line + spw;
-                                            ui_box_end(
-                                                ui_box_begin(&(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
-                                                                           .color = theme->accent_bg,
-                                                                           .flags = BoxFlag_Float,
-                                                                           .float_offset = { offset_x, offset_y } }));
+                                                if (ui_lclicked(ir_ex.flags))
+                                                    cmd_queue_push(
+                                                        &shared->cmd_queue,
+                                                        str_fmt(CMD_STR_MAX_LENGTH,
+                                                                "tab.open_word content_data=%d window=%u",
+                                                                (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
+                                                                wctx->id));
+
+                                                i32 line_count = 0;
+                                                for (i32 i = 0; i < block->token_count; i++)
+                                                    if (block->tokens[i].line_index + 1 > line_count)
+                                                        line_count = block->tokens[i].line_index + 1;
+
+                                                f32 offset_y = (tok->line_index + 1 - line_count) * lnh - 1.f;
+                                                f32 offset_x = tok->x_on_line + spw;
+                                                ui_box_end(ui_box_begin(
+                                                    &(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
+                                                                  .color = theme->accent_bg,
+                                                                  .flags = BoxFlag_Float,
+                                                                  .float_offset = { offset_x, offset_y } }));
+                                            }
                                         }
                                     }
-                                }
                                 }
 
                                 ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
@@ -2341,17 +2341,18 @@ static void decoration_overlay(WindowContext* ctx)
     /* menu popup (context-menu-like panel below the menu button) */
     if (ctx->menu_popup.open)
     {
-        f32 popup_w = 200;
-        f32 popup_h = 150;
         f32 gap = 4;
         f32 popup_x = ctx->decoration_menu.xmin;
         f32 popup_y = ctx->decoration_menu.ymax + gap;
 
         UIBox* popup = ui_box_begin(&(BoxConfig){
-            .sizing = { fixed(popup_w), fixed(popup_h) },
+            .sizing = { fit({}), fit({}) },
             .flags = BoxFlag_Float,
             .float_offset = { popup_x, -(client_h - 1) + popup_y },
             .color = theme->palette_bg,
+            .padding = { 16, 16, 16, 16 },
+            .child_gap = 6,
+            .direction = LAYOUT_TOP_TO_BOTTOM,
             .rect_style = {
                 .corner_radius = 8,
                 .shadow_color = theme->shadow,
@@ -2372,7 +2373,90 @@ static void decoration_overlay(WindowContext* ctx)
                     ir.last_box->position.y + ir.last_box->size.height,
                 };
             }
+
             /* TODO: popup content goes here */
+            // clang-format off
+            TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->bar_fg, .wrap = True };
+            BoxConfig box_cfg = { .sizing = { fit({}), fit({}) }, .color = theme->active_bg, .rect_style = { .corner_radius = 2 }, .padding = { 3, 3, 3, 3 } };
+            UIBox* cnt = NULL;
+            UIBox* box = NULL;
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Window: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to close"), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Window: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("F11"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to toggle light/dark theme"), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str(" "), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            ///
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Panel: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+h/j/k/l"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to resize"), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Panel: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+w"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to close current tab"), &hint_text_cfg);
+            ui_box_end(cnt);
+            
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str(" "), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            ///
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Search Palette: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Tab"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to switch mode"), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Search Palette: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Up/Down"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" or "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+p/n"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to navigate items"), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Search Palette: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" or "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+["), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to close"), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str(" "), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            ///
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Focused Dictionary: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Alt+h/l"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to navigate part of speech"), &hint_text_cfg);
+            ui_box_end(cnt);
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Focused Dictionary: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("j/k"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to scroll"), &hint_text_cfg);
+            ui_box_end(cnt);
+            // clang-format on
         }
         ui_box_end(popup);
     }
