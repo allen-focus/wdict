@@ -1,2 +1,3 @@
+MAIN_ICON ICON "app.ico"
 ICON_FONT RCDATA "thirdparty\\fontello\\icons.ttf"
 DICT_DATA RCDATA "data\\dict.bin.zstd"

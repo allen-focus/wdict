@@ -3835,12 +3835,16 @@ i32 WinMainCRTStartup()
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     /* Register window class */
-    WNDCLASSW wc = {
+    WNDCLASSEXW wc = {
+        .cbSize = sizeof(wc),
         .lpfnWndProc = window_procedure,
         .hInstance = GetModuleHandleW(NULL),
+        .hIcon = LoadIconW(GetModuleHandleW(NULL), L"MAIN_ICON"),
+        .hIconSm = (HICON)LoadImageW(GetModuleHandleW(NULL), L"MAIN_ICON", IMAGE_ICON,
+                                      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR),
         .lpszClassName = L"window class",
     };
-    RegisterClassW(&wc);
+    RegisterClassExW(&wc);
 
     /* Register drag popup window class */
     WNDCLASSW dp_wc = {
