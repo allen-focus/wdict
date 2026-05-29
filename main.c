@@ -3523,6 +3523,29 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 return 0;
             }
 
+            /* Dict content keyboard scrolling (Up/Down/J/K).
+               Only active when dict content is shown and no overlay is open. */
+            if (ctx && ctx->dict_content_active && !ctx->palette_popup.open && !ctx->menu_popup.open)
+            {
+                b32 handled = True;
+                f32 step = 8.f;
+                // clang-format off
+                switch (wparam)
+                {
+                    case VK_UP:
+                    case 'K': ctx->ui.mouse_scroll_delta.y -= step; break;
+                    case VK_DOWN:
+                    case 'J': ctx->ui.mouse_scroll_delta.y += step; break;
+                    default: handled = False; break;
+                }
+                // clang-format on
+                if (handled)
+                {
+                    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                    return 0;
+                }
+            }
+
             /* Palette mode switching — intercept before shortcut lookup
                so Ctrl+W switches to word mode instead of closing a tab.
                Tab/Shift+Tab cycles forward/backward through modes. */
@@ -3739,6 +3762,12 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         case WM_CHAR:
         {
             wchar_t c = (wchar_t)wparam;
+
+            /* Dict content active: J/K are consumed as scroll keys in WM_KEYDOWN.
+               Prevent them from falling through to char input or palette toggle. */
+            if (ctx && ctx->dict_content_active && !ctx->palette_popup.open && !ctx->menu_popup.open)
+                if (c == 'j' || c == 'J' || c == 'k' || c == 'K')
+                    break;
 
             /* '/' or 's' key opens or focuses the search palette */
             if ((c == '/' || c == 's') && ctx)
