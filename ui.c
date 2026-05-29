@@ -523,21 +523,32 @@ static void ui_box_calculate_fit_axis(UIBox* box, const Axis axis)
 
     /* If the current box is a child, adjust its parent's size based on box direction. */
     UIBox* parent = box->parent;
-    if (parent && !(box->flags & BoxFlag_Float))
+    if (parent)
     {
         AxisContext parent_ctx = get_axis_ctx(parent, axis);
-        if (axis_has_fit_attribute(parent_ctx.sizing_mode))
+        if (!(box->flags & BoxFlag_Float))
+        {
+            if (axis_has_fit_attribute(parent_ctx.sizing_mode))
+            {
+                if (parent->cfg.direction == parent_ctx.main_direction)
+                {
+                    *parent_ctx.size += *box_ctx.size;
+                    *parent_ctx.min_size += *box_ctx.min_size;
+                }
+                else
+                {
+                    f32 padding = parent_ctx.padding_start + parent_ctx.padding_end;
+                    *parent_ctx.size = max(*box_ctx.size + padding, *parent_ctx.size);
+                    *parent_ctx.min_size = max(*box_ctx.min_size + padding, *parent_ctx.min_size);
+                }
+            }
+        }
+        else
         {
             if (parent->cfg.direction == parent_ctx.main_direction)
             {
-                *parent_ctx.size += *box_ctx.size;
-                *parent_ctx.min_size += *box_ctx.min_size;
-            }
-            else
-            {
-                f32 padding = parent_ctx.padding_start + parent_ctx.padding_end;
-                *parent_ctx.size = max(*box_ctx.size + padding, *parent_ctx.size);
-                *parent_ctx.min_size = max(*box_ctx.min_size + padding, *parent_ctx.min_size);
+                *parent_ctx.size -= parent->cfg.child_gap;
+                *parent_ctx.min_size -= parent->cfg.child_gap;
             }
         }
     }
@@ -653,7 +664,8 @@ static void ui_box_grow_shrink_children_axis(UIBox* box, const Axis axis)
         while (child)
         {
             if (child->flags & BoxFlag_Float)
-                *ctx.remaining += box->cfg.child_gap;
+                if (box->cfg.direction == ctx.main_direction)
+                    *ctx.remaining += box->cfg.child_gap;
 
             AxisContext child_ctx = get_axis_ctx(child, axis);
 
