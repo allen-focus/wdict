@@ -2030,18 +2030,12 @@ static void render_dict_content(const void* data, void* ctx)
                                 DictWordToken* tok = &block->tokens[hit];
                                 ui_set_desired_cursor(UI_CURSOR_HAND);
 
-                                if (ui_pressed(ir.flags) && !g_ui_ctx->mouse_captured_by_hash)
-                                {
-                                    DictWordDragPayload p = { .drag_type = DRAG_TYPE_DICT_WORD,
-                                                              .content_data =
-                                                                  (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
-                                                              .from_window_id = wctx->id,
-                                                              ._reserved = 0 };
-                                    isize n = tok->text.len < 47 ? tok->text.len : 47;
-                                    memcpy(p.title, tok->text.data, (usize)n);
-                                    p.title[n] = '\0';
-                                    ui_set_drag_payload(&p, sizeof(p));
-                                }
+                                if (ui_lclicked(ir.flags))
+                                    cmd_queue_push(&shared->cmd_queue,
+                                                   str_fmt(CMD_STR_MAX_LENGTH,
+                                                           "tab.open_word content_data=%d window=%u",
+                                                           (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
+                                                           wctx->id));
 
                                 i32 line_count = 0;
                                 for (i32 i = 0; i < block->token_count; i++)
@@ -2121,19 +2115,12 @@ static void render_dict_content(const void* data, void* ctx)
                                             DictWordToken* tok = &block->tokens[hit];
                                             ui_set_desired_cursor(UI_CURSOR_HAND);
 
-                                            if (ui_pressed(ir_ex.flags) && !g_ui_ctx->mouse_captured_by_hash)
-                                            {
-                                                DictWordDragPayload p = {
-                                                    .drag_type = DRAG_TYPE_DICT_WORD,
-                                                    .content_data =
-                                                        (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
-                                                    .from_window_id = wctx->id,
-                                                    ._reserved = 0 };
-                                                isize n = tok->text.len < 47 ? tok->text.len : 47;
-                                                memcpy(p.title, tok->text.data, (usize)n);
-                                                p.title[n] = '\0';
-                                                ui_set_drag_payload(&p, sizeof(p));
-                                            }
+                                            if (ui_lclicked(ir_ex.flags))
+                                                cmd_queue_push(&shared->cmd_queue,
+                                                               str_fmt(CMD_STR_MAX_LENGTH,
+                                                                       "tab.open_word content_data=%d window=%u",
+                                                                       (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
+                                                                       wctx->id));
 
                                             i32 line_count = 0;
                                             for (i32 i = 0; i < block->token_count; i++)
@@ -3250,21 +3237,6 @@ static void process_frame(WindowContext* ctx)
                                                    "tab.move_to_new_window panel=%u tab=%u window=%u pos_x=%d pos_y=%d",
                                                    payload->from_panel_id, payload->from_tab_id,
                                                    payload->from_window_id, (i32)cursor_pt.x, (i32)cursor_pt.y));
-                        }
-                    }
-
-                    /* Unhandled drop of dict word: open in focused panel */
-                    if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed &&
-                        g_ui_ctx->drag_payload_size >= (isize)sizeof(DictWordDragPayload))
-                    {
-                        DictWordDragPayload* dp = (DictWordDragPayload*)g_ui_ctx->drag_payload_buf;
-                        if (dp->drag_type == DRAG_TYPE_DICT_WORD)
-                        {
-                            g_ui_ctx->drag_payload_consumed = True;
-                            cmd_queue_push(&shared->cmd_queue,
-                                           str_fmt(CMD_STR_MAX_LENGTH,
-                                                   "tab.open_word content_data=%d window=%u",
-                                                   dp->content_data, ctx->id));
                         }
                     }
                 }
