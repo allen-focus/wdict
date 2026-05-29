@@ -21,8 +21,8 @@
 #define fit_grow(...) { __VA_ARGS__, SIZING_MODE_FIT_GROW }
 #define grow(...)     { __VA_ARGS__, SIZING_MODE_GROW }
 
-#define COMMAND_QUEUE_CAPACITY     4096
-#define BOX_QUEUE_CAPACITY         2048
+#define COMMAND_QUEUE_CAPACITY     8192
+#define BOX_QUEUE_CAPACITY         4096
 #define BOX_STACK_CAPACITY         32
 #define HASH_STR_MAX_LENGTH        128
 #define CHAR_INPUT_QUEUE_CAPACITY  64
