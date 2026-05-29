@@ -63,6 +63,8 @@ typedef struct
 {
     String text;
     f32 width;
+    i32 byte_start;
+    i32 byte_end;
     u32 dict_word_idx;
     i32 line_index;
     f32 x_on_line;
@@ -1248,6 +1250,7 @@ static void cmd_panel_resize_right(void* userdata, String cmd_text)
 }
 
 static void render_dict_content(const void* data, void* ctx);
+static void render_dict_pos_selector(void* userdata);
 
 static void cmd_dict_pos_select(void* userdata, String cmd_text)
 {
@@ -1735,6 +1738,8 @@ static void dict_build_tokens_for_block(WindowContext* wctx, UIBox* text_box, co
         DictWordToken* tok = &block->tokens[wi];
         tok->text = word_text;
         tok->width = wb->width;
+        tok->byte_start = (i32)wb->byte_start;
+        tok->byte_end = (i32)wb->byte_end;
         tok->line_index = -1;
         tok->x_on_line = -1.f;
 
@@ -1749,6 +1754,61 @@ static void dict_build_tokens_for_block(WindowContext* wctx, UIBox* text_box, co
 
     wctx->dict_word_block_count++;
     wctx->dict_word_total_tokens += (i32)word_count;
+}
+
+static void dict_compute_token_positions(DictWordBlock* block, f32 box_width, f32 space_width)
+{
+    if (block->token_count == 0 || box_width <= 0.f)
+        return;
+
+    f32 line_x = 0;
+    i32 line = 0;
+    i32 line_word_start = 0;
+
+    for (i32 i = 0; i < block->token_count; i++)
+    {
+        DictWordToken* tok = &block->tokens[i];
+        f32 w = tok->width;
+
+        if (i > line_word_start)
+        {
+            i32 gap_bytes = tok->byte_start - block->tokens[i - 1].byte_end;
+            if (gap_bytes > 0)
+                w += (f32)gap_bytes * space_width;
+        }
+
+        if (line_x + w > box_width && i > line_word_start)
+        {
+            line++;
+            line_x = 0;
+            w = tok->width;
+            line_word_start = i;
+        }
+
+        tok->x_on_line = line_x;
+        tok->line_index = line;
+        line_x += w;
+    }
+}
+
+static i32 dict_token_hit_test(const DictWordBlock* block, f32 local_x, f32 local_y, f32 line_height)
+{
+    if (block->token_count == 0 || line_height <= 0.f)
+        return -1;
+
+    i32 line = (i32)(local_y / line_height);
+    if (line < 0)
+        return -1;
+
+    for (i32 i = 0; i < block->token_count; i++)
+    {
+        const DictWordToken* tok = &block->tokens[i];
+        if (tok->line_index == line && local_x >= tok->x_on_line && local_x < tok->x_on_line + tok->width)
+        {
+            return i;
+        }
+    }
+    return -1;
 }
 
 static void render_dict_content(const void* data, void* ctx)
@@ -1909,10 +1969,43 @@ static void render_dict_content(const void* data, void* ctx)
                                                .color = theme->dict_definition_fg,
                                                .line_height = 20,
                                                .wrap = True });
-                    {
-                        i32 block_id = wctx->dict_word_block_count;
-                        dict_build_tokens_for_block(wctx, en_def_box, db);
+
+                    i32 block_id = wctx->dict_word_block_count;
+                    dict_build_tokens_for_block(wctx, en_def_box, db);
+                    UIBoxInteractResult ir =
                         ui_box_interact(en_def_box, str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_id));
+                    if (ui_hovered(ir.flags) && wctx->dict_word_block_count > 0)
+                    {
+                        DictWordBlock* block = &wctx->dict_word_blocks[block_id];
+                        f32 box_width = ir.last_box ? ir.last_box->size.width : 0.f;
+                        if (box_width > 0.f)
+                        {
+                            f32 spw = en_def_box->data.text.space_width;
+                            f32 lnh = en_def_box->data.text.line_height;
+                            dict_compute_token_positions(block, box_width, spw);
+
+                            f32 lx = wctx->ui.mouse_pos.x - ir.last_box->position.x;
+                            f32 ly = wctx->ui.mouse_pos.y - ir.last_box->position.y;
+                            i32 hit = dict_token_hit_test(block, lx, ly, lnh);
+
+                            if (hit >= 0 && block->tokens[hit].dict_word_idx > 0)
+                            {
+                                DictWordToken* tok = &block->tokens[hit];
+                                ui_set_desired_cursor(UI_CURSOR_HAND);
+
+                                i32 line_count = 0;
+                                for (i32 i = 0; i < block->token_count; i++)
+                                    if (block->tokens[i].line_index + 1 > line_count)
+                                        line_count = block->tokens[i].line_index + 1;
+
+                                f32 offset_y = (tok->line_index + 1 - line_count) * lnh - 1.f;
+                                f32 offset_x = tok->x_on_line + spw;
+                                ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
+                                                                       .color = theme->accent_bg,
+                                                                       .flags = BoxFlag_Float,
+                                                                       .float_offset = { offset_x, offset_y } }));
+                            }
+                        }
                     }
 
                     ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
@@ -1954,11 +2047,44 @@ static void render_dict_content(const void* data, void* ctx)
                                                            .color = theme->dict_example_fg,
                                                            .line_height = 17,
                                                            .wrap = True });
+                                i32 block_id = wctx->dict_word_block_count;
+                                dict_build_tokens_for_block(wctx, ex_en_box, db);
+                                UIBoxInteractResult ir_ex = ui_box_interact(
+                                    ex_en_box, str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_id));
+
+                                if (ui_hovered(ir_ex.flags) && wctx->dict_word_block_count > 0)
                                 {
-                                    i32 block_id = wctx->dict_word_block_count;
-                                    dict_build_tokens_for_block(wctx, ex_en_box, db);
-                                    ui_box_interact(ex_en_box,
-                                                    str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_id));
+                                    DictWordBlock* block = &wctx->dict_word_blocks[block_id];
+                                    f32 box_width = ir_ex.last_box ? ir_ex.last_box->size.width : 0.f;
+                                    if (box_width > 0.f)
+                                    {
+                                        f32 spw = ex_en_box->data.text.space_width;
+                                        f32 lnh = ex_en_box->data.text.line_height;
+                                        dict_compute_token_positions(block, box_width, spw);
+
+                                        f32 lx = wctx->ui.mouse_pos.x - ir_ex.last_box->position.x;
+                                        f32 ly = wctx->ui.mouse_pos.y - ir_ex.last_box->position.y;
+                                        i32 hit = dict_token_hit_test(block, lx, ly, lnh);
+
+                                        if (hit >= 0 && block->tokens[hit].dict_word_idx > 0)
+                                        {
+                                            DictWordToken* tok = &block->tokens[hit];
+                                            ui_set_desired_cursor(UI_CURSOR_HAND);
+
+                                            i32 line_count = 0;
+                                            for (i32 i = 0; i < block->token_count; i++)
+                                                if (block->tokens[i].line_index + 1 > line_count)
+                                                    line_count = block->tokens[i].line_index + 1;
+
+                                            f32 offset_y = (tok->line_index + 1 - line_count) * lnh - 1.f;
+                                            f32 offset_x = tok->x_on_line + spw;
+                                            ui_box_end(ui_box_begin(
+                                                &(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
+                                                              .color = theme->accent_bg,
+                                                              .flags = BoxFlag_Float,
+                                                              .float_offset = { offset_x, offset_y } }));
+                                        }
+                                    }
                                 }
 
                                 ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
