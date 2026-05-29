@@ -50,6 +50,30 @@
 #define SEARCH_PALETTE_INPUT_HASH_STR "search palette input"
 #define PALETTE_CONTEXT_MAX_CHARS     64
 #define DICT_MAX_POS                  32
+#define DICT_TOKEN_BLOCK_MAX          256
+#define DICT_TOKEN_TOTAL_MAX          32768
+
+/*
+ * DictWordToken — per-word metadata for interaction hit-test.
+ * Built from TextData.words after each ui_text() call on English text blocks.
+ * The x_on_line / line_index fields are filled lazily during hit-test,
+ * using the text box's cached position from the previous frame's layout.
+ */
+typedef struct
+{
+    String text;
+    f32 width;
+    u32 dict_word_idx;
+    i32 line_index;
+    f32 x_on_line;
+} DictWordToken;
+
+typedef struct
+{
+    DictWordToken* tokens;
+    i32 token_count;
+    UIBox* text_box;
+} DictWordBlock;
 
 typedef enum
 {
@@ -250,6 +274,12 @@ struct WindowContext
     u8 dict_cur_pos;
     b32 dict_content_active;
 
+    /* dict word token arrays — built per frame, own arena to avoid aliasing with ui arena. */
+    Arena dict_token_arena;
+    DictWordBlock* dict_word_blocks;
+    i32 dict_word_block_count;
+    i32 dict_word_total_tokens;
+
     /* IME */
     HIMC default_himc;
 
@@ -444,6 +474,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     Assert(ctx);
     ctx->shared = shared;
     ctx->id = s_window_next_id++;
+    ctx->dict_token_arena = arena_new(MB(1));
 
     /* Copy title */
     wcsncpy_s(ctx->title, MAX_TITLE_LENGTH, title, _TRUNCATE);
@@ -1218,7 +1249,7 @@ static void cmd_panel_resize_right(void* userdata, String cmd_text)
 
 static void render_dict_content(const void* data, void* ctx);
 
-static void cmd_dict_select_pos(void* userdata, String cmd_text)
+static void cmd_dict_pos_select(void* userdata, String cmd_text)
 {
     AppShared* shared = (AppShared*)userdata;
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
@@ -1246,11 +1277,11 @@ static void cmd_dict_select_pos(void* userdata, String cmd_text)
     {
         u8 cnt = dict_rd_u8(&p);
         p += (usize)cnt * 4;
-    } // brief_en
+    }
     {
         u8 cnt = dict_rd_u8(&p);
         p += (usize)cnt * 4;
-    } // brief_zh
+    }
     u8 pos_count = dict_rd_u8(&p);
 
     if (pos_count == 0)
@@ -1273,7 +1304,6 @@ static void cmd_dict_select_pos(void* userdata, String cmd_text)
     /* update content_data with new pos index */
     active->content_data = (void*)(isize)((word_idx << 8) | (u8)new_pos);
 
-    /* wake up for re-render */
     if (w->ui.requested_frames <= 0)
         w->ui.requested_frames = 1;
 }
@@ -1653,6 +1683,8 @@ static const char* s_pos_names[] = {
     [POS_DEF_ART] = "def. art.",
 };
 
+static void render_dict_content(const void* data, void* ctx);
+
 static void dict_skip_pos(const u8** p)
 {
     dict_rd_u8(p); // pos_kind
@@ -1664,6 +1696,59 @@ static void dict_skip_pos(const u8** p)
         u8 ex_count = dict_rd_u8(p);
         *p += (usize)ex_count * 8; // ex_en(4) + ex_zh(4) per example
     }
+}
+
+static void dict_build_tokens_for_block(WindowContext* wctx, UIBox* text_box, const DictDB* db)
+{
+    if (!text_box || text_box->type != BOX_TYPE_TEXT)
+        return;
+    if (wctx->dict_word_block_count >= DICT_TOKEN_BLOCK_MAX)
+        return;
+
+    TextData* td = &text_box->data.text;
+    isize word_count = td->words.len;
+    if (word_count == 0 || word_count > DICT_TOKEN_TOTAL_MAX)
+        return;
+    if (wctx->dict_word_total_tokens + word_count > DICT_TOKEN_TOTAL_MAX)
+        return;
+
+    Arena* arena = &wctx->dict_token_arena;
+
+    /* allocate blocks array on first use */
+    if (wctx->dict_word_blocks == NULL)
+        wctx->dict_word_blocks =
+            arena_push(arena, sizeof(DictWordBlock) * DICT_TOKEN_BLOCK_MAX, _Alignof(DictWordBlock), 1);
+
+    DictWordBlock* block = &wctx->dict_word_blocks[wctx->dict_word_block_count];
+    block->tokens = arena_push(arena, sizeof(DictWordToken) * word_count, _Alignof(DictWordToken), 1);
+    block->token_count = (i32)word_count;
+    block->text_box = text_box;
+
+    String full_text = td->content;
+    WordBreak* words = td->words.data;
+
+    for (isize wi = 0; wi < word_count; wi++)
+    {
+        WordBreak* wb = &words[wi];
+        String word_text = { full_text.data + wb->byte_start, wb->byte_end - wb->byte_start };
+
+        DictWordToken* tok = &block->tokens[wi];
+        tok->text = word_text;
+        tok->width = wb->width;
+        tok->line_index = -1;
+        tok->x_on_line = -1.f;
+
+        /* dict_lookup requires null-terminated string */
+        char lookup_buf[128];
+        isize copy_len = word_text.len < 127 ? word_text.len : 127;
+        memcpy(lookup_buf, word_text.data, (usize)copy_len);
+        lookup_buf[copy_len] = '\0';
+        i32 idx = dict_lookup(db, lookup_buf);
+        tok->dict_word_idx = (idx >= 0) ? (u32)idx : 0;
+    }
+
+    wctx->dict_word_block_count++;
+    wctx->dict_word_total_tokens += (i32)word_count;
 }
 
 static void render_dict_content(const void* data, void* ctx)
@@ -1817,12 +1902,18 @@ static void render_dict_content(const void* data, void* ctx)
                 UIBox* def_container = ui_box_begin(
                     &(BoxConfig){ .sizing = { fit({}), fit({}) }, .child_gap = 2, .direction = LAYOUT_TOP_TO_BOTTOM });
                 {
-                    ui_text((String){ (u8*)DICT_STR(db, en_off), (isize)strlen(DICT_STR(db, en_off)) },
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                           .font_size = 12,
-                                           .color = theme->dict_definition_fg,
-                                           .line_height = 20,
-                                           .wrap = True });
+                    UIBox* en_def_box =
+                        ui_text((String){ (u8*)DICT_STR(db, en_off), (isize)strlen(DICT_STR(db, en_off)) },
+                                &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                               .font_size = 12,
+                                               .color = theme->dict_definition_fg,
+                                               .line_height = 20,
+                                               .wrap = True });
+                    {
+                        i32 block_id = wctx->dict_word_block_count;
+                        dict_build_tokens_for_block(wctx, en_def_box, db);
+                        ui_box_interact(en_def_box, str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_id));
+                    }
 
                     ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
                             &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
@@ -1856,12 +1947,19 @@ static void render_dict_content(const void* data, void* ctx)
                                                                        .child_gap = 3,
                                                                        .direction = LAYOUT_TOP_TO_BOTTOM });
                             {
-                                ui_text((String){ (u8*)DICT_STR(db, ex_en), (isize)strlen(DICT_STR(db, ex_en)) },
-                                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
-                                                       .font_size = 11,
-                                                       .color = theme->dict_example_fg,
-                                                       .line_height = 17,
-                                                       .wrap = True });
+                                UIBox* ex_en_box =
+                                    ui_text((String){ (u8*)DICT_STR(db, ex_en), (isize)strlen(DICT_STR(db, ex_en)) },
+                                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
+                                                           .font_size = 11,
+                                                           .color = theme->dict_example_fg,
+                                                           .line_height = 17,
+                                                           .wrap = True });
+                                {
+                                    i32 block_id = wctx->dict_word_block_count;
+                                    dict_build_tokens_for_block(wctx, ex_en_box, db);
+                                    ui_box_interact(ex_en_box,
+                                                    str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_id));
+                                }
 
                                 ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
                                         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ZH],
@@ -1883,6 +1981,10 @@ static void render_dict_content(const void* data, void* ctx)
     ui_box_end(container);
 }
 
+//
+// Frame Processing
+//
+
 static void render_dict_pos_selector(void* userdata)
 {
     WindowContext* ctx = (WindowContext*)userdata;
@@ -1892,7 +1994,6 @@ static void render_dict_pos_selector(void* userdata)
     if (ctx->dict_pos_count <= 1)
         return;
 
-    /* spacer to push buttons to the right edge */
     ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) } }));
 
     f32 btn_h = 20.f;
@@ -1931,10 +2032,6 @@ static void render_dict_pos_selector(void* userdata)
         ui_box_end(btn);
     }
 }
-
-//
-// Frame Processing
-//
 
 static void render_highlighted_text(String text, i32 range_count, const FuzzyRange* ranges,
                                     const TextConfig* normal_cfg, const TextConfig* highlight_cfg)
@@ -2653,8 +2750,11 @@ static void panel_container(WindowContext* ctx, const Rect rect)
     AppShared* shared = ctx->shared;
     const Theme* theme = &shared->theme;
 
-    /* reset per-frame dict content flag — render_dict_content sets it back to True */
     ctx->dict_content_active = False;
+    ctx->dict_word_block_count = 0;
+    ctx->dict_word_total_tokens = 0;
+    ctx->dict_word_blocks = NULL;
+    arena_pop_to(&ctx->dict_token_arena, 0);
 
     // clang-format off
     PanelTheme pt = {
@@ -3529,16 +3629,20 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             {
                 b32 handled = True;
                 f32 step = 8.f;
-                // clang-format off
                 switch (wparam)
                 {
                     case VK_UP:
-                    case 'K': ctx->ui.mouse_scroll_delta.y -= step; break;
+                    case 'K':
+                        ctx->ui.mouse_scroll_delta.y -= step;
+                        break;
                     case VK_DOWN:
-                    case 'J': ctx->ui.mouse_scroll_delta.y += step; break;
-                    default: handled = False; break;
+                    case 'J':
+                        ctx->ui.mouse_scroll_delta.y += step;
+                        break;
+                    default:
+                        handled = False;
+                        break;
                 }
-                // clang-format on
                 if (handled)
                 {
                     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
@@ -3875,6 +3979,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 panel_free_tree(ctx->root_panel);
                 ui_deinit(&ctx->ui);
                 renderer_deinit(&ctx->renderer);
+                arena_release(&ctx->dict_token_arena);
                 free(ctx);
             }
             if (!shared || !shared->first_window)
@@ -3999,7 +4104,7 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_down"),      str("Resize Panel Down"),        str(""), cmd_panel_resize_down,      &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_up"),        str("Resize Panel Up"),          str(""), cmd_panel_resize_up,        &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_right"),     str("Resize Panel Right"),       str(""), cmd_panel_resize_right,     &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("dict.pos_select"),       str("Select Part of Speech"),    str(""), cmd_dict_select_pos,        &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("dict.pos_select"),       str("Select Part of Speech"),    str(""), cmd_dict_pos_select,        &shared });
 
         /* Bind shortcuts */
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },          str("tab.new"));
