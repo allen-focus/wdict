@@ -243,6 +243,9 @@ struct WindowContext
     SearchPaletteMode palette_effective_mode;
     volatile LONG palette_switch_version;
 
+    /* IME */
+    HIMC default_himc;
+
     /* guards */
     b32 in_frame;
     b32 mouse_tracked;
@@ -529,6 +532,10 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     ctx->palette_search_mode = PALETTE_MODE_WORD;
     ctx->palette_effective_mode = PALETTE_MODE_WORD;
     ctx->palette_switch_version = 0;
+
+    /* Save default IME context for IME disable/enable control */
+    ctx->default_himc = ImmGetContext(ctx->window);
+    ImmReleaseContext(ctx->window, ctx->default_himc);
 
     /* Add to window list */
     window_list_add(shared, ctx);
@@ -2558,29 +2565,19 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                         TextConfig hint_text_cfg = {
                             .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->hint, .wrap = True
                         };
+                        UIBox* box = NULL;
+                        BoxConfig box_cfg = { .sizing = { fit({}), fit({}) },
+                                              .color = theme->active_bg,
+                                              .rect_style = { .corner_radius = 2 },
+                                              .padding = { 3, 3, 3, 3 } };
+
+                        // clang-format off
                         ui_text(str("Type "), &hint_text_cfg);
-
-                        UIBox* box = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
-                                                                .color = theme->active_bg,
-                                                                .rect_style = { .corner_radius = 2 },
-                                                                .padding = { 3, 3, 3, 3 } });
-                        {
-                            ui_text(str("/"), &hint_text_cfg);
-                        }
-                        ui_box_end(box);
-
+                        box = ui_box_begin(&box_cfg); ui_text(str("/"), &hint_text_cfg); ui_box_end(box);
                         ui_text(str(" or "), &hint_text_cfg);
-
-                        box = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
-                                                         .color = theme->active_bg,
-                                                         .rect_style = { .corner_radius = 2 },
-                                                         .padding = { 3, 3, 3, 3 } });
-                        {
-                            ui_text(str("s"), &hint_text_cfg);
-                        }
-                        ui_box_end(box);
-
+                        box = ui_box_begin(&box_cfg); ui_text(str("s"), &hint_text_cfg); ui_box_end(box);
                         ui_text(str(" to search"), &hint_text_cfg);
+                        // clang-format on
                     }
                     ui_box_end(hint_container);
                 }
@@ -2617,6 +2614,13 @@ static void process_frame(WindowContext* ctx)
     if (ctx->in_frame)
         return;
     ctx->in_frame = True;
+
+    /* IME control: disable when palette closed (so keyboard shortcuts like 's' work),
+       re-enable when palette open (so Chinese input works in search field). */
+    if (ctx->palette_popup.open)
+        ImmAssociateContext(ctx->window, ctx->default_himc);
+    else
+        ImmAssociateContext(ctx->window, NULL);
 
     AppShared* shared = ctx->shared;
     UIContext* ui_ctx = &ctx->ui;
@@ -3840,8 +3844,8 @@ i32 WinMainCRTStartup()
         .lpfnWndProc = window_procedure,
         .hInstance = GetModuleHandleW(NULL),
         .hIcon = LoadIconW(GetModuleHandleW(NULL), L"MAIN_ICON"),
-        .hIconSm = (HICON)LoadImageW(GetModuleHandleW(NULL), L"MAIN_ICON", IMAGE_ICON,
-                                      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR),
+        .hIconSm = (HICON)LoadImageW(GetModuleHandleW(NULL), L"MAIN_ICON", IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                     GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR),
         .lpszClassName = L"window class",
     };
     RegisterClassExW(&wc);

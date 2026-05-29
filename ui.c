@@ -2303,7 +2303,7 @@ void ui_panel_end(PanelContext* panel_ctx)
         UIBox* bottom_bar = ui_box_begin(&(BoxConfig){
             .sizing = { grow({}), fixed(0) },
             .direction = LAYOUT_LEFT_TO_RIGHT,
-            .padding = { 0, 10, 0, 10 },
+            .padding = { 0, 8, 0, 8 },
             .alignment = { ALIGN_START, ALIGN_CENTER },
         });
 
@@ -2330,12 +2330,25 @@ void ui_panel_end(PanelContext* panel_ctx)
             Color tc = panel_ctx->theme->tab_fg;
             f32 text_alpha = clamp((t - 0.3f) / 0.7f, 0.f, 1.f);
             tc.a = (u8)((f32)tc.a * text_alpha);
-            ui_text(str("This panel is focused"), &(TextConfig){
-                                                      .font = panel_ctx->font_ui,
-                                                      .font_size = 12,
-                                                      .color = tc,
-                                                      .line_height = 30,
-                                                  });
+
+            UIBox* hint_container = ui_box_begin(
+                &(BoxConfig){ .sizing = { fit({}), grow({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            {
+                TextConfig hint_text_cfg = { .font = panel_ctx->font_ui, .font_size = 10.5, .color = tc };
+
+                UIBox* box = NULL;
+                BoxConfig box_cfg = { .sizing = { fit({}), fit({}) },
+                                      .color = panel_ctx->theme->hover_bg,
+                                      .rect_style = { .corner_radius = 3 },
+                                      .padding = { 5, 5, 5, 5 } };
+                // clang-format off
+                box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+-/+"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to split; "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+h/j/k/l"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to switch focus."), &hint_text_cfg);
+                // clang-format on
+            }
+            ui_box_end(hint_container);
         }
 
         ui_box_end(bottom_bar);
