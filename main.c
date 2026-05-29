@@ -2007,13 +2007,16 @@ static void render_dict_content(const void* data, void* ctx)
                                                .line_height = 20,
                                                .wrap = True });
 
-                    i32 block_id = wctx->dict_word_block_count;
+                    i32 block_before = wctx->dict_word_block_count;
                     dict_build_tokens_for_block(wctx, en_def_box, db);
-                    UIBoxInteractResult ir =
-                        ui_box_interact(en_def_box, str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_id));
-                    if (ui_hovered(ir.flags) && wctx->dict_word_block_count > 0)
+                    if (wctx->dict_word_block_count > block_before)
                     {
-                        DictWordBlock* block = &wctx->dict_word_blocks[block_id];
+                        UIBoxInteractResult ir = ui_box_interact(
+                            en_def_box,
+                            str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_before));
+                        if (ui_hovered(ir.flags) && wctx->dict_word_block_count > 0)
+                        {
+                            DictWordBlock* block = &wctx->dict_word_blocks[block_before];
                         f32 box_width = ir.last_box ? ir.last_box->size.width : 0.f;
                         if (box_width > 0.f)
                         {
@@ -2049,6 +2052,7 @@ static void render_dict_content(const void* data, void* ctx)
                                                                       .float_offset = { offset_x, offset_y } }));
                             }
                         }
+                    }
                     }
 
                     ui_text((String){ (u8*)DICT_STR(db, zh_off), (isize)strlen(DICT_STR(db, zh_off)) },
@@ -2090,14 +2094,17 @@ static void render_dict_content(const void* data, void* ctx)
                                                            .color = theme->dict_example_fg,
                                                            .line_height = 17,
                                                            .wrap = True });
-                                i32 block_id = wctx->dict_word_block_count;
+                                i32 block_before = wctx->dict_word_block_count;
                                 dict_build_tokens_for_block(wctx, ex_en_box, db);
-                                UIBoxInteractResult ir_ex = ui_box_interact(
-                                    ex_en_box, str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_id));
+                                if (wctx->dict_word_block_count > block_before)
+                                {
+                                    UIBoxInteractResult ir_ex = ui_box_interact(
+                                        ex_en_box,
+                                        str_fmt(HASH_STR_MAX_LENGTH, "dict_blk_%u_%d", wctx->id, block_before));
 
                                 if (ui_hovered(ir_ex.flags) && wctx->dict_word_block_count > 0)
                                 {
-                                    DictWordBlock* block = &wctx->dict_word_blocks[block_id];
+                                    DictWordBlock* block = &wctx->dict_word_blocks[block_before];
                                     f32 box_width = ir_ex.last_box ? ir_ex.last_box->size.width : 0.f;
                                     if (box_width > 0.f)
                                     {
@@ -2135,6 +2142,7 @@ static void render_dict_content(const void* data, void* ctx)
                                                                            .float_offset = { offset_x, offset_y } }));
                                         }
                                     }
+                                }
                                 }
 
                                 ui_text((String){ (u8*)DICT_STR(db, ex_zh), (isize)strlen(DICT_STR(db, ex_zh)) },
