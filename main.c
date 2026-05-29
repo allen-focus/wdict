@@ -56,8 +56,6 @@
 /*
  * DictWordToken — per-word metadata for interaction hit-test.
  * Built from TextData.words after each ui_text() call on English text blocks.
- * The x_on_line / line_index fields are filled lazily during hit-test,
- * using the text box's cached position from the previous frame's layout.
  */
 typedef struct
 {
@@ -76,6 +74,18 @@ typedef struct
     i32 token_count;
     UIBox* text_box;
 } DictWordBlock;
+
+/*
+ * DictWordDragPayload — 64-byte drag payload stored in UIContext.drag_payload_buf.
+ */
+typedef struct
+{
+    u32 drag_type;
+    i32 content_data;
+    u32 from_window_id;
+    u32 _reserved;
+    char title[48];
+} DictWordDragPayload;
 
 typedef enum
 {
@@ -106,10 +116,10 @@ typedef enum
 
 typedef enum
 {
-    PALETTE_VIEW_EMPTY, /* query is empty */
-    PALETTE_VIEW_LOADING, /* mode switching or waiting for worker results */
-    PALETTE_VIEW_RESULTS, /* search complete, results available */
-    PALETTE_VIEW_NO_MATCH, /* query non-empty but 0 results */
+    PALETTE_VIEW_EMPTY,
+    PALETTE_VIEW_LOADING,
+    PALETTE_VIEW_RESULTS,
+    PALETTE_VIEW_NO_MATCH,
 } PaletteViewState;
 
 typedef struct
@@ -202,21 +212,18 @@ typedef struct
     SearchState palette_search;
     DictDB dict_db;
     Arena dict_arena;
-    volatile b32 dict_ready; // True = dict + search aux + search states fully initialized
-    DWORD main_thread_id; // used by startup_dict_thread to PostMessage wake-ups
+    volatile b32 dict_ready;
+    DWORD main_thread_id;
     DictSearchAuxEntry* search_aux;
     Arena search_aux_arena;
 
-    /* cross-window drag-drop */
     b32 cross_drag_active;
     u8 cross_drag_payload_buf[DRAG_PAYLOAD_MAX];
     isize cross_drag_payload_size;
     u32 cross_drag_source_window_id;
 
-    /* drag hint popup (heap-allocated — UIContext + Renderer are too large for the stack) */
     DragPopup* drag_popup;
 
-    /* accent border color (registry-derived, updated on WM_DWMCOLORIZATIONCOLORCHANGED) */
     Color accent_border_color;
     b32 has_accent_border;
 } AppShared;
@@ -231,11 +238,9 @@ struct WindowContext
     WindowContext* next;
     u32 id;
 
-    /* panel */
     Panel* root_panel;
     Panel* focused_panel;
 
-    /* widget needed */
     b32 check;
 
     u8 text_buf_1[TEXT_BUFFER_SIZE];
@@ -243,7 +248,6 @@ struct WindowContext
     TextEditState text_edit_1;
     TextEditState text_edit_2;
 
-    /* decoration (window-level overlay) */
     Rect decoration_minimize;
     Rect decoration_maximize;
     Rect decoration_close;
@@ -255,11 +259,9 @@ struct WindowContext
     isize decoration_spacer_count;
     TitleBarHot tb_hovered_button;
 
-    /* overlay popups */
     OverlayPopup menu_popup;
     OverlayPopup palette_popup;
 
-    /* palette state */
     u8 palette_text_buf[SEARCH_QUERY_BUF];
     TextEditState palette_text_edit;
     i32 palette_selected_index;
@@ -270,13 +272,13 @@ struct WindowContext
     SearchPaletteMode palette_effective_mode;
     volatile LONG palette_switch_version;
 
-    /* dict POS selector state — written by render_dict_content, read by panel_container */
+    /* dict POS selector state */
     u8 dict_pos_count;
     u8 dict_pos_kinds[DICT_MAX_POS];
     u8 dict_cur_pos;
     b32 dict_content_active;
 
-    /* dict word token arrays — built per frame, own arena to avoid aliasing with ui arena. */
+    /* dict word token arrays */
     Arena dict_token_arena;
     DictWordBlock* dict_word_blocks;
     i32 dict_word_block_count;
@@ -285,16 +287,15 @@ struct WindowContext
     /* IME */
     HIMC default_himc;
 
-    /* guards */
     b32 in_frame;
     b32 mouse_tracked;
 };
 
-static DictDB* g_dict_db; /* set at startup, used by extract callbacks */
-static DictSearchAuxEntry* g_search_aux; /* set at startup, used by extract callbacks */
+static DictDB* g_dict_db;
+static DictSearchAuxEntry* g_search_aux;
 
 static u64 s_search_palette_input_hash;
-static u32 s_window_next_id = 1; /* 0 reserved for none */
+static u32 s_window_next_id = 1;
 static u16 s_utf16_pending_high = 0;
 
 //
@@ -1311,6 +1312,42 @@ static void cmd_dict_pos_select(void* userdata, String cmd_text)
         w->ui.requested_frames = 1;
 }
 
+static void cmd_tab_open_word(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    i32 content_data = cmd_parse_i32(cmd_text, str("content_data"), -1);
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    u32 panel_id = cmd_parse_u32(cmd_text, str("panel"), 0);
+
+    if (content_data < 0)
+        return;
+
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w)
+        return;
+
+    Panel* p = panel_id ? panel_find_by_id(w->root_panel, panel_id) : w->focused_panel;
+    if (!p)
+        p = panel_find_first_leaf(w->root_panel);
+    if (!p)
+        return;
+
+    i32 word_idx = content_data >> 8;
+    const char* word_str = DICT_STR(&shared->dict_db, shared->dict_db.words[word_idx].word_stroff);
+    isize wlen = strlen(word_str);
+
+    PanelTab* tab = panel_tab_declare(p, (String){ (u8*)word_str, wlen });
+    if (tab)
+    {
+        tab->content_data = (void*)(isize)content_data;
+        tab->render_fn = render_dict_content;
+        panel_tab_activate(p, tab);
+    }
+
+    if (w->ui.requested_frames <= 0)
+        w->ui.requested_frames = 1;
+}
+
 //
 // Palette navigation
 //
@@ -1993,6 +2030,19 @@ static void render_dict_content(const void* data, void* ctx)
                                 DictWordToken* tok = &block->tokens[hit];
                                 ui_set_desired_cursor(UI_CURSOR_HAND);
 
+                                if (ui_pressed(ir.flags) && !g_ui_ctx->mouse_captured_by_hash)
+                                {
+                                    DictWordDragPayload p = { .drag_type = DRAG_TYPE_DICT_WORD,
+                                                              .content_data =
+                                                                  (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
+                                                              .from_window_id = wctx->id,
+                                                              ._reserved = 0 };
+                                    isize n = tok->text.len < 47 ? tok->text.len : 47;
+                                    memcpy(p.title, tok->text.data, (usize)n);
+                                    p.title[n] = '\0';
+                                    ui_set_drag_payload(&p, sizeof(p));
+                                }
+
                                 i32 line_count = 0;
                                 for (i32 i = 0; i < block->token_count; i++)
                                     if (block->tokens[i].line_index + 1 > line_count)
@@ -2070,6 +2120,20 @@ static void render_dict_content(const void* data, void* ctx)
                                         {
                                             DictWordToken* tok = &block->tokens[hit];
                                             ui_set_desired_cursor(UI_CURSOR_HAND);
+
+                                            if (ui_pressed(ir_ex.flags) && !g_ui_ctx->mouse_captured_by_hash)
+                                            {
+                                                DictWordDragPayload p = {
+                                                    .drag_type = DRAG_TYPE_DICT_WORD,
+                                                    .content_data =
+                                                        (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
+                                                    .from_window_id = wctx->id,
+                                                    ._reserved = 0 };
+                                                isize n = tok->text.len < 47 ? tok->text.len : 47;
+                                                memcpy(p.title, tok->text.data, (usize)n);
+                                                p.title[n] = '\0';
+                                                ui_set_drag_payload(&p, sizeof(p));
+                                            }
 
                                             i32 line_count = 0;
                                             for (i32 i = 0; i < block->token_count; i++)
@@ -3188,6 +3252,21 @@ static void process_frame(WindowContext* ctx)
                                                    payload->from_window_id, (i32)cursor_pt.x, (i32)cursor_pt.y));
                         }
                     }
+
+                    /* Unhandled drop of dict word: open in focused panel */
+                    if (ui_dropped(rb.flags) && !g_ui_ctx->drag_payload_consumed &&
+                        g_ui_ctx->drag_payload_size >= (isize)sizeof(DictWordDragPayload))
+                    {
+                        DictWordDragPayload* dp = (DictWordDragPayload*)g_ui_ctx->drag_payload_buf;
+                        if (dp->drag_type == DRAG_TYPE_DICT_WORD)
+                        {
+                            g_ui_ctx->drag_payload_consumed = True;
+                            cmd_queue_push(&shared->cmd_queue,
+                                           str_fmt(CMD_STR_MAX_LENGTH,
+                                                   "tab.open_word content_data=%d window=%u",
+                                                   dp->content_data, ctx->id));
+                        }
+                    }
                 }
                 ui_box_end(content);
 
@@ -4231,6 +4310,7 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_up"),        str("Resize Panel Up"),          str(""), cmd_panel_resize_up,        &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_right"),     str("Resize Panel Right"),       str(""), cmd_panel_resize_right,     &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("dict.pos_select"),       str("Select Part of Speech"),    str(""), cmd_dict_pos_select,        &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.open_word"),         str("Open Word in Tab"),          str(""), cmd_tab_open_word,          &shared });
 
         /* Bind shortcuts */
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },          str("tab.new"));

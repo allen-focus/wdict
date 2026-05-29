@@ -31,6 +31,7 @@ typedef enum
 typedef enum
 {
     DRAG_TYPE_TAB = 0,
+    DRAG_TYPE_DICT_WORD = 1,
 } DragType;
 
 typedef struct
