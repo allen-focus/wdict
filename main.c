@@ -2034,8 +2034,7 @@ static void render_dict_content(const void* data, void* ctx)
                                     cmd_queue_push(&shared->cmd_queue,
                                                    str_fmt(CMD_STR_MAX_LENGTH,
                                                            "tab.open_word content_data=%d window=%u",
-                                                           (i32)((tok->dict_word_idx << 8) | (u32)pos_idx),
-                                                           wctx->id));
+                                                           (i32)((tok->dict_word_idx << 8) | (u32)pos_idx), wctx->id));
 
                                 i32 line_count = 0;
                                 for (i32 i = 0; i < block->token_count; i++)
@@ -2045,9 +2044,9 @@ static void render_dict_content(const void* data, void* ctx)
                                 f32 offset_y = (tok->line_index + 1 - line_count) * lnh - 1.f;
                                 f32 offset_x = tok->x_on_line + spw;
                                 ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
-                                                                       .color = theme->accent_bg,
-                                                                       .flags = BoxFlag_Float,
-                                                                       .float_offset = { offset_x, offset_y } }));
+                                                                      .color = theme->accent_bg,
+                                                                      .flags = BoxFlag_Float,
+                                                                      .float_offset = { offset_x, offset_y } }));
                             }
                         }
                     }
@@ -2129,11 +2128,11 @@ static void render_dict_content(const void* data, void* ctx)
 
                                             f32 offset_y = (tok->line_index + 1 - line_count) * lnh - 1.f;
                                             f32 offset_x = tok->x_on_line + spw;
-                                            ui_box_end(ui_box_begin(
-                                                &(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
-                                                              .color = theme->accent_bg,
-                                                              .flags = BoxFlag_Float,
-                                                              .float_offset = { offset_x, offset_y } }));
+                                            ui_box_end(
+                                                ui_box_begin(&(BoxConfig){ .sizing = { fixed(tok->width), fixed(1.5f) },
+                                                                           .color = theme->accent_bg,
+                                                                           .flags = BoxFlag_Float,
+                                                                           .float_offset = { offset_x, offset_y } }));
                                         }
                                     }
                                 }
@@ -3805,7 +3804,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
             /* Dict content keyboard scrolling (Up/Down/J/K).
                Only active when dict content is shown and no overlay is open. */
-            if (ctx && ctx->dict_content_active && !ctx->palette_popup.open && !ctx->menu_popup.open)
+            if (ctx && ctx->dict_content_active && !ctx->palette_popup.open && !ctx->menu_popup.open && !ctrl && !alt)
             {
                 b32 handled = True;
                 f32 step = 8.f;
