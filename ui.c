@@ -1097,6 +1097,7 @@ void ui_frame_end(isize arena_pos_backup)
     g_ui_ctx->mouse_double_click = False;
     g_ui_ctx->mouse_delta = (Position){ 0.f, 0.f };
     g_ui_ctx->mouse_scroll_delta = (Position){ 0.f, 0.f };
+    g_ui_ctx->keyboard_scroll_delta = (Position){ 0.f, 0.f };
     g_ui_ctx->char_input_queue_count = 0;
     g_ui_ctx->text_action_queue_count = 0;
 
@@ -1690,6 +1691,16 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
                                  g_ui_ctx->current_time, SCROLL_ANIM_DURATION);
                 g_ui_ctx->mouse_scroll_delta.y = 0;
             }
+        }
+
+        /* Handle keyboard scroll delta (unconditional — no hover check) */
+        if (g_ui_ctx->keyboard_scroll_delta.y && scroll_ctx.keyboard_scroll_target && scroll_ctx.max_delta.y > 0)
+        {
+            f32 new_target = last_area->scroll_anim_y.target + g_ui_ctx->keyboard_scroll_delta.y * SCROLL_SENSITIVITY;
+            new_target = clamp(new_target, 0, scroll_ctx.max_delta.y);
+            start_timed_lerp(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target,
+                             g_ui_ctx->current_time, SCROLL_ANIM_DURATION);
+            g_ui_ctx->keyboard_scroll_delta.y = 0;
         }
 
         /* Auto-scroll X — text cursor (point: width=0 by convention) */
@@ -2310,6 +2321,7 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
 void ui_panel_end(PanelContext* panel_ctx)
 {
     TracyCZoneNC(ctx_pe, "PanelEnd", TracyColor_Panel, TRACY_SUBSYSTEMS & TracySys_Panel);
+    panel_ctx->scroll_ctx.keyboard_scroll_target = panel_ctx->show_bottom_bar;
     ui_scrollable_area_end(panel_ctx->scroll_ctx);
 
     /* Bottom transition bar on hovered panel */

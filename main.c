@@ -3812,11 +3812,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 {
                     case VK_UP:
                     case 'K':
-                        ctx->ui.mouse_scroll_delta.y -= step;
+                        ctx->ui.keyboard_scroll_delta.y -= step;
                         break;
                     case VK_DOWN:
                     case 'J':
-                        ctx->ui.mouse_scroll_delta.y += step;
+                        ctx->ui.keyboard_scroll_delta.y += step;
                         break;
                     default:
                         handled = False;

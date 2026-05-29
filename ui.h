@@ -495,6 +495,9 @@ struct UIContext
     String ime_composition;
     Position ime_cursor_screen_pos;
 
+    /* keyboard scroll — consumed unconditionally by scrollable_area_end */
+    Position keyboard_scroll_delta;
+
     /* nesting */
     UIContext* prev_ctx;
 };
@@ -525,6 +528,8 @@ typedef struct
     f32 scroll_hint_h;
 
     f32 scroll_margin;
+
+    b32 keyboard_scroll_target; /* set by ui_panel_end for the focused panel */
 } ScrollContext;
 
 typedef struct
