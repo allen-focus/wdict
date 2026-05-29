@@ -581,6 +581,12 @@ typedef struct
     LayoutDirection direction;
     Alignment alignment;
     b32 show_bottom_bar; // draw bottom accent bar when this panel is focused
+
+    /* Optional callback to render extra content inside the bottom bar (after hint text, before bar end).
+       The callback runs inside the bottom bar's LAYOUT_LEFT_TO_RIGHT layout. Use a grow({}) spacer
+       before your content to push it to the right edge. */
+    void (*bottom_bar_render_fn)(void* userdata);
+    void* bottom_bar_userdata;
 } PanelConfig;
 
 typedef struct
@@ -598,6 +604,9 @@ typedef struct
     const Font* font_ui;
     f32 font_size;
     b32 show_bottom_bar;
+
+    void (*bottom_bar_render_fn)(void* userdata);
+    void* bottom_bar_userdata;
 } PanelContext;
 
 //

@@ -49,6 +49,7 @@
 
 #define SEARCH_PALETTE_INPUT_HASH_STR "search palette input"
 #define PALETTE_CONTEXT_MAX_CHARS     64
+#define DICT_MAX_POS                  32
 
 typedef enum
 {
@@ -242,6 +243,12 @@ struct WindowContext
     SearchPaletteMode palette_search_mode;
     SearchPaletteMode palette_effective_mode;
     volatile LONG palette_switch_version;
+
+    /* dict POS selector state — written by render_dict_content, read by panel_container */
+    u8 dict_pos_count;
+    u8 dict_pos_kinds[DICT_MAX_POS];
+    u8 dict_cur_pos;
+    b32 dict_content_active;
 
     /* IME */
     HIMC default_himc;
@@ -1209,6 +1216,68 @@ static void cmd_panel_resize_right(void* userdata, String cmd_text)
     panel_resize_pixel(w->root_panel, root_rect, w->focused_panel, PanelSpatial_Right, step);
 }
 
+static void render_dict_content(const void* data, void* ctx);
+
+static void cmd_dict_select_pos(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    i32 delta = cmd_parse_i32(cmd_text, str("delta"), 0);
+    i32 target_pos = cmd_parse_i32(cmd_text, str("pos"), -1);
+
+    WindowContext* w = find_window_by_id(shared, window_id);
+    if (!w || !w->focused_panel)
+        return;
+
+    PanelTab* active = panel_tab_get_active(w->focused_panel);
+    if (!active || active->render_fn != render_dict_content)
+        return;
+
+    /* content_data encodes both word index and POS index:
+       upper bits = word_idx, lower 8 bits = pos_idx */
+    i32 combined = (i32)(isize)active->content_data;
+    i32 word_idx = combined >> 8;
+    u8 cur_pos = (u8)(combined & 0xFF);
+
+    const DictDB* db = &shared->dict_db;
+    const DictWordIndex* word = &db->words[word_idx];
+    const u8* p = db->entdata + word->entdata_off;
+    p += 4; // freq
+    {
+        u8 cnt = dict_rd_u8(&p);
+        p += (usize)cnt * 4;
+    } // brief_en
+    {
+        u8 cnt = dict_rd_u8(&p);
+        p += (usize)cnt * 4;
+    } // brief_zh
+    u8 pos_count = dict_rd_u8(&p);
+
+    if (pos_count == 0)
+        return;
+
+    i32 new_pos = cur_pos;
+    if (delta != 0)
+        new_pos = (i32)cur_pos + delta;
+    else if (target_pos >= 0)
+        new_pos = target_pos;
+
+    if (new_pos < 0)
+        new_pos = 0;
+    if (new_pos >= (i32)pos_count)
+        new_pos = (i32)pos_count - 1;
+
+    if ((u8)new_pos == cur_pos)
+        return;
+
+    /* update content_data with new pos index */
+    active->content_data = (void*)(isize)((word_idx << 8) | (u8)new_pos);
+
+    /* wake up for re-render */
+    if (w->ui.requested_frames <= 0)
+        w->ui.requested_frames = 1;
+}
+
 //
 // Palette navigation
 //
@@ -1584,10 +1653,29 @@ static const char* s_pos_names[] = {
     [POS_DEF_ART] = "def. art.",
 };
 
+static void dict_skip_pos(const u8** p)
+{
+    dict_rd_u8(p); // pos_kind
+    dict_rd_u32(p); // pron_off
+    u8 def_count = dict_rd_u8(p);
+    for (u8 di = 0; di < def_count; di++)
+    {
+        *p += 8; // en_off(4) + zh_off(4)
+        u8 ex_count = dict_rd_u8(p);
+        *p += (usize)ex_count * 8; // ex_en(4) + ex_zh(4) per example
+    }
+}
+
 static void render_dict_content(const void* data, void* ctx)
 {
-    i32 word_idx = (i32)(isize)data;
-    AppShared* shared = (AppShared*)ctx;
+    /* content_data encodes both word index and POS index:
+       upper bits = word_idx (into db->words[]), lower 8 bits = pos_idx */
+    i32 combined = (i32)(isize)data;
+    i32 word_idx = combined >> 8;
+    u8 pos_idx = (u8)(combined & 0xFF);
+
+    WindowContext* wctx = (WindowContext*)ctx;
+    AppShared* shared = wctx->shared;
     const DictDB* db = &shared->dict_db;
     if (!db->hdr)
         return;
@@ -1614,10 +1702,38 @@ static void render_dict_content(const void* data, void* ctx)
 
     u8 pos_count = dict_rd_u8(&p);
 
+    /* write POS list into WindowContext so panel_container can render the selector */
+    wctx->dict_content_active = True;
+    wctx->dict_pos_count = pos_count < DICT_MAX_POS ? pos_count : DICT_MAX_POS;
+    wctx->dict_cur_pos = pos_idx;
+
     if (pos_count == 0)
         return;
 
-    /* only render first POS */
+    /* scan all POS entries to capture pos_kind[] for the selector */
+    {
+        const u8* scan = p;
+        for (u8 pi = 0; pi < wctx->dict_pos_count; pi++)
+        {
+            wctx->dict_pos_kinds[pi] = dict_rd_u8(&scan);
+            dict_rd_u32(&scan); // pron_off
+            u8 dc = dict_rd_u8(&scan);
+            for (u8 di = 0; di < dc; di++)
+            {
+                scan += 8; // en_off(4) + zh_off(4)
+                u8 ec = dict_rd_u8(&scan);
+                scan += (usize)ec * 8; // ex_en(4) + ex_zh(4) per example
+            }
+        }
+    }
+
+    /* skip preceding POS entries to reach the selected one */
+    if (pos_idx >= pos_count)
+        pos_idx = (u8)(pos_count - 1);
+    for (u8 pi = 0; pi < pos_idx; pi++)
+        dict_skip_pos(&p);
+
+    /* render selected POS */
     u8 pos_kind = dict_rd_u8(&p);
     u32 pron_off = dict_rd_u32(&p);
 
@@ -1765,6 +1881,55 @@ static void render_dict_content(const void* data, void* ctx)
         }
     }
     ui_box_end(container);
+}
+
+static void render_dict_pos_selector(void* userdata)
+{
+    WindowContext* ctx = (WindowContext*)userdata;
+    AppShared* shared = ctx->shared;
+    const Theme* theme = &shared->theme;
+
+    if (ctx->dict_pos_count <= 1)
+        return;
+
+    /* spacer to push buttons to the right edge */
+    ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) } }));
+
+    f32 btn_h = 20.f;
+    f32 btn_fs = 10.5f;
+    Padding btn_pad = { 2, 6, 2, 6 };
+
+    for (u8 i = 0; i < ctx->dict_pos_count; i++)
+    {
+        u8 pk = ctx->dict_pos_kinds[i];
+        const char* label = (pk < countof(s_pos_names) && s_pos_names[pk]) ? s_pos_names[pk] : "?";
+
+        b32 is_active = (i == ctx->dict_cur_pos);
+        Color bg = is_active ? theme->accent_bg : (Color){ 0 };
+        Color fg = is_active ? theme->accent_fg : theme->bar_fg;
+
+        UIBox* btn = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fixed(btn_h) },
+                                                .padding = btn_pad,
+                                                .rect_style = { .corner_radius = 3 },
+                                                .color = bg,
+                                                .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+        {
+            UIBoxInteractResult ir =
+                ui_box_interact(btn, str_fmt(HASH_STR_MAX_LENGTH, "dict_pos_btn_%u_%u", ctx->id, i));
+
+            if (ui_lclicked(ir.flags) && (u8)i != ctx->dict_cur_pos)
+                cmd_queue_push(&shared->cmd_queue,
+                               str_fmt(CMD_STR_MAX_LENGTH, "dict.pos_select pos=%d window=%u panel=%u", (i32)i, ctx->id,
+                                       ctx->focused_panel ? ctx->focused_panel->id : 0));
+
+            ui_text((String){ (u8*)label, (isize)strlen(label) },
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+                                   .font_size = btn_fs,
+                                   .color = fg,
+                                   .line_height = btn_h - btn_pad.top - btn_pad.bottom });
+        }
+        ui_box_end(btn);
+    }
 }
 
 //
@@ -2300,7 +2465,10 @@ static void search_palette_render(WindowContext* ctx)
                                             isize wlen = strlen(wrd);
                                             memcpy(active->name, wrd, wlen);
                                             active->name_len = wlen;
-                                            active->content_data = (void*)(isize)(w - shared->dict_db.words);
+                                            /* content_data encodes word_idx (upper bits) | pos_idx (lower 8 bits).
+                                               Start at pos 0 when selecting a new word from palette. */
+                                            active->content_data =
+                                                (void*)(isize)(((w - shared->dict_db.words) << 8) | 0);
                                             active->render_fn = render_dict_content;
                                         }
                                     }
@@ -2485,6 +2653,9 @@ static void panel_container(WindowContext* ctx, const Rect rect)
     AppShared* shared = ctx->shared;
     const Theme* theme = &shared->theme;
 
+    /* reset per-frame dict content flag — render_dict_content sets it back to True */
+    ctx->dict_content_active = False;
+
     // clang-format off
     PanelTheme pt = {
         .hover_bg          = theme->press_bg,
@@ -2545,6 +2716,8 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             .window_id = ctx->id,
             .alignment = { ALIGN_CENTER, ALIGN_START },
             .show_bottom_bar = (p == ctx->focused_panel),
+            .bottom_bar_render_fn = (p == ctx->focused_panel) ? render_dict_pos_selector : NULL,
+            .bottom_bar_userdata = ctx,
         });
         {
             if (ui_lclicked(panel.interact.flags))
@@ -2555,7 +2728,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
             {
                 if (active->render_fn)
                 {
-                    active->render_fn(active->content_data, shared);
+                    active->render_fn(active->content_data, ctx);
                 }
                 else
                 {
@@ -3797,6 +3970,7 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_down"),      str("Resize Panel Down"),        str(""), cmd_panel_resize_down,      &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_up"),        str("Resize Panel Up"),          str(""), cmd_panel_resize_up,        &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_right"),     str("Resize Panel Right"),       str(""), cmd_panel_resize_right,     &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("dict.pos_select"),       str("Select Part of Speech"),    str(""), cmd_dict_select_pos,        &shared });
 
         /* Bind shortcuts */
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },          str("tab.new"));
@@ -3818,6 +3992,8 @@ i32 WinMainCRTStartup()
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'J' },          str("panel.resize_down"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'K' },          str("panel.resize_up"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'L' },          str("panel.resize_right"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT,                       'H' },          str("dict.pos_select delta=-1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT,                       'L' },          str("dict.pos_select delta=+1"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                      VK_F11 },       str("app.toggle_theme"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      VK_OEM_4 },     str("palette.close")); // ctrl+[
         Assert(!shortcut_detect_conflicts(&shared.shortcuts));

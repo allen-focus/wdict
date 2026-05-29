@@ -2286,7 +2286,9 @@ PanelContext ui_panel_begin(const PanelConfig* cfg)
                                    .theme = cfg->theme,
                                    .font_ui = cfg->font_ui,
                                    .font_size = cfg->font_size,
-                                   .show_bottom_bar = cfg->show_bottom_bar };
+                                   .show_bottom_bar = cfg->show_bottom_bar,
+                                   .bottom_bar_render_fn = cfg->bottom_bar_render_fn,
+                                   .bottom_bar_userdata = cfg->bottom_bar_userdata };
 
         TracyCZoneEnd(ctx_pb);
         return panel_ctx;
@@ -2349,6 +2351,10 @@ void ui_panel_end(PanelContext* panel_ctx)
                 // clang-format on
             }
             ui_box_end(hint_container);
+
+            /* optional extra content (e.g. POS selector) */
+            if (panel_ctx->bottom_bar_render_fn)
+                panel_ctx->bottom_bar_render_fn(panel_ctx->bottom_bar_userdata);
         }
 
         ui_box_end(bottom_bar);
