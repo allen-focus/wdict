@@ -54,8 +54,9 @@
 #define DICT_TOKEN_BLOCK_MAX          256
 #define DICT_TOKEN_TOTAL_MAX          32768
 
-#define WM_TRAY_CALLBACK (WM_APP + 1)
-#define TRAY_ICON_ID     1
+#define WM_TRAY_CALLBACK         (WM_APP + 1)
+#define TRAY_ICON_ID             1
+#define HOTKEY_TOGGLE_FOREGROUND 1
 
 /*
  * DictWordToken — per-word metadata for interaction hit-test.
@@ -702,6 +703,53 @@ static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM 
                         shared->tray_window = NULL;
                         while (shared->first_window)
                             DestroyWindow(shared->first_window->window);
+                    }
+                }
+            }
+            return 0;
+        }
+        case WM_HOTKEY:
+        {
+            if (shared && wparam == HOTKEY_TOGGLE_FOREGROUND)
+            {
+                HWND foreground = GetForegroundWindow();
+                WindowContext* ctx = NULL;
+                for (WindowContext* w = shared->first_window; w; w = w->next)
+                    if (w->window == foreground)
+                    {
+                        ctx = w;
+                        break;
+                    }
+
+                if (ctx)
+                {
+                    b32 is_last = (!ctx->next && shared->first_window == ctx);
+                    if (is_last)
+                    {
+                        shared->tray_window = ctx;
+                        ShowWindow(ctx->window, SW_HIDE);
+                    }
+                    else
+                    {
+                        DestroyWindow(ctx->window);
+                    }
+                }
+                else
+                {
+                    HWND target = NULL;
+                    if (shared->tray_window)
+                    {
+                        target = shared->tray_window->window;
+                        shared->tray_window = NULL;
+                    }
+                    else if (shared->first_window)
+                        target = shared->first_window->window;
+                    if (target)
+                    {
+                        ShowWindow(target, SW_SHOW);
+                        SetForegroundWindow(target);
+                        if (IsIconic(target))
+                            ShowWindow(target, SW_RESTORE);
                     }
                 }
             }
@@ -2675,6 +2723,12 @@ static void decoration_overlay(WindowContext* ctx)
                 ui_text(str("1. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("F11"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to toggle light/dark theme"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("2. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+Shift+M"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to toggle foreground (closes if multiple windows, hides to tray if last)"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
             cnt = ui_box_begin(&cnt_cfg);
@@ -4765,10 +4819,10 @@ i32 WinMainCRTStartup()
     WindowContext* first =
         create_window(&shared, L"App Title", CW_USEDEFAULT, CW_USEDEFAULT, CLIENT_WIDTH, CLIENT_HEIGHT, True);
     first->ui.requested_frames = IDLE_WAKE_FRAMES;
-
     /* Create message-only window for tray icon callbacks (process-lifetime, independent of any real window) */
     shared.tray_hwnd =
         CreateWindowExW(0, L"TrayIconClass", NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), &shared);
+    RegisterHotKey(shared.tray_hwnd, HOTKEY_TOGGLE_FOREGROUND, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 'M');
 
     /* Add system tray icon (persists until process exit) */
     {
@@ -5010,7 +5064,8 @@ i32 WinMainCRTStartup()
         Shell_NotifyIconW(NIM_DELETE, &nid);
     }
 
-    /* Destroy message-only tray window */
+    /* Unregister hotkey and destroy message-only tray window */
+    UnregisterHotKey(shared.tray_hwnd, HOTKEY_TOGGLE_FOREGROUND);
     if (shared.tray_hwnd)
         DestroyWindow(shared.tray_hwnd);
 
