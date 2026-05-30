@@ -2,6 +2,7 @@
 #pragma comment(lib, "user32")
 #pragma comment(lib, "shcore")
 #pragma comment(lib, "dwmapi")
+#pragma comment(lib, "shell32")
 
 #include "cmd.h"
 #include "dict.h"
@@ -52,6 +53,9 @@
 #define DICT_MAX_POS                  32
 #define DICT_TOKEN_BLOCK_MAX          256
 #define DICT_TOKEN_TOTAL_MAX          32768
+
+#define WM_TRAY_CALLBACK (WM_APP + 1)
+#define TRAY_ICON_ID     1
 
 /*
  * DictWordToken — per-word metadata for interaction hit-test.
@@ -204,6 +208,8 @@ typedef struct
     HCURSOR cursors[UI_CURSOR_COUNT];
     WindowContext* first_window;
     WindowContext* last_window;
+    WindowContext* tray_window;
+    HWND tray_hwnd;
     Arena cfg_arena;
     Arena cmd_arena;
     CmdRegistry cmd_registry;
@@ -581,6 +587,13 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     /* Add to window list */
     window_list_add(shared, ctx);
 
+    /* Restore hidden tray window when a new window is created */
+    if (shared->tray_window)
+    {
+        ShowWindow(shared->tray_window->window, SW_SHOW);
+        shared->tray_window = NULL;
+    }
+
     /* Init per-window root panel */
     ctx->root_panel = panel_alloc();
     ctx->root_panel->pct_of_parent = 1.0f;
@@ -622,6 +635,78 @@ static LRESULT CALLBACK drag_popup_window_procedure(HWND window, UINT message, W
     {
         ShowWindow(window, SW_HIDE);
         return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    AppShared* shared = NULL;
+    LONG_PTR ptr = GetWindowLongPtrW(window, GWLP_USERDATA);
+    if (ptr)
+        shared = (AppShared*)ptr;
+
+    switch (message)
+    {
+        case WM_CREATE:
+        {
+            CREATESTRUCTW* cs = (CREATESTRUCTW*)(lparam);
+            SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)(cs->lpCreateParams));
+            return 0;
+        }
+        case WM_TRAY_CALLBACK:
+        {
+            if (shared && wparam == TRAY_ICON_ID)
+            {
+                if (lparam == WM_LBUTTONUP)
+                {
+                    if (shared->tray_window)
+                    {
+                        HWND hwnd = shared->tray_window->window;
+                        shared->tray_window = NULL;
+                        ShowWindow(hwnd, SW_SHOW);
+                        SetForegroundWindow(hwnd);
+                        if (IsIconic(hwnd))
+                            ShowWindow(hwnd, SW_RESTORE);
+                    }
+                    else if (shared->first_window)
+                    {
+                        SetForegroundWindow(shared->first_window->window);
+                    }
+                }
+                else if (lparam == WM_RBUTTONUP)
+                {
+                    HMENU menu = CreatePopupMenu();
+                    UINT cmd = 0;
+                    if (menu)
+                    {
+                        AppendMenuW(menu, MF_STRING, 1, L"Exit");
+                        POINT pt;
+                        GetCursorPos(&pt);
+                        if (shared->tray_window)
+                            SetForegroundWindow(shared->tray_window->window);
+                        else if (shared->first_window)
+                            SetForegroundWindow(shared->first_window->window);
+                        cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, window, NULL);
+                        DestroyMenu(menu);
+                    }
+                    PostMessageW(window, WM_NULL, 0, 0);
+                    if (cmd == 1)
+                    {
+                        NOTIFYICONDATAW nid = { 0 };
+                        nid.cbSize = sizeof(NOTIFYICONDATAW);
+                        nid.hWnd = shared->tray_hwnd;
+                        nid.uID = TRAY_ICON_ID;
+                        Shell_NotifyIconW(NIM_DELETE, &nid);
+
+                        shared->tray_window = NULL;
+                        while (shared->first_window)
+                            DestroyWindow(shared->first_window->window);
+                    }
+                }
+            }
+            return 0;
+        }
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
@@ -3909,7 +3994,19 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         }
                     }
                 }
-                // DestroyWindow(window);
+                if (shared)
+                {
+                    b32 is_last = (shared->first_window == shared->last_window && ctx == shared->first_window);
+                    if (is_last)
+                    {
+                        shared->tray_window = ctx;
+                        ShowWindow(window, SW_HIDE);
+                    }
+                    else
+                    {
+                        DestroyWindow(window);
+                    }
+                }
                 return 0;
             }
 
@@ -4258,6 +4355,28 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             return 0;
         }
 
+        case WM_CLOSE:
+        {
+            if (shared && ctx)
+            {
+                b32 is_last = (shared->first_window == shared->last_window && ctx == shared->first_window);
+                if (is_last)
+                {
+                    shared->tray_window = ctx;
+                    ShowWindow(window, SW_HIDE);
+                }
+                else
+                {
+                    DestroyWindow(window);
+                }
+            }
+            else
+            {
+                DestroyWindow(window);
+            }
+            return 0;
+        }
+
         case WM_DESTROY:
         {
             if (shared && ctx)
@@ -4459,6 +4578,14 @@ i32 WinMainCRTStartup()
     };
     RegisterClassW(&dp_wc);
 
+    /* Register tray icon window class (message-only, lives for process lifetime) */
+    WNDCLASSW tray_wc = {
+        .lpfnWndProc = tray_window_procedure,
+        .hInstance = GetModuleHandleW(NULL),
+        .lpszClassName = L"TrayIconClass",
+    };
+    RegisterClassW(&tray_wc);
+
     /* Launch dictionary thread (non-blocking — decompress + search init in background) */
     shared.main_thread_id = GetCurrentThreadId();
     {
@@ -4491,6 +4618,23 @@ i32 WinMainCRTStartup()
     WindowContext* first =
         create_window(&shared, L"App Title", CW_USEDEFAULT, CW_USEDEFAULT, CLIENT_WIDTH, CLIENT_HEIGHT, True);
     first->ui.requested_frames = IDLE_WAKE_FRAMES;
+
+    /* Create message-only window for tray icon callbacks (process-lifetime, independent of any real window) */
+    shared.tray_hwnd =
+        CreateWindowExW(0, L"TrayIconClass", NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), &shared);
+
+    /* Add system tray icon (persists until process exit) */
+    {
+        NOTIFYICONDATAW nid = { 0 };
+        nid.cbSize = sizeof(NOTIFYICONDATAW);
+        nid.hWnd = shared.tray_hwnd;
+        nid.uID = TRAY_ICON_ID;
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+        nid.uCallbackMessage = WM_TRAY_CALLBACK;
+        nid.hIcon = LoadIconW(GetModuleHandleW(NULL), L"MAIN_ICON");
+        wcscpy_s(nid.szTip, 128, L"wdict");
+        Shell_NotifyIconW(NIM_ADD, &nid);
+    }
 
     /* Run message loop */
     MSG message;
@@ -4709,6 +4853,19 @@ i32 WinMainCRTStartup()
     dwrite_deinit(&shared.dwrite);
     arena_release(&shared.cmd_arena);
     arena_release(&shared.cfg_arena);
+
+    /* Remove system tray icon */
+    {
+        NOTIFYICONDATAW nid = { 0 };
+        nid.cbSize = sizeof(NOTIFYICONDATAW);
+        nid.hWnd = shared.tray_hwnd;
+        nid.uID = TRAY_ICON_ID;
+        Shell_NotifyIconW(NIM_DELETE, &nid);
+    }
+
+    /* Destroy message-only tray window */
+    if (shared.tray_hwnd)
+        DestroyWindow(shared.tray_hwnd);
 
     ExitProcess(0);
 }
