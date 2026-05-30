@@ -34,7 +34,7 @@ DictDB dict_open(const void* blob)
 
     if (hdr->magic != DICT_MAGIC)
         return db;
-    if (hdr->version != DICT_VERSION)
+    if (hdr->version < 2 || hdr->version > DICT_VERSION)
         return db;
     if (hdr->word_count == 0)
         return db;
@@ -43,6 +43,9 @@ DictDB dict_open(const void* blob)
     db.words = (const DictWordIndex*)(base + hdr->words_off);
     db.entdata = base + hdr->entdata_off;
     db.strpool = (const char*)(base + hdr->strpool_off);
+    db.variants = (hdr->version >= 3 && hdr->variant_off > 0 && hdr->variant_count > 0)
+                      ? (const DictVariantEntry*)(base + hdr->variant_off)
+                      : NULL;
 
     return db;
 }
@@ -62,6 +65,36 @@ i32 dict_lookup(const DictDB* db, const char* word)
         i32 c = ascii_stricmp(mid_word, word);
         if (c == 0)
             return mid;
+        if (c < 0)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+
+    return -1;
+}
+
+i32 dict_resolve(const DictDB* db, const char* word)
+{
+    // First try direct headword lookup.
+    i32 idx = dict_lookup(db, word);
+    if (idx >= 0)
+        return idx;
+
+    // Not found as a headword — try variant resolution.
+    if (!db || !db->variants || !word || !*word)
+        return -1;
+
+    i32 lo = 0;
+    i32 hi = (i32)db->hdr->variant_count - 1;
+
+    while (lo <= hi)
+    {
+        i32 mid = (lo + hi) / 2;
+        const char* vw = DICT_STR(db, db->variants[mid].variant_stroff);
+        i32 c = ascii_stricmp(vw, word);
+        if (c == 0)
+            return (i32)db->variants[mid].base_word_idx;
         if (c < 0)
             lo = mid + 1;
         else

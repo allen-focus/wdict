@@ -1957,7 +1957,7 @@ static void dict_build_tokens_for_block(WindowContext* wctx, UIBox* text_box, co
         tok->line_index = -1;
         tok->x_on_line = -1.f;
 
-        /* dict_lookup requires null-terminated string */
+        /* dict_resolve requires null-terminated string */
         char lookup_buf[128];
         isize copy_len = word_text.len < 127 ? word_text.len : 127;
         memcpy(lookup_buf, word_text.data, (usize)copy_len);
@@ -1978,7 +1978,7 @@ static void dict_build_tokens_for_block(WindowContext* wctx, UIBox* text_box, co
             copy_len--;
         lookup_buf[copy_len] = '\0';
 
-        i32 idx = dict_lookup(db, lookup_buf);
+        i32 idx = dict_resolve(db, lookup_buf);
         tok->dict_word_idx = (idx >= 0) ? (u32)idx : 0;
     }
 

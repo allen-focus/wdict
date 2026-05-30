@@ -26,6 +26,8 @@ cmake --build build --config release
 
 The application embeds an English–Chinese dictionary as a compressed zstd binary blob (`data/dict.bin.zstd`) via `resource.rc` (`DICT_DATA RCDATA`). At startup, `startup_dict_thread` decompresses it (≈70 ms) into an arena-allocated buffer, then `DictDB` (see `dict.h`) opens it with zero-copy parsing — all pointers point directly into the decompressed memory, requiring no additional heap allocation.
 
+When clicking an inflected word within a definition/example (e.g. "apples", "abandoned"), `dict_resolve()` first looks up the word directly; if not found, it falls back to binary search over a `VariantIndex` section to find the headword.
+
 To compress the dictionary after building:
 ```
 python scripts/compress_dict.py data/dict.bin data/dict.bin.zstd
@@ -33,7 +35,7 @@ python scripts/compress_dict.py data/dict.bin data/dict.bin.zstd
 
 The compressed binary reduces the `.exe` size by ≈67%.
 
-The blob is little-endian and consists of four contiguous sections:
+The blob is little-endian and consists of five contiguous sections (v3+):
 
 ```
 ┌─────────────────────┐  offset 0
@@ -42,6 +44,8 @@ The blob is little-endian and consists of four contiguous sections:
 │  WordIndex[]        │  12 bytes per entry, sorted alphabetically
 ├─────────────────────┤  header.entdata_off
 │  EntryData          │  variable-length EntryBlob per entry, tightly packed
+├─────────────────────┤  header.variant_off (v3+)
+│  VariantIndex[]     │  8 bytes per entry, sorted alphabetically (absent in v2)
 ├─────────────────────┤  header.strpool_off
 │  StringPool         │  all strings null-terminated, offset 0 = empty string
 └─────────────────────┘
@@ -49,15 +53,25 @@ The blob is little-endian and consists of four contiguous sections:
 
 ### FileHeader (32 bytes, packed)
 
-| Offset   | Field          | Type   | Description                |
-| -------- | -------------- | ------ | -------------------------- |
-| 0        | `magic`        | u32    | `0x44494354` ("DICT")      |
-| 4        | `version`      | u32    | `2`                        |
-| 8        | `word_count`   | u32    | Number of word entries     |
-| 12       | `words_off`    | u32    | Byte offset to WordIndex[] |
-| 16       | `entdata_off`  | u32    | Byte offset to EntryData   |
-| 20       | `strpool_off`  | u32    | Byte offset to StringPool  |
-| 24       | `_reserved[2]` | u32    | Reserved, must be 0        |
+| Offset   | Field            | Type   | Description                              |
+| -------- | ---------------- | ------ | ---------------------------------------- |
+| 0        | `magic`          | u32    | `0x44494354` ("DICT")                    |
+| 4        | `version`        | u32    | `3` (v2 → v3: added VariantIndex)        |
+| 8        | `word_count`     | u32    | Number of word entries                   |
+| 12       | `words_off`      | u32    | Byte offset to WordIndex[]               |
+| 16       | `entdata_off`    | u32    | Byte offset to EntryData                 |
+| 20       | `strpool_off`    | u32    | Byte offset to StringPool                |
+| 24       | `variant_off`    | u32    | Byte offset to VariantIndex[] (0 = none) |
+| 28       | `variant_count`  | u32    | Number of DictVariantEntry entries       |
+
+### VariantIndex (8 bytes per entry, sorted alphabetically by variant word)
+
+| Offset | Field            | Type | Description                                           |
+| ------ | ---------------  | ---- | ----------------------------------------------------- |
+| 0      | `variant_stroff` | u32  | Offset into StringPool (null-terminated variant word) |
+| 4      | `base_word_idx`  | u32  | Index into WordIndex[] for the headword entry         |
+
+`dict_resolve()` performs a case-insensitive binary search on this array when `dict_lookup()` fails, enabling inflected form (e.g. "apples") to headword ("apple") resolution.
 
 ### WordIndex (12 bytes per entry, sorted alphabetically by word)
 
@@ -135,7 +149,7 @@ python scripts/build_dict.py <input.json> <output.bin>
 
 ### Expected JSON format
 
-The top-level object maps each headword to its entry:
+The top-level object maps each headword to its entry. An optional `_variant_map` key provides the reverse mapping from inflected form to headword — `build_dict.py` skips it as a word entry and builds the `VariantIndex` binary section from it instead.
 
 ```jsonc
 {
@@ -169,12 +183,37 @@ The top-level object maps each headword to its entry:
 }
 ```
 
+The optional `_variant_map` section maps inflected forms to their headwords:
+
+```jsonc
+{
+  "apple": {
+    "word": "apple",
+    "freq": 42238,
+    "brief_en": ["..."],
+    "brief_zh": ["..."],
+    "pos_node": { ... }
+  },
+  "_variant_map": {
+    "apples": "apple",
+    "abandoned": "abandon",
+    "abandoning": "abandon",
+    "abandons": "abandon",
+    "better": "good",
+    "running": "run",
+    "sang": "sing",
+    ...
+  }
+}
+```
+
 Field notes:
 
 - `freq` — `null` if unknown. Used by `dict_fuzzy_search()` to boost common words.
 - `brief_en` / `brief_zh` — short glosses for quick-lookup UI. May be empty arrays.
 - `pron` — IPA pronunciation string. Empty string if absent.
 - `pos_node` keys — matched to `PosKind` by name (case-sensitive). Unrecognised names become `POS_UNKNOWN` (255).
+- `_variant_map` — `build_dict.py` skips this key and builds the `VariantIndex` binary section from it for runtime `dict_resolve()` lookups.
 
 
 ## License

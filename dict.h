@@ -8,7 +8,7 @@
 //
 
 #define DICT_MAGIC           0x44494354u /* "DICT" */
-#define DICT_VERSION         2u
+#define DICT_VERSION         3u /* v3: added VariantIndex section and dict_resolve() */
 #define DICT_SEARCH_SEP_CHAR ((char)0x01)
 
 //
@@ -53,7 +53,8 @@ typedef struct
     u32 words_off; // → WordIndex[]
     u32 entdata_off; // → EntryData
     u32 strpool_off; // → StringPool
-    u32 _reserved[2];
+    u32 variant_off; // → VariantIndex[] (0 = none)
+    u32 variant_count; // number of DictVariantEntry entries
 } DictFileHeader;
 
 typedef struct
@@ -62,6 +63,12 @@ typedef struct
     u32 entdata_off; // → entdata (EntryBlob start)
     u32 freq; // 0xFFFFFFFF = null
 } DictWordIndex;
+
+typedef struct
+{
+    u32 variant_stroff; // → strpool (null-terminated variant word string)
+    u32 base_word_idx; // index into WordIndex[]
+} DictVariantEntry;
 
 //
 // Runtime zero-copy view of a loaded dictionary blob.
@@ -74,6 +81,7 @@ typedef struct
     const DictWordIndex* words; // [hdr->word_count]
     const u8* entdata; // tightly-packed EntryBlob array
     const char* strpool; // null-terminated concatenated strings
+    const DictVariantEntry* variants; // [hdr->variant_count] (NULL = none)
 } DictDB;
 
 //
@@ -88,6 +96,13 @@ DictDB dict_open(const void* blob);
 // Case-insensitive binary search over the alphabetically-sorted WordIndex.
 // Returns word_idx (0 … hdr->word_count-1) or -1 on miss.
 i32 dict_lookup(const DictDB* db, const char* word);
+
+// Resolve a word to a headword index with variant fallback.
+// 1. tries dict_lookup(word) — if found, returns the word index directly.
+// 2. if not found, binary-searches the VariantIndex for the word,
+//    and returns the base word's index.
+// Returns -1 if neither the word nor any variant mapping matches.
+i32 dict_resolve(const DictDB* db, const char* word);
 
 // Convert a strpool offset to a C string pointer.
 #define DICT_STR(db, off) ((const char*)((db)->strpool + (off)))

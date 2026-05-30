@@ -1,12 +1,13 @@
 """
 build_dict.py — Convert data/dict.json to data/dict.bin
 
-Binary layout (4 sections, little-endian):
+Binary layout (5 sections, little-endian):
 
-  [FileHeader  32 B fixed]
-  [WordIndex[] 12 B per entry, sorted alphabetically by word]
-  [EntryData   variable-length EntryBlob per entry, tightly packed]
-  [StringPool  all strings null-terminated, offset 0 = empty string]
+  [FileHeader    32 B fixed]
+  [WordIndex[]   12 B per entry, sorted alphabetically by word]
+  [EntryData     variable-length EntryBlob per entry, tightly packed]
+  [VariantIndex  8 B per entry, sorted alphabetically by variant word]
+  [StringPool    all strings null-terminated, offset 0 = empty string]
 
 Usage:  python scripts/build_dict.py data/dict.json data/dict.bin
 """
@@ -60,6 +61,9 @@ class Builder:
         #   word_lower  — for case-insensitive sort
         #   word_original — the actual word string to intern
         self._words = []
+
+        # Variant map: {variant_word -> base_word_original}
+        self._variant_map = None
 
     # ── string interning ─────────────────────────────────────────────────
 
@@ -136,6 +140,10 @@ class Builder:
     def build(self, json_path: str, out_path: str):
         data = json.loads(Path(json_path).read_text(encoding='utf-8'))
 
+        # Extract _variant_map before iterating so we don't try to build
+        # an EntryBlob for it.
+        self._variant_map = data.pop('_variant_map', None)
+
         # Phase 1: build all EntryBlobs, collect words.
         for word_original, entry in data.items():
             ent_off = self._build_entry(entry)
@@ -143,6 +151,20 @@ class Builder:
 
         # Phase 2: sort alphabetically by word (case-insensitive).
         self._words.sort(key=lambda x: x[0])
+
+        # Build a lookup from word_original -> sorted WordIndex position.
+        word_index_of = {}
+        for i, (_word_lower, word_original, _ent_off) in enumerate(self._words):
+            word_index_of[word_original] = i
+
+        # Build variant entries: (variant_word, base_word_index).
+        variant_entries = []
+        if self._variant_map:
+            for variant_word, base_word in self._variant_map.items():
+                base_idx = word_index_of.get(base_word)
+                if base_idx is not None:
+                    variant_entries.append((variant_word.lower(), self._intern(variant_word), base_idx))
+            variant_entries.sort(key=lambda x: x[0])
 
         # Phase 3: intern all word strings (after sort so strpool order
         # matches the sorted WordIndex order, keeping word strings together
@@ -156,23 +178,26 @@ class Builder:
             word_entries.append((self._intern(word_original), ent_off, freq))
 
         # Phase 4: compute section offsets and assemble final blob.
-        HDR_SIZE   = 32
-        WORDS_SIZE = len(word_entries) * 12
+        HDR_SIZE       = 32
+        WORDS_SIZE     = len(word_entries) * 12
+        VARIANT_SIZE   = len(variant_entries) * 8
 
-        words_off   = HDR_SIZE
-        entdata_off = words_off + WORDS_SIZE
-        strpool_off = entdata_off + len(self._entdata)
+        words_off       = HDR_SIZE
+        entdata_off     = words_off + WORDS_SIZE
+        variant_off     = entdata_off + len(self._entdata) if VARIANT_SIZE > 0 else 0
+        strpool_off     = (variant_off + VARIANT_SIZE) if VARIANT_SIZE > 0 else entdata_off + len(self._entdata)
 
         # ── Header ──
         out = bytearray()
         out += struct.pack('<IIIIIIII',
-            0x44494354,       # magic "DICT"
-            2,                # version
-            len(word_entries),# word_count
+            0x44494354,               # magic "DICT"
+            3,                        # version (3 = added VariantIndex)
+            len(word_entries),        # word_count
             words_off,
             entdata_off,
             strpool_off,
-            0, 0)             # reserved
+            variant_off,              # → VariantIndex (0 = none)
+            len(variant_entries))     # variant_count
 
         # ── WordIndex[] ──
         for word_stroff, ent_off, freq in word_entries:
@@ -180,6 +205,10 @@ class Builder:
 
         # ── EntryData ──
         out += self._entdata
+
+        # ── VariantIndex[] ──
+        for _variant_lower, variant_stroff, base_idx in variant_entries:
+            out += struct.pack('<II', variant_stroff, base_idx)
 
         # ── StringPool ──
         out += self._strpool
@@ -190,9 +219,11 @@ class Builder:
         # ── Stats ──
         kib = 1024.0
         print(f"Words:      {len(word_entries)}")
+        print(f"Variants:   {len(variant_entries)}")
         print(f"Header:     {HDR_SIZE} B")
         print(f"WordIndex:  {WORDS_SIZE} B ({WORDS_SIZE/kib:.1f} KB)")
         print(f"EntryData:  {len(self._entdata):,} B ({len(self._entdata)/kib:.1f} KB)")
+        print(f"VariantIdx: {VARIANT_SIZE} B ({VARIANT_SIZE/kib:.1f} KB)")
         print(f"StringPool: {len(self._strpool):,} B ({len(self._strpool)/kib:.1f} KB)")
         print(f"  (strings: {len(self._strcache)} unique)")
         print(f"Total:      {len(out):,} B ({len(out)/kib:.1f} KB)")

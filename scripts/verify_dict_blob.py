@@ -8,18 +8,32 @@ if len(sys.argv) != 2:
 with open(sys.argv[1], 'rb') as f:
     blob = f.read()
 
-# ── Parse Header ──
+# ── Parse Header (v3: reserved[2] → variant_off, variant_count) ──
 (magic, version, word_count, words_off,
- entdata_off, strpool_off, r0, r1) = struct.unpack_from('<IIIIIIII', blob, 0)
+ entdata_off, strpool_off, variant_off, variant_count) = struct.unpack_from('<IIIIIIII', blob, 0)
 
 assert magic    == 0x44494354, f'bad magic: 0x{magic:08X}'
-assert version  == 2,          f'bad version: {version}'
-assert r0 == 0 and r1 == 0,    f'reserved non-zero: {r0} {r1}'
+assert version in (2, 3),      f'bad version: {version}'
 assert words_off == 32
-assert entdata_off == 32 + word_count * 12
-assert 0 < entdata_off <= strpool_off < len(blob), 'section misalignment'
 
-print(f'Header OK: {word_count} words, {len(blob)} total bytes')
+if version == 2:
+    assert variant_off == 0 and variant_count == 0, f'v2 reserved non-zero: {variant_off} {variant_count}'
+    assert entdata_off == 32 + word_count * 12
+    assert 0 < entdata_off <= strpool_off < len(blob), 'section misalignment'
+else:
+    # v3: sections are Header | WordIndex | EntryData | [VariantIndex] | StringPool
+    assert 0 <= variant_off < len(blob)
+    if variant_off == 0:
+        assert variant_count == 0
+        assert entdata_off == 32 + word_count * 12
+        assert 0 < entdata_off <= strpool_off < len(blob), 'section misalignment'
+    else:
+        assert variant_count > 0
+        assert variant_off >= entdata_off + 1  # at least past EntryData
+        assert strpool_off == variant_off + variant_count * 8
+        assert 0 < entdata_off <= variant_off < strpool_off < len(blob), 'section misalignment'
+
+print(f'Header OK: {word_count} words, {variant_count} variants, {len(blob)} total bytes')
 
 # ── Parse WordIndex ──
 words = []
@@ -48,6 +62,27 @@ print()
 for w, ws, eo, fr in words[:5]:
     fr_s = 'null' if fr == 0xFFFFFFFF else str(fr)
     print(f'  {w:12s}  ws={ws:4d}  eo={eo:4d}  freq={fr_s}')
+
+# ── Parse VariantIndex (v3 only) ──
+if version >= 3 and variant_count > 0:
+    variant_entries = []
+    for i in range(variant_count):
+        off = variant_off + i * 8
+        vs, bi = struct.unpack_from('<II', blob, off)
+        end = blob.index(b'\x00', strpool_off + vs)
+        variant_word = blob[strpool_off + vs:end].decode('utf-8')
+        assert 0 <= bi < word_count, f'variant[{i}] base_word_idx {bi} out of range'
+        base_word = words[bi][0]
+        variant_entries.append((variant_word, base_word, vs, bi))
+    # Check sorted alphabetically (case-insensitive)
+    for i in range(1, len(variant_entries)):
+        a, b = variant_entries[i-1][0].lower(), variant_entries[i][0].lower()
+        assert a <= b, f'variant index not sorted at i={i}: "{variant_entries[i-1][0]}" > "{variant_entries[i][0]}"'
+    print(f'VariantIndex OK: {variant_count} entries, sorted')
+    for vw, bw, vs, bi in variant_entries[:5]:
+        print(f'  {vw:15s} → {bw:12s}  (idx={bi})')
+else:
+    print(f'\nVariantIndex: none (version={version})')
 
 # ── EntryBlob reader helpers ──
 def rd_u8(pos):
