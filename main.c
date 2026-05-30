@@ -3977,6 +3977,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             b32 shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
             b32 alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
 
+            if (wparam == VK_F4 && alt && message == WM_SYSKEYDOWN)
+            {
+                if (shared && ctx)
+                    DestroyWindow(window);
+                return 0;
+            }
+
             if (wparam == VK_ESCAPE)
             {
                 /* Close open overlays before destroying the window */
