@@ -893,10 +893,10 @@ static void cmd_split_panel_h(void* userdata, String cmd_text)
     if (p && panel_split(p, Axis2_Y, True))
     {
         /* The split panel is now an internal node — redirect any window
-           that had it focused to child_a (which inherited the original tabs). */
+           that had it focused to child_b (the new empty panel). */
         for (WindowContext* w = shared->first_window; w; w = w->next)
             if (w->focused_panel == p)
-                w->focused_panel = p->child_a;
+                w->focused_panel = p->child_b;
     }
 }
 
@@ -910,7 +910,7 @@ static void cmd_split_panel_v(void* userdata, String cmd_text)
     {
         for (WindowContext* w = shared->first_window; w; w = w->next)
             if (w->focused_panel == p)
-                w->focused_panel = p->child_a;
+                w->focused_panel = p->child_b;
     }
 }
 
@@ -972,7 +972,8 @@ static void cmd_tab_new(void* userdata, String cmd_text)
         u8 name_buf[PANEL_TAB_NAME_MAX];
         isize name_len;
         panel_tab_generate_default_name(rt.panel, name_buf, sizeof(name_buf), &name_len);
-        panel_tab_declare(rt.panel, (String){ name_buf, name_len });
+        PanelTab* tab = panel_tab_declare(rt.panel, (String){ name_buf, name_len });
+        panel_tab_activate(rt.panel, tab);
     }
 }
 
@@ -2175,9 +2176,10 @@ static void render_dict_pos_selector(void* userdata)
     AppShared* shared = ctx->shared;
     const Theme* theme = &shared->theme;
 
-    if (ctx->dict_pos_count <= 1)
+    if (ctx->dict_pos_count <= 1 || !ctx->dict_content_active)
         return;
 
+    // spacer
     ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) } }));
 
     for (u8 i = 0; i < ctx->dict_pos_count; i++)
@@ -3014,7 +3016,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
     AppShared* shared = ctx->shared;
     const Theme* theme = &shared->theme;
 
-    ctx->dict_content_active = False;
+    ctx->dict_pos_count = 0;
     ctx->dict_word_block_count = 0;
     ctx->dict_word_total_tokens = 0;
     ctx->dict_word_blocks = NULL;
@@ -3047,6 +3049,8 @@ static void panel_container(WindowContext* ctx, const Rect rect)
         /* Only handle leaf nodes. Internal nodes are not real UI containers and should be skipped */
         if (p->child_a)
             continue;
+
+        ctx->dict_pos_count = 0;
 
         /* Pre-compute panel rect and reserve space for window caption buttons.
            Only the top-right leaf panel needs the right inset, otherwise tabs would
@@ -3126,6 +3130,12 @@ static void panel_container(WindowContext* ctx, const Rect rect)
         if (touches_top && ctx->decoration_spacer_count < 16)
             ctx->decoration_spacer_rects[ctx->decoration_spacer_count++] = panel.tab_bar_spacer_rect;
         Assert(ctx->decoration_spacer_count <= ctx->decoration_spacer_count);
+    }
+
+    /* Derive dict_content_active from the focused panel's active tab */
+    {
+        PanelTab* active = panel_tab_get_active(ctx->focused_panel);
+        ctx->dict_content_active = (active && active->render_fn == render_dict_content);
     }
 
     /* Draw panel boundary */
