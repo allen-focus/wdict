@@ -1103,6 +1103,16 @@ static void cmd_window_create(void* userdata, String cmd_text)
     create_window((AppShared*)userdata, L"Window", pos_x, pos_y, w, h, True);
 }
 
+static void cmd_window_destroy(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    WindowContext* ctx = find_window_by_id(shared, window_id);
+    if (!ctx)
+        return;
+    DestroyWindow(ctx->window);
+}
+
 static void cmd_toggle_theme(void* userdata, String cmd_text)
 {
     (void)cmd_text;
@@ -2691,13 +2701,19 @@ static void decoration_overlay(WindowContext* ctx)
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+N"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to create new window"), &hint_text_cfg);
+                ui_text(str(" to create window"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+W"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to destroy window"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to close window (The last window will be hidden to the system tray)"), &hint_text_cfg);
+                ui_text(str(" to destroy window (The last will be hidden to the system tray)"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
 
@@ -2740,13 +2756,13 @@ static void decoration_overlay(WindowContext* ctx)
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+T"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to create new tab"), &hint_text_cfg);
+                ui_text(str(" to create tab"), &hint_text_cfg);
                 ui_box_end(cnt);
                 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+W"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to close current tab"), &hint_text_cfg);
+                ui_text(str(" to destroy tab"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
@@ -2758,7 +2774,7 @@ static void decoration_overlay(WindowContext* ctx)
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("5. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+Alt+H/L"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to move current tab to left/right"), &hint_text_cfg);
+                ui_text(str(" to move tab to left/right"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
 
@@ -4907,6 +4923,7 @@ i32 WinMainCRTStartup()
     {
         /* Register commands */
         cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_window_create,          &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("window.destroy"),         str("Close Window"),             str(""), cmd_window_destroy,         &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("menu.toggle"),            str("Toggle Menu Popup"),        str(""), cmd_toggle_menu,            &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.close"),          str("Close Search Palette"),     str(""), cmd_close_palette,          &shared });
@@ -4937,6 +4954,7 @@ i32 WinMainCRTStartup()
 
         /* Bind shortcuts */
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT,                    'N' },          str("window.create"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT,                    'W' },          str("window.destroy"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                                         'T' },          str("tab.new"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                                         'W' },          str("tab.close"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,                     VK_OEM_MINUS }, str("panel.split_h"));
