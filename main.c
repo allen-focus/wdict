@@ -7,6 +7,7 @@
 #include "cmd.h"
 #include "dict.h"
 #include "glyph_cache.h"
+#include "overlay_dcomp.h"
 #include "panel.h"
 #include "renderer.h"
 #include "search.h"
@@ -246,6 +247,9 @@ struct WindowContext
     wchar_t title[MAX_TITLE_LENGTH];
     UIContext ui;
     Renderer renderer;
+    IDCompositionDevice* dcomp_device;
+    IDCompositionTarget* dcomp_target;
+    IDCompositionVisual* dcomp_visual;
     AppShared* shared;
     WindowContext* next;
     u32 id;
@@ -347,7 +351,7 @@ static const Theme s_theme_light = {
     .border           = rgba(192, 191, 188, 255),
     .scrollbar_thumb  = rgba(94,  92,  100, 80 ),
     .scrollbar_track  = rgba(192, 191, 188, 80 ),
-    .shadow           = rgba(205, 205, 207, 255),
+    .shadow           = rgba(192, 191, 188, 255),
 
     /* specific */
     .bar_bg           = rgba(228, 227, 227, 255),
@@ -401,7 +405,7 @@ static const Theme s_theme_dark = {
     .border           = rgba(94,  92,  100, 255),
     .scrollbar_thumb  = rgba(192, 191, 188, 80 ),
     .scrollbar_track  = rgba(94,  92,  100, 80 ),
-    .shadow           = rgba(0,   0,   0,   255),
+    .shadow           = rgba(34,  34,  38,  255),
 
     /* specific */
     .bar_bg           = rgba(55,  55,  55,  255),
@@ -644,8 +648,9 @@ static WindowContext* create_quick_search_window(AppShared* shared)
     i32 pos_x = (screen_w - (i32)physical_w) / 2;
     i32 pos_y = (screen_h - (i32)physical_h) / 2;
 
-    ctx->window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"window class", L"", WS_POPUP, pos_x, pos_y,
-                                  (i32)physical_w, (i32)physical_h, NULL, NULL, GetModuleHandleW(NULL), ctx);
+    ctx->window =
+        CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"window class", L"", WS_POPUP,
+                        pos_x, pos_y, (i32)physical_w, (i32)physical_h, NULL, NULL, GetModuleHandleW(NULL), ctx);
     if (!ctx->window)
     {
         free(ctx);
@@ -659,7 +664,7 @@ static WindowContext* create_quick_search_window(AppShared* shared)
 
     /* Init UI context */
     UIRenderFunc render_fn = {
-        .flush_and_present = renderer_flush_and_present,
+        .flush_and_present = renderer_flush_overlay_and_present,
         .on_resize = renderer_resize,
         .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
         .get_text_width = renderer_get_text_width_for_dpi,
@@ -673,8 +678,16 @@ static WindowContext* create_quick_search_window(AppShared* shared)
     ctx->ui.clipboard_copy = win32_clipboard_copy;
     ctx->ui.clipboard_paste = win32_clipboard_paste;
 
+    /* Configure renderer for DComp composition (must be set before renderer_init — see memset trap) */
+    ctx->renderer.is_composition = True;
+    ctx->renderer.initial_width = physical_w;
+    ctx->renderer.initial_height = physical_h;
+
     /* Init per-window renderer */
     renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
+
+    /* Init DComp device + visual tree */
+    renderer_init_dcomp(&ctx->renderer, ctx->window, &ctx->dcomp_device, &ctx->dcomp_target, &ctx->dcomp_visual);
 
     /* Init palette text edit state */
     ctx->palette_text_edit.base = ctx->palette_text_buf;
@@ -3132,7 +3145,7 @@ static void search_palette_render(WindowContext* ctx)
                         // clang-format on
                         ui_text(label, &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                                       .font_size = 10.f,
-                                                      .color = theme->accent_weak_fg });
+                                                      .color = theme->hover_fg });
                     }
                     ui_box_end(indicator);
                 }
@@ -3412,7 +3425,7 @@ static void search_palette_render(WindowContext* ctx)
                     {
                         ui_text(str("No matches"), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                                                   .font_size = 12.f,
-                                                                  .color = theme->accent_weak_fg });
+                                                                  .color = theme->hover_fg });
                     }
                     ui_box_end(no_match_row);
                 }
@@ -3595,11 +3608,12 @@ static void process_frame(WindowContext* ctx)
         isize arena_pos = ui_frame_begin(&ctx->ui);
         UIBox* root = ui_box_begin(&(BoxConfig){
             .sizing = { fixed(client_w), fixed(client_h) },
-            .color = shared->theme.palette_bg,
         });
         search_palette_render(ctx);
         ui_box_end(root);
         ui_frame_end(arena_pos);
+        if (ctx->dcomp_device)
+            IDCompositionDevice_Commit(ctx->dcomp_device);
 
         if (!ctx->palette_popup.open)
         {
@@ -4819,6 +4833,24 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     shared->quick_search_window = NULL;
                 }
                 ui_deinit(&ctx->ui);
+                if (ctx->is_quick_search)
+                {
+                    if (ctx->dcomp_visual)
+                    {
+                        IDCompositionVisual_Release(ctx->dcomp_visual);
+                        ctx->dcomp_visual = NULL;
+                    }
+                    if (ctx->dcomp_target)
+                    {
+                        IDCompositionTarget_Release(ctx->dcomp_target);
+                        ctx->dcomp_target = NULL;
+                    }
+                    if (ctx->dcomp_device)
+                    {
+                        IDCompositionDevice_Release(ctx->dcomp_device);
+                        ctx->dcomp_device = NULL;
+                    }
+                }
                 renderer_deinit(&ctx->renderer);
                 arena_release(&ctx->dict_token_arena);
                 free(ctx);

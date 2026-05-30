@@ -223,6 +223,22 @@ float roundedBoxShadow(float2 lower, float2 upper, float2 pixel, float sigma, fl
 }
 
 //
+// sRGB encoding (for composition path, where RTV is non-sRGB UNORM)
+//
+
+float linear_to_srgb_channel(float x)
+{
+    if (x <= 0.0031308f)
+        return 12.92f * x;
+    return 1.055f * pow(abs(x), 1.0f / 2.4f) - 0.055f;
+}
+
+float3 linear_to_srgb(float3 c)
+{
+    return float3(linear_to_srgb_channel(c.r), linear_to_srgb_channel(c.g), linear_to_srgb_channel(c.b));
+}
+
+//
 // pixel shader
 //
 
@@ -244,14 +260,22 @@ float4 ps(PS_INPUT input) : SV_TARGET
     if (input.is_text == 1.0)
     {
         float text_alpha = input.color.a * glyph_texture_grayscale_ratio;
+#ifdef COMPOSITION_PATH
+        return float4(linear_to_srgb(input.color.rgb) * text_alpha, text_alpha);
+#else
         return float4(input.color.rgb, text_alpha);
+#endif
     }
 
     // If the pixel is completely inside, skip subsequent corner‑radius and shadow calculations.
     float2 d = abs(input.position.xy - input.original_rect_center)
                - input.original_rect_half_size + max(input.corner_radius, input.border_thickness);
     if (d.x < -1.0 && d.y < -1.0)
+#ifdef COMPOSITION_PATH
+        return float4(linear_to_srgb(input.color.rgb) * input.color.a, input.color.a);
+#else
         return input.color;
+#endif
 
     // SDF-based rounded rectangle generation
     float2 distance_to_shrunk_corner = calculate_distance_to_shrunk_corner(
@@ -310,8 +334,13 @@ float4 ps(PS_INPUT input) : SV_TARGET
     float effective_shadow_alpha = shadow_alpha * input.shadow_color.a;
     float3 composed_rgb_linear = base_alpha * base_linear + effective_shadow_alpha * shadow_color * (1.0 - base_alpha);
     float composed_alpha = base_alpha + effective_shadow_alpha * (1.0 - base_alpha);
+    float3 straight_linear = composed_rgb_linear / max(composed_alpha, 1e-6);
 
     // Handle premultiplied alpha
-    float3 final_srgb = composed_rgb_linear / max(composed_alpha, 1e-6);
-    return float4(final_srgb, composed_alpha);
+#ifdef COMPOSITION_PATH
+    float3 straight_srgb = linear_to_srgb(straight_linear);
+    return float4(straight_srgb * composed_alpha, composed_alpha);
+#else
+    return float4(straight_linear, composed_alpha);
+#endif
 }

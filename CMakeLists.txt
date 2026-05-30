@@ -77,6 +77,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 #
 
 target_link_options(${PROJECT_NAME} PRIVATE
+    dcomp.lib
     $<$<CONFIG:Debug>:/SUBSYSTEM:WINDOWS>
     $<$<CONFIG:Profile>:/SUBSYSTEM:WINDOWS>
     $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS /FIXED /INCREMENTAL:NO /OPT:ICF /OPT:REF>
@@ -139,6 +140,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
         OUTPUT
             "${SHADER_DIR}/d3d11_vshader.h"
             "${SHADER_DIR}/d3d11_pshader.h"
+            "${SHADER_DIR}/d3d11_pshader_comp.h"
             "${SHADER_STAMP}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_DIR}"
         COMMAND fxc.exe ${FXC_FLAGS} /T vs_5_0 /E vs
@@ -146,6 +148,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
                 "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl"
         COMMAND fxc.exe ${FXC_FLAGS} /T ps_5_0 /E ps
                 /Fh "${SHADER_DIR}/d3d11_pshader.h" /Vn d3d11_pshader
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl"
+        COMMAND fxc.exe ${FXC_FLAGS} /T ps_5_0 /E ps /D COMPOSITION_PATH=1
+                /Fh "${SHADER_DIR}/d3d11_pshader_comp.h" /Vn d3d11_pshader_comp
                 "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl"
         COMMAND ${CMAKE_COMMAND} -E touch "${SHADER_STAMP}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl"

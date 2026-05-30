@@ -95,6 +95,7 @@ if exist "shader.hlsl" (
     if not exist shaders (mkdir shaders)
     fxc.exe /nologo /T vs_5_0 /E vs /O3 /WX /Zpc /Ges /Fh shaders/d3d11_vshader.h /Vn d3d11_vshader /Qstrip_reflect /Qstrip_debug /Qstrip_priv shader.hlsl
     fxc.exe /nologo /T ps_5_0 /E ps /O3 /WX /Zpc /Ges /Fh shaders/d3d11_pshader.h /Vn d3d11_pshader /Qstrip_reflect /Qstrip_debug /Qstrip_priv shader.hlsl
+    fxc.exe /nologo /T ps_5_0 /E ps /D COMPOSITION_PATH=1 /O3 /WX /Zpc /Ges /Fh shaders/d3d11_pshader_comp.h /Vn d3d11_pshader_comp /Qstrip_reflect /Qstrip_debug /Qstrip_priv shader.hlsl
 )
 
 :: ---------------------------------------------------------

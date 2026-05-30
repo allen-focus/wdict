@@ -2,6 +2,7 @@
 #pragma comment(lib, "dxguid")
 #pragma comment(lib, "dxgi")
 #pragma comment(lib, "d3dcompiler")
+#pragma comment(lib, "dcomp.lib")
 
 #define COBJMACROS
 #include <d3d11.h>
@@ -11,10 +12,13 @@
 #include <stdio.h>
 #include <windows.h>
 
+#define DCOMP_INITGUID
 #include "glyph_cache.h"
 #include "math.h"
+#include "overlay_dcomp.h"
 #include "renderer.h"
 #include "shaders/d3d11_pshader.h"
+#include "shaders/d3d11_pshader_comp.h"
 #include "shaders/d3d11_vshader.h"
 #include "utils.h"
 
@@ -100,6 +104,11 @@ void renderer_shared_init(RendererShared* shared)
                                                        .BlendOpAlpha = D3D11_BLEND_OP_ADD,
                                                        .RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL } };
         ID3D11Device_CreateBlendState(shared->device, &desc, &shared->blend_state);
+
+        /* Premultiplied blend for DComp composition path */
+        desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+        desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+        ID3D11Device_CreateBlendState(shared->device, &desc, &shared->blend_state_premul);
     }
 
     /* Create input layout, vertex shader, pixel shader */
@@ -126,6 +135,8 @@ void renderer_shared_init(RendererShared* shared)
                                         &shared->vertex_shader);
         ID3D11Device_CreatePixelShader(shared->device, d3d11_pshader, sizeof(d3d11_pshader), NULL,
                                        &shared->pixel_shader);
+        ID3D11Device_CreatePixelShader(shared->device, d3d11_pshader_comp, sizeof(d3d11_pshader_comp), NULL,
+                                       &shared->pixel_shader_comp);
         ID3D11Device_CreateInputLayout(shared->device, desc, ARRAYSIZE(desc), d3d11_vshader, sizeof(d3d11_vshader),
                                        &shared->layout);
     }
@@ -150,8 +161,10 @@ void renderer_shared_deinit(RendererShared* shared)
     ID3D11InputLayout_Release(shared->layout);
     ID3D11VertexShader_Release(shared->vertex_shader);
     ID3D11PixelShader_Release(shared->pixel_shader);
+    ID3D11PixelShader_Release(shared->pixel_shader_comp);
     ID3D11SamplerState_Release(shared->sampler_state);
     ID3D11BlendState_Release(shared->blend_state);
+    ID3D11BlendState_Release(shared->blend_state_premul);
     ID3D11DeviceContext_Release(shared->context);
     ID3D11Device_Release(shared->device);
     memset(shared, 0, sizeof(*shared));
@@ -159,7 +172,14 @@ void renderer_shared_deinit(RendererShared* shared)
 
 void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window)
 {
+    b32 is_comp = renderer->is_composition;
+    u32 init_w = renderer->initial_width;
+    u32 init_h = renderer->initial_height;
+
     memset(renderer, 0, sizeof(*renderer));
+    renderer->is_composition = is_comp;
+    renderer->initial_width = init_w;
+    renderer->initial_height = init_h;
     renderer->shared = shared;
 
     /* Allocate vertex and clip arrays from a dedicated arena */
@@ -194,20 +214,31 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
             IDXGIDevice_Release(dxgi_device);
         }
         DXGI_SWAP_CHAIN_DESC1 desc = {
-            .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+            .Width = renderer->is_composition ? renderer->initial_width : 0,
+            .Height = renderer->is_composition ? renderer->initial_height : 0,
+            .Format = renderer->is_composition ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM,
+            .AlphaMode = renderer->is_composition ? DXGI_ALPHA_MODE_PREMULTIPLIED : DXGI_ALPHA_MODE_UNSPECIFIED,
             .SampleDesc = { 1, 0 },
             .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
             .BufferCount = 2,
-            .Scaling = DXGI_SCALING_NONE,
+            .Scaling = renderer->is_composition ? DXGI_SCALING_STRETCH : DXGI_SCALING_NONE,
             .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
             .Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT,
         };
+        if (renderer->is_composition)
+        {
+            IDXGIFactory2_CreateSwapChainForComposition(factory, (IUnknown*)shared->device, &desc, NULL,
+                                                        &renderer->swapchain);
+        }
+        else
+        {
 #if !defined(NDEBUG) || defined(TRACY_ENABLE)
-        desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING,
+            desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 #endif
             IDXGIFactory2_CreateSwapChainForHwnd(factory, (IUnknown*)shared->device, window, &desc, NULL, NULL,
                                                  &renderer->swapchain);
-        IDXGIFactory_MakeWindowAssociation(factory, window, DXGI_MWA_NO_ALT_ENTER);
+            IDXGIFactory_MakeWindowAssociation(factory, window, DXGI_MWA_NO_ALT_ENTER);
+        }
         IDXGIFactory2_Release(factory);
         IDXGISwapChain1_QueryInterface(renderer->swapchain, &IID_IDXGISwapChain2, (void**)&renderer->swapchain2);
         renderer->frame_latency_waitable_object = IDXGISwapChain2_GetFrameLatencyWaitableObject(renderer->swapchain2);
@@ -217,7 +248,8 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     {
         ID3D11Texture2D* texture;
         IDXGISwapChain1_GetBuffer(renderer->swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
-        D3D11_RENDER_TARGET_VIEW_DESC desc = { .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+        D3D11_RENDER_TARGET_VIEW_DESC desc = { .Format = renderer->is_composition ? DXGI_FORMAT_B8G8R8A8_UNORM
+                                                                                  : DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
                                                .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D };
         ID3D11Device_CreateRenderTargetView(shared->device, (ID3D11Resource*)texture, &desc,
                                             &renderer->render_target_view);
@@ -280,6 +312,29 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
         };
         ID3D11Device_CreateBuffer(shared->device, &desc, NULL, &renderer->clip_rect_buffer);
     }
+}
+
+void renderer_init_dcomp(Renderer* renderer, HWND window, void** out_device, void** out_target, void** out_visual)
+{
+    IDXGIDevice* dxgi_device;
+    ID3D11Device_QueryInterface(renderer->shared->device, &IID_IDXGIDevice, (void**)&dxgi_device);
+
+    IDCompositionDevice* dcomp_device = NULL;
+    DCompositionCreateDevice(dxgi_device, &IID_IDCompositionDevice, (void**)&dcomp_device);
+    IDXGIDevice_Release(dxgi_device);
+
+    IDCompositionTarget* dcomp_target = NULL;
+    IDCompositionDevice_CreateTargetForHwnd(dcomp_device, window, TRUE, &dcomp_target);
+
+    IDCompositionVisual* dcomp_visual = NULL;
+    IDCompositionDevice_CreateVisual(dcomp_device, &dcomp_visual);
+    IDCompositionVisual_SetContent(dcomp_visual, (IUnknown*)renderer->swapchain);
+    IDCompositionTarget_SetRoot(dcomp_target, dcomp_visual);
+    IDCompositionDevice_Commit(dcomp_device);
+
+    *out_device = dcomp_device;
+    *out_target = dcomp_target;
+    *out_visual = dcomp_visual;
 }
 
 static void renderer_upload_glyph(Renderer* renderer, u16 atlas_x, u16 atlas_y, u32 w, u32 h)
@@ -419,11 +474,11 @@ void renderer_flush_and_present(Renderer* renderer, const u32 client_width, cons
     ID3D11DeviceContext_VSSetShader(s->context, s->vertex_shader, NULL, 0);
     ID3D11DeviceContext_PSSetConstantBuffers(s->context, 1, 1, &renderer->clip_rect_buffer);
     ID3D11DeviceContext_RSSetViewports(s->context, 1, &viewport);
-    ID3D11DeviceContext_PSSetShader(s->context, s->pixel_shader, NULL, 0);
+    ID3D11DeviceContext_PSSetShader(s->context, renderer->is_composition ? s->pixel_shader_comp : s->pixel_shader, NULL, 0);
     ID3D11DeviceContext_PSSetShaderResources(s->context, 0, 1, &renderer->glyph_atlas_shader_resource_view);
     ID3D11DeviceContext_PSSetSamplers(s->context, 0, 1, &s->sampler_state);
     ID3D11DeviceContext_OMSetRenderTargets(s->context, 1, &renderer->render_target_view, NULL);
-    ID3D11DeviceContext_OMSetBlendState(s->context, s->blend_state, NULL, 0xffffffff);
+    ID3D11DeviceContext_OMSetBlendState(s->context, renderer->is_composition ? s->blend_state_premul : s->blend_state, NULL, 0xffffffff);
     ID3D11DeviceContext_DrawInstanced(s->context, 4, renderer->vertex_cache.count, 0, 0);
     // clang-format on
 
@@ -446,6 +501,53 @@ void renderer_flush_and_present(Renderer* renderer, const u32 client_width, cons
     TracyCZoneEnd(ctx_flush);
 }
 
+void renderer_flush_overlay_and_present(Renderer* renderer, const u32 client_width, const u32 client_height)
+{
+    map_vertex_buffer(renderer);
+    map_clip_rects_to_cbuffer(renderer);
+    map_mvp_to_cbuffer(renderer, client_width, client_height);
+
+    D3D11_VIEWPORT viewport = {
+        .TopLeftX = 0,
+        .TopLeftY = 0,
+        .Width = (FLOAT)client_width,
+        .Height = (FLOAT)client_height,
+        .MinDepth = 0,
+        .MaxDepth = 1,
+    };
+
+    f32 color[4] = { 0, 0, 0, 0 };
+    ID3D11DeviceContext_ClearRenderTargetView(renderer->shared->context, renderer->render_target_view, color);
+
+    // clang-format off
+    RendererShared* s = renderer->shared;
+    u32 stride = sizeof(Vertex);
+    u32 offset = 0;
+    ID3D11DeviceContext_IASetInputLayout(s->context, s->layout);
+    ID3D11DeviceContext_IASetPrimitiveTopology(s->context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->vertex_buffer, &stride, &offset);
+    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->vertex_buffer, &stride, &offset);
+    ID3D11DeviceContext_VSSetConstantBuffers(s->context, 0, 1, &renderer->mvp_buffer);
+    ID3D11DeviceContext_VSSetShader(s->context, s->vertex_shader, NULL, 0);
+    ID3D11DeviceContext_PSSetConstantBuffers(s->context, 1, 1, &renderer->clip_rect_buffer);
+    ID3D11DeviceContext_RSSetViewports(s->context, 1, &viewport);
+    ID3D11DeviceContext_PSSetShader(s->context, renderer->is_composition ? s->pixel_shader_comp : s->pixel_shader, NULL, 0);
+    ID3D11DeviceContext_PSSetShaderResources(s->context, 0, 1, &renderer->glyph_atlas_shader_resource_view);
+    ID3D11DeviceContext_PSSetSamplers(s->context, 0, 1, &s->sampler_state);
+    ID3D11DeviceContext_OMSetRenderTargets(s->context, 1, &renderer->render_target_view, NULL);
+    ID3D11DeviceContext_OMSetBlendState(s->context, renderer->is_composition ? s->blend_state_premul : s->blend_state, NULL, 0xffffffff);
+    ID3D11DeviceContext_DrawInstanced(s->context, 4, renderer->vertex_cache.count, 0, 0);
+    // clang-format on
+
+    IDXGISwapChain1_Present(renderer->swapchain, False, 0);
+
+    memset(renderer->vertex_cache.data, 0, sizeof(Vertex) * VERTEX_CAPACITY);
+    renderer->vertex_cache.count = 0;
+    memset(renderer->clip_cache.rects, 0, sizeof(Rect) * CLIP_RECT_CAPACITY);
+    renderer->clip_cache.current_index = 0;
+    renderer->clip_cache.count = 0;
+}
+
 //
 // swapchain resize
 //
@@ -461,14 +563,16 @@ void renderer_resize(Renderer* renderer, const u32 client_width, const u32 clien
     /* Resize swapchain */
     u32 flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 #if !defined(NDEBUG) || defined(TRACY_ENABLE)
-    flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    if (!renderer->is_composition)
+        flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 #endif
     IDXGISwapChain1_ResizeBuffers(renderer->swapchain, 0, client_width, client_height, DXGI_FORMAT_UNKNOWN, flags);
 
     /* Create render target view for new backbuffer texture */
     ID3D11Texture2D* texture;
     IDXGISwapChain1_GetBuffer(renderer->swapchain, 0, &IID_ID3D11Texture2D, (void**)&texture);
-    D3D11_RENDER_TARGET_VIEW_DESC desc = { .Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+    D3D11_RENDER_TARGET_VIEW_DESC desc = { .Format = renderer->is_composition ? DXGI_FORMAT_B8G8R8A8_UNORM
+                                                                              : DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
                                            .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D };
     ID3D11Device_CreateRenderTargetView(renderer->shared->device, (ID3D11Resource*)texture, &desc,
                                         &renderer->render_target_view);

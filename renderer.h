@@ -54,9 +54,11 @@ typedef struct RendererShared
     ID3D11DeviceContext* context;
     ID3D11SamplerState*  sampler_state;
     ID3D11BlendState*    blend_state;
+    ID3D11BlendState*    blend_state_premul;
     ID3D11InputLayout*   layout;
     ID3D11VertexShader*  vertex_shader;
     ID3D11PixelShader*   pixel_shader;
+    ID3D11PixelShader*   pixel_shader_comp;
 } RendererShared;
 // clang-format on
 
@@ -78,6 +80,9 @@ typedef struct Renderer
     AtlasGlyphMap             atlas_map;
     RendererShared*           shared;
     Arena                     arena;
+    b32                       is_composition;
+    u32                       initial_width;
+    u32                       initial_height;
 } Renderer;
 // clang-format on
 
@@ -87,11 +92,13 @@ void renderer_shared_init(RendererShared* shared);
 void renderer_shared_deinit(RendererShared* shared);
 
 void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window);
+void renderer_init_dcomp(Renderer* renderer, HWND window, void** out_device, void** out_target, void** out_visual);
 void renderer_deinit(Renderer* renderer);
 void renderer_resize(Renderer* renderer, const u32 client_width, const u32 client_height);
 void renderer_recreate_glyph_atlas_texture(Renderer* renderer);
 void renderer_wait_for_last_submitted_frame(Renderer* renderer);
 void renderer_flush_and_present(Renderer* renderer, const u32 client_width, const u32 client_height);
+void renderer_flush_overlay_and_present(Renderer* renderer, const u32 client_width, const u32 client_height);
 
 f32 renderer_get_text_width_for_dpi(Renderer* renderer, GlyphRasterCache* raster_cache, const String text,
                                     const Font* font, const f32 font_size, const u32 dpi);
