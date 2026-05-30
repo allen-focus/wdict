@@ -887,11 +887,27 @@ static PanelTab* find_tab_globally(AppShared* shared, u32 window_id, u32 tab_id)
 // Command
 //
 
-static void cmd_create_window(void* userdata, String cmd_text)
+static void cmd_window_create(void* userdata, String cmd_text)
 {
     u32 w = cmd_parse_u32(cmd_text, str("w"), CLIENT_WIDTH);
     u32 h = cmd_parse_u32(cmd_text, str("h"), CLIENT_HEIGHT);
-    create_window((AppShared*)userdata, L"Window", CW_USEDEFAULT, CW_USEDEFAULT, w, h, True);
+    i32 pos_x = CW_USEDEFAULT;
+    i32 pos_y = CW_USEDEFAULT;
+    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
+    if (window_id)
+    {
+        WindowContext* ctx = find_window_by_id((AppShared*)userdata, window_id);
+        if (ctx)
+        {
+            RECT r;
+            if (GetWindowRect(ctx->window, &r))
+            {
+                pos_x = r.left + 50;
+                pos_y = r.top + 75;
+            }
+        }
+    }
+    create_window((AppShared*)userdata, L"Window", pos_x, pos_y, w, h, True);
 }
 
 static void cmd_toggle_theme(void* userdata, String cmd_text)
@@ -2477,10 +2493,18 @@ static void decoration_overlay(WindowContext* ctx)
             UIBox* cnt = NULL;
             UIBox* box = NULL;
 
+            /// window ---------------------------
+
+            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+            ui_text(str("Window: "), &hint_text_cfg);
+            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+n"), &hint_text_cfg); ui_box_end(box);
+            ui_text(str(" to create new window"), &hint_text_cfg);
+            ui_box_end(cnt);
+
             cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
             ui_text(str("Window: "), &hint_text_cfg);
             box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to close"), &hint_text_cfg);
+            ui_text(str(" to close (The last window will be hidden to the system tray)"), &hint_text_cfg);
             ui_box_end(cnt);
 
             cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
@@ -2493,7 +2517,7 @@ static void decoration_overlay(WindowContext* ctx)
             ui_text(str(" "), &hint_text_cfg);
             ui_box_end(cnt);
 
-            ///
+            /// panel ----------------------------
 
             cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
             ui_text(str("Panel: "), &hint_text_cfg);
@@ -2511,7 +2535,7 @@ static void decoration_overlay(WindowContext* ctx)
             ui_text(str(" "), &hint_text_cfg);
             ui_box_end(cnt);
 
-            ///
+            /// search palette -------------------
 
             cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
             ui_text(str("Search Palette: "), &hint_text_cfg);
@@ -2539,7 +2563,7 @@ static void decoration_overlay(WindowContext* ctx)
             ui_text(str(" "), &hint_text_cfg);
             ui_box_end(cnt);
 
-            ///
+            /// focused dictionary ---------------
 
             cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
             ui_text(str("Focused Dictionary: "), &hint_text_cfg);
@@ -4495,7 +4519,7 @@ i32 WinMainCRTStartup()
     // clang-format off
     {
         /* Register commands */
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_create_window,          &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_window_create,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("menu.toggle"),            str("Toggle Menu Popup"),        str(""), cmd_toggle_menu,            &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.toggle"),         str("Toggle Search Palette"),    str(""), cmd_toggle_palette,         &shared });
@@ -4524,13 +4548,13 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.open_word"),         str("Open Word in Tab"),          str(""), cmd_tab_open_word,          &shared });
 
         /* Bind shortcuts */
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },          str("window.create"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },          str("tab.new"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'W' },          str("tab.close"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  VK_OEM_MINUS }, str("panel.split_h"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  VK_OEM_PLUS },  str("panel.split_v"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'H' },          str("tab.move delta=-1"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'L' },          str("tab.move delta=+1"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },          str("tab.move_to_panel"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },          str("tab.to_new_panel axis=X"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },          str("tab.to_new_panel axis=Y"));
         shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      VK_TAB },       str("panel.focus_next"));
