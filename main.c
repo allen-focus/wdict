@@ -1786,6 +1786,22 @@ static void dict_build_tokens_for_block(WindowContext* wctx, UIBox* text_box, co
         isize copy_len = word_text.len < 127 ? word_text.len : 127;
         memcpy(lookup_buf, word_text.data, (usize)copy_len);
         lookup_buf[copy_len] = '\0';
+
+        /* Strip leading/trailing punctuation so "apple." → "apple" */
+        const char* start = lookup_buf;
+        while (*start && strchr("\"'([{-", *start))
+            start++;
+        if (start > lookup_buf)
+        {
+            isize remain = (isize)strlen(start);
+            memmove(lookup_buf, start, (usize)remain);
+            lookup_buf[remain] = '\0';
+            copy_len = remain;
+        }
+        while (copy_len > 0 && strchr(".,!?;:\"')]}-", lookup_buf[copy_len - 1]))
+            copy_len--;
+        lookup_buf[copy_len] = '\0';
+
         i32 idx = dict_lookup(db, lookup_buf);
         tok->dict_word_idx = (idx >= 0) ? (u32)idx : 0;
     }
