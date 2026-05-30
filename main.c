@@ -1700,9 +1700,9 @@ static f32 dict_freq_weight(const void* entry, f32 raw)
 }
 
 static const char* s_pos_names[] = {
-    [POS_NOUN] = "n.",
-    [POS_VERB] = "v.",
-    [POS_NOUN_VERB] = "n., v.",
+    [POS_NOUN] = "noun",
+    [POS_VERB] = "verb",
+    [POS_NOUN_VERB] = "noun, verb",
     [POS_ADJ] = "adj.",
     [POS_ADV] = "adv.",
     [POS_ADJ_ADV] = "adj., adv.",
@@ -1710,7 +1710,7 @@ static const char* s_pos_names[] = {
     [POS_DET] = "det.",
     [POS_INDEF_ART] = "indef. art.",
     [POS_INTERJ] = "interj.",
-    [POS_MODAL] = "modal v.",
+    [POS_MODAL] = "modal verb",
     [POS_NUM] = "num.",
     [POS_PREDET] = "predet.",
     [POS_PREP] = "prep.",
@@ -1718,8 +1718,8 @@ static const char* s_pos_names[] = {
     [POS_PRON] = "pron.",
     [POS_SUFFIX] = "suf.",
     [POS_PREFIX] = "pref.",
-    [POS_AUX_VERB] = "aux. v.",
-    [POS_PHRASAL_VERB] = "phr. v.",
+    [POS_AUX_VERB] = "aux. verb",
+    [POS_PHRASAL_VERB] = "phr. verb",
     [POS_DEF_ART] = "def. art.",
 };
 
