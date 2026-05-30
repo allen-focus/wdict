@@ -1954,32 +1954,32 @@ static void render_dict_content(const void* data, void* ctx)
         }
 
         /* ── separator ── */
-        ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->dict_separator }));
+        // ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->dict_separator }));
 
         /* ── POS label + phonetic ── */
-        if (pos_kind < countof(s_pos_names) && s_pos_names[pos_kind])
-        {
-            UIBox* pos_row = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
-                                                        .direction = LAYOUT_LEFT_TO_RIGHT,
-                                                        .child_gap = 8,
-                                                        .padding = { 4, 0, 4, 0 } });
-            {
-                const char* label = s_pos_names[pos_kind];
-                ui_text((String){ (u8*)label, (isize)strlen(label) },
-                        &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                       .font_size = 14,
-                                       .color = theme->dict_phonetic_fg,
-                                       .line_height = 20 });
-
-                if (pron_off)
-                    ui_text((String){ (u8*)DICT_STR(db, pron_off), (isize)strlen(DICT_STR(db, pron_off)) },
-                            &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                           .font_size = 13,
-                                           .color = theme->dict_phonetic_fg,
-                                           .line_height = 20 });
-            }
-            ui_box_end(pos_row);
-        }
+        // if (pos_kind < countof(s_pos_names) && s_pos_names[pos_kind])
+        // {
+        //     UIBox* pos_row = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
+        //                                                 .direction = LAYOUT_LEFT_TO_RIGHT,
+        //                                                 .child_gap = 8,
+        //                                                 .padding = { 4, 0, 4, 0 } });
+        //     {
+        //         const char* label = s_pos_names[pos_kind];
+        //         ui_text((String){ (u8*)label, (isize)strlen(label) },
+        //                 &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+        //                                .font_size = 14,
+        //                                .color = theme->dict_phonetic_fg,
+        //                                .line_height = 20 });
+        //
+        //         if (pron_off)
+        //             ui_text((String){ (u8*)DICT_STR(db, pron_off), (isize)strlen(DICT_STR(db, pron_off)) },
+        //                     &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
+        //                                    .font_size = 13,
+        //                                    .color = theme->dict_phonetic_fg,
+        //                                    .line_height = 20 });
+        //     }
+        //     ui_box_end(pos_row);
+        // }
 
         /* ── definitions ── */
         u8 def_count = dict_rd_u8(&p);
