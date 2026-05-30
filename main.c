@@ -3883,7 +3883,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                         }
                     }
                 }
-                DestroyWindow(window);
+                // DestroyWindow(window);
                 return 0;
             }
 
