@@ -2180,10 +2180,6 @@ static void render_dict_pos_selector(void* userdata)
 
     ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) } }));
 
-    f32 btn_h = 20.f;
-    f32 btn_fs = 10.5f;
-    Padding btn_pad = { 2, 6, 2, 6 };
-
     for (u8 i = 0; i < ctx->dict_pos_count; i++)
     {
         u8 pk = ctx->dict_pos_kinds[i];
@@ -2193,8 +2189,8 @@ static void render_dict_pos_selector(void* userdata)
         Color bg = is_active ? theme->accent_bg : (Color){ 0 };
         Color fg = is_active ? theme->accent_fg : theme->bar_fg;
 
-        UIBox* btn = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fixed(btn_h) },
-                                                .padding = btn_pad,
+        UIBox* btn = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fixed(24) },
+                                                .padding = { 2, 6, 2, 6 },
                                                 .rect_style = { .corner_radius = 3 },
                                                 .color = bg,
                                                 .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
@@ -2208,10 +2204,7 @@ static void render_dict_pos_selector(void* userdata)
                                        ctx->focused_panel ? ctx->focused_panel->id : 0));
 
             ui_text((String){ (u8*)label, (isize)strlen(label) },
-                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
-                                   .font_size = btn_fs,
-                                   .color = fg,
-                                   .line_height = btn_h - btn_pad.top - btn_pad.bottom });
+                    &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI], .font_size = 12.f, .color = fg });
         }
         ui_box_end(btn);
     }

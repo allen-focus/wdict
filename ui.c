@@ -1698,8 +1698,8 @@ void ui_scrollable_area_end(ScrollContext scroll_ctx)
         {
             f32 new_target = last_area->scroll_anim_y.target + g_ui_ctx->keyboard_scroll_delta.y * SCROLL_SENSITIVITY;
             new_target = clamp(new_target, 0, scroll_ctx.max_delta.y);
-            start_timed_lerp(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target,
-                             g_ui_ctx->current_time, SCROLL_ANIM_DURATION);
+            start_timed_lerp(&last_area->scroll_anim_y, last_area->scroll_delta.y, new_target, g_ui_ctx->current_time,
+                             SCROLL_ANIM_DURATION);
             g_ui_ctx->keyboard_scroll_delta.y = 0;
         }
 
