@@ -1115,6 +1115,33 @@ static void cmd_tab_activate(void* userdata, String cmd_text)
         panel_tab_activate(rt.panel, rt.tab);
 }
 
+static void cmd_tab_activate_left(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, cmd_text);
+    if (!rt.panel || !rt.tab)
+        return;
+    PanelTab* prev = NULL;
+    for (PanelTab* t = rt.panel->tab_first; t; t = t->next)
+    {
+        if (t == rt.tab)
+            break;
+        prev = t;
+    }
+    if (prev)
+        panel_tab_activate(rt.panel, prev);
+}
+
+static void cmd_tab_activate_right(void* userdata, String cmd_text)
+{
+    AppShared* shared = (AppShared*)userdata;
+    ResolvePanelTabResult rt = resolve_panel_and_tab(shared, cmd_text);
+    if (!rt.panel || !rt.tab)
+        return;
+    if (rt.tab->next)
+        panel_tab_activate(rt.panel, rt.tab->next);
+}
+
 static void cmd_tab_move(void* userdata, String cmd_text)
 {
     AppShared* shared = (AppShared*)userdata;
@@ -4530,6 +4557,8 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.new"),                str("New Tab"),                  str(""), cmd_tab_new,                &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.close"),              str("Close Tab"),                str(""), cmd_tab_close,              &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate"),           str("Activate Tab"),             str(""), cmd_tab_activate,           &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate_left"),      str("Activate Left Tab"),        str(""), cmd_tab_activate_left,      &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.activate_right"),     str("Activate Right Tab"),       str(""), cmd_tab_activate_right,     &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move"),               str("Move Tab"),                 str(""), cmd_tab_move,               &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_panel"),      str("Move Tab To Next Panel"),   str(""), cmd_tab_move_to_panel,      &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.move_to_new_window"), str("Move Tab To New Window"),   str(""), cmd_tab_move_to_new_window, &shared });
