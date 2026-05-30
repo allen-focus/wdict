@@ -2515,93 +2515,170 @@ static void decoration_overlay(WindowContext* ctx)
 
             /* TODO: popup content goes here */
             // clang-format off
-            TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->bar_fg, .wrap = True };
+            BoxConfig title_cnt_cfg = (BoxConfig){ .sizing = { fit_grow({}), fit({}) }, .padding = { 8, 0, 3, 0 }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } };
+            BoxConfig cnt_cfg = (BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } };
             BoxConfig box_cfg = { .sizing = { fit({}), fit({}) }, .color = theme->active_bg, .rect_style = { .corner_radius = 2 }, .padding = { 3, 3, 3, 3 } };
+            TextConfig hint_title_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 12, .color = theme->accent_bg };
+            TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->bar_fg };
+            UIBox* title_cnt = NULL;
             UIBox* cnt = NULL;
             UIBox* box = NULL;
 
             /// window ---------------------------
 
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Window: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+n"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to create new window"), &hint_text_cfg);
-            ui_box_end(cnt);
+            title_cnt = ui_box_begin(&title_cnt_cfg);
+            ui_text(str("Window"), &hint_title_cfg);
+            ui_box_end(title_cnt);
+            {
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("1. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+n"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to create new window"), &hint_text_cfg);
+                ui_box_end(cnt);
 
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Window: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to close (The last window will be hidden to the system tray)"), &hint_text_cfg);
-            ui_box_end(cnt);
-
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Window: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("F11"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to toggle light/dark theme"), &hint_text_cfg);
-            ui_box_end(cnt);
-
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str(" "), &hint_text_cfg);
-            ui_box_end(cnt);
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("2. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to close window (The last window will be hidden to the system tray)"), &hint_text_cfg);
+                ui_box_end(cnt);
+            }
 
             /// panel ----------------------------
 
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Panel: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+h/j/k/l"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to resize"), &hint_text_cfg);
-            ui_box_end(cnt);
+            title_cnt = ui_box_begin(&title_cnt_cfg);
+            ui_text(str("Panel"), &hint_title_cfg);
+            ui_box_end(title_cnt);
+            {
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("1. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+-/+"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to split panel"), &hint_text_cfg);
+                ui_box_end(cnt);
 
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Panel: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+w"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to close current tab"), &hint_text_cfg);
-            ui_box_end(cnt);
-            
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str(" "), &hint_text_cfg);
-            ui_box_end(cnt);
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("2. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+h/j/k/l"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to switch panel focus"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("3. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+h/j/k/l"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to resize"), &hint_text_cfg);
+                ui_box_end(cnt);
+            }
+
+            /// tab ------------------------------
+
+            title_cnt = ui_box_begin(&title_cnt_cfg);
+            ui_text(str("Tab"), &hint_title_cfg);
+            ui_box_end(title_cnt);
+            {
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("1. "), &hint_text_cfg);
+                ui_text(str("tab could be dragged to anywhere"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("2. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+t"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to create new tab"), &hint_text_cfg);
+                ui_box_end(cnt);
+                
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("3. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+w"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to close current tab"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("4. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+h/l"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to focus left/right tab"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("5. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+Alt+h/l"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to move current tab to left/right"), &hint_text_cfg);
+                ui_box_end(cnt);
+            }
 
             /// search palette -------------------
 
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Search Palette: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Tab"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to switch mode"), &hint_text_cfg);
-            ui_box_end(cnt);
+            title_cnt = ui_box_begin(&title_cnt_cfg);
+            ui_text(str("Search Palette"), &hint_title_cfg);
+            ui_box_end(title_cnt);
+            {
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("1. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("s"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" or "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("/"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to open search palette"), &hint_text_cfg);
+                ui_box_end(cnt);
 
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Search Palette: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Up/Down"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" or "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+p/n"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to navigate items"), &hint_text_cfg);
-            ui_box_end(cnt);
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("2. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" or "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+["), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to close search palette"), &hint_text_cfg);
+                ui_box_end(cnt);
 
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Search Palette: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" or "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+["), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to close"), &hint_text_cfg);
-            ui_box_end(cnt);
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("3. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Tab"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to switch search mode in search palette"), &hint_text_cfg);
+                ui_box_end(cnt);
 
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("4. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Up/Down"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" or "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+p/n"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to navigate items in search palette"), &hint_text_cfg);
+                ui_box_end(cnt);
+            }
+
+            /// dictionary -----------------------
+
+            title_cnt = ui_box_begin(&title_cnt_cfg);
+            ui_text(str("Dictionary"), &hint_title_cfg);
+            ui_box_end(title_cnt);
+            {
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("1. "), &hint_text_cfg);
+                ui_text(str("The words in the definitions and examples are clickable"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("2. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Alt+h/l"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to navigate part of speech"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("3. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("j/k"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to scroll"), &hint_text_cfg);
+                ui_box_end(cnt);
+            }
+
+            /// Miscellany -----------------------
+
+            title_cnt = ui_box_begin(&title_cnt_cfg);
+            ui_text(str("Miscellany"), &hint_title_cfg);
+            ui_box_end(title_cnt);
+            {
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("1. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("F11"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to toggle light/dark theme"), &hint_text_cfg);
+                ui_box_end(cnt);
+            }
+            cnt = ui_box_begin(&cnt_cfg);
             ui_text(str(" "), &hint_text_cfg);
-            ui_box_end(cnt);
-
-            /// focused dictionary ---------------
-
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Focused Dictionary: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("Alt+h/l"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to navigate part of speech"), &hint_text_cfg);
-            ui_box_end(cnt);
-
-            cnt = ui_box_begin( &(BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-            ui_text(str("Focused Dictionary: "), &hint_text_cfg);
-            box = ui_box_begin(&box_cfg); ui_text(str("j/k"), &hint_text_cfg); ui_box_end(box);
-            ui_text(str(" to scroll"), &hint_text_cfg);
             ui_box_end(cnt);
             // clang-format on
         }
