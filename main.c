@@ -214,6 +214,7 @@ typedef struct
     WindowContext* last_window;
     WindowContext* tray_window;
     WindowContext* quick_search_window;
+    WindowContext* last_active_main_window;
     HWND tray_hwnd;
     Arena cfg_arena;
     Arena cmd_arena;
@@ -727,6 +728,38 @@ static LRESULT CALLBACK drag_popup_window_procedure(HWND window, UINT message, W
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
+static void quick_search_activate(AppShared* shared)
+{
+    if (!shared->dict_ready)
+        return;
+
+    WindowContext* qs = find_quick_search_window(shared);
+    if (!qs)
+    {
+        qs = create_quick_search_window(shared);
+        if (!qs)
+            return;
+    }
+
+    qs->palette_popup.open = True;
+    qs->quick_search_result_confirmed = False;
+    qs->quick_search_closing = False;
+    qs->palette_selected_index = 0;
+    qs->palette_prev_selected_index = -1;
+    qs->palette_prev_query_len = 0;
+    qs->palette_activate_pending = False;
+    qs->palette_search_mode = PALETTE_MODE_WORD;
+    qs->palette_effective_mode = PALETTE_MODE_WORD;
+    qs->palette_switch_version = 0;
+    /* Preserve previous input, auto-select-all */
+    qs->palette_text_edit.cursor = qs->palette_text_edit.text_len;
+    qs->palette_text_edit.mark = 0;
+    qs->ui.focused_hash = s_search_palette_input_hash;
+    qs->ui.requested_frames = IDLE_WAKE_FRAMES;
+    ShowWindow(qs->window, SW_SHOW);
+    SetForegroundWindow(qs->window);
+}
+
 static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
     AppShared* shared = NULL;
@@ -856,32 +889,7 @@ static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM 
                     return 0;
                 }
 
-                if (!qs)
-                {
-                    qs = create_quick_search_window(shared);
-                    if (!qs)
-                        return 0;
-                }
-
-                /* Reset state for fresh activation */
-                qs->palette_popup.open = True;
-                qs->quick_search_result_confirmed = False;
-                qs->quick_search_closing = False;
-                qs->palette_selected_index = 0;
-                qs->palette_prev_selected_index = -1;
-                qs->palette_prev_query_len = 0;
-                qs->palette_activate_pending = False;
-                qs->palette_search_mode = PALETTE_MODE_WORD;
-                qs->palette_effective_mode = PALETTE_MODE_WORD;
-                qs->palette_switch_version = 0;
-                /* Preserve previous input, auto-select-all */
-                qs->palette_text_edit.cursor = qs->palette_text_edit.text_len;
-                qs->palette_text_edit.mark = 0;
-                qs->ui.focused_hash = s_search_palette_input_hash;
-                qs->ui.requested_frames = IDLE_WAKE_FRAMES;
-
-                ShowWindow(qs->window, SW_SHOW);
-                SetForegroundWindow(qs->window);
+                quick_search_activate(shared);
             }
             return 0;
         }
@@ -1112,41 +1120,6 @@ static void cmd_toggle_menu(void* userdata, String cmd_text)
         return;
 
     ctx->menu_popup.open = !ctx->menu_popup.open;
-    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
-}
-
-static void cmd_toggle_palette(void* userdata, String cmd_text)
-{
-    (void)cmd_text;
-    AppShared* shared = (AppShared*)userdata;
-    if (!shared->dict_ready)
-        return;
-    u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
-    WindowContext* ctx = find_window_by_id(shared, window_id);
-    if (!ctx)
-        return;
-
-    ctx->palette_popup.open = !ctx->palette_popup.open;
-    if (ctx->palette_popup.open)
-    {
-        ctx->ui.focused_hash = s_search_palette_input_hash;
-        ctx->palette_selected_index = 0;
-        ctx->palette_search_mode = PALETTE_MODE_WORD;
-        ctx->palette_switch_version = 0;
-
-        // Auto select all text
-        ctx->palette_text_edit.cursor = ctx->palette_text_edit.text_len;
-        ctx->palette_text_edit.mark = 0;
-    }
-    else
-    {
-        ctx->ui.focused_hash = 0;
-        ctx->palette_selected_index = -1;
-        ctx->palette_prev_selected_index = -1;
-        ctx->palette_activate_pending = False;
-        ctx->palette_search_mode = PALETTE_MODE_WORD;
-        ctx->palette_switch_version = 0;
-    }
     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
 }
 
@@ -2717,7 +2690,7 @@ static void decoration_overlay(WindowContext* ctx)
             {
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+n"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+N"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to create new window"), &hint_text_cfg);
                 ui_box_end(cnt);
 
@@ -2742,13 +2715,13 @@ static void decoration_overlay(WindowContext* ctx)
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+h/j/k/l"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+H/J/K/L"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to switch panel focus"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+h/j/k/l"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+H/J/K/L"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to resize"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
@@ -2766,25 +2739,25 @@ static void decoration_overlay(WindowContext* ctx)
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+t"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+T"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to create new tab"), &hint_text_cfg);
                 ui_box_end(cnt);
                 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+w"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+W"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to close current tab"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("4. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+h/l"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+H/L"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to focus left/right tab"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("5. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+Alt+h/l"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+Alt+H/L"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to move current tab to left/right"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
@@ -2797,9 +2770,7 @@ static void decoration_overlay(WindowContext* ctx)
             {
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("s"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" or "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("/"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+M"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to open search palette"), &hint_text_cfg);
                 ui_box_end(cnt);
 
@@ -2821,7 +2792,7 @@ static void decoration_overlay(WindowContext* ctx)
                 ui_text(str("4. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Up/Down"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" or "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+p/n"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+P/N"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to navigate items in search palette"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
@@ -2839,13 +2810,13 @@ static void decoration_overlay(WindowContext* ctx)
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Alt+h/l"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("Alt+H/L"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to navigate part of speech"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("j/k"), &hint_text_cfg); ui_box_end(box);
+                box = ui_box_begin(&box_cfg); ui_text(str("J/K"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to scroll"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
@@ -3538,10 +3509,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                     {
                         hint_cnt = ui_box_begin(&hint_cnt_cfg);
                         {
-                            ui_text(str("Type "), &hint_text_cfg);
-                            box = ui_box_begin(&box_cfg); ui_text(str("/"), &hint_text_cfg); ui_box_end(box);
-                            ui_text(str(" or "), &hint_text_cfg);
-                            box = ui_box_begin(&box_cfg); ui_text(str("s"), &hint_text_cfg); ui_box_end(box);
+                            box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+M"), &hint_text_cfg); ui_box_end(box);
                             ui_text(str(" to search"), &hint_text_cfg);
                         }
                         ui_box_end(hint_cnt);
@@ -3621,7 +3589,9 @@ static void process_frame(WindowContext* ctx)
         {
             if (ctx->quick_search_result_confirmed)
             {
-                WindowContext* main = shared->first_window;
+                WindowContext* main = shared->last_active_main_window;
+                if (!main)
+                    main = shared->first_window;
                 if (!main && shared->tray_window)
                     main = shared->tray_window;
                 if (main)
@@ -3632,10 +3602,27 @@ static void process_frame(WindowContext* ctx)
                     SetForegroundWindow(main->window);
                     if (IsIconic(main->window))
                         ShowWindow(main->window, SW_RESTORE);
-                    i32 cd = (ctx->quick_search_confirmed_word_idx << 8) | 0;
-                    cmd_queue_push(
-                        &shared->cmd_queue,
-                        str_fmt(CMD_STR_MAX_LENGTH, "tab.open_word content_data=%d window=%u", cd, main->id));
+                    /* Replace focused tab content with confirmed word */
+                    Panel* panel = main->focused_panel;
+                    if (!panel)
+                        panel = panel_find_first_leaf(main->root_panel);
+                    if (panel)
+                    {
+                        PanelTab* active = panel_tab_get_active(panel);
+                        if (active)
+                        {
+                            const DictWordIndex* w = &shared->dict_db.words[ctx->quick_search_confirmed_word_idx];
+                            const char* wrd = DICT_STR(&shared->dict_db, w->word_stroff);
+                            isize wlen = strlen(wrd);
+                            if (wlen < PANEL_TAB_NAME_MAX)
+                            {
+                                memcpy(active->name, wrd, wlen);
+                                active->name_len = wlen;
+                            }
+                            active->content_data = (void*)(isize)(((w - shared->dict_db.words) << 8) | 0);
+                            active->render_fn = render_dict_content;
+                        }
+                    }
                     main->ui.requested_frames = IDLE_WAKE_FRAMES;
                 }
             }
@@ -3658,8 +3645,7 @@ static void process_frame(WindowContext* ctx)
         return;
     }
 
-    /* IME control: disable when palette closed (so keyboard shortcuts like 's' work),
-       re-enable when palette open (so Chinese input works in search field). */
+    /* IME control: disable when palette closed, re-enable when palette open */
     if (ctx->palette_popup.open)
         ImmAssociateContext(ctx->window, ctx->default_himc);
     else
@@ -3851,9 +3837,6 @@ static void process_frame(WindowContext* ctx)
 
                 /* decoration buttons float on top of panels at top-right */
                 decoration_overlay(ctx);
-
-                /* search palette (centered overlay) */
-                search_palette_render(ctx);
             }
             ui_box_end(root_box);
         }
@@ -4070,6 +4053,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
                 return 0;
             }
+            if (ctx && !ctx->is_quick_search && LOWORD(wparam) != WA_INACTIVE)
+                shared->last_active_main_window = ctx;
             if (ctx)
                 ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             return DefWindowProcW(window, message, wparam, lparam);
@@ -4123,8 +4108,7 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                                        str_fmt(CMD_STR_MAX_LENGTH, "menu.toggle window=%u", ctx->id));
                         break;
                     case TitleBarHot_Search:
-                        cmd_queue_push(&ctx->shared->cmd_queue,
-                                       str_fmt(CMD_STR_MAX_LENGTH, "palette.toggle window=%u", ctx->id));
+                        quick_search_activate(ctx->shared);
                         break;
                     case TitleBarHot_None:
                     default:
@@ -4697,18 +4681,6 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 if (c == 'j' || c == 'J' || c == 'k' || c == 'K')
                     break;
 
-            /* '/' or 's' key opens or focuses the search palette */
-            if ((c == '/' || c == 's') && ctx)
-            {
-                if (!(ctx->palette_popup.open && ctx->ui.focused_hash == s_search_palette_input_hash))
-                {
-                    cmd_queue_push(&shared->cmd_queue,
-                                   str_fmt(CMD_STR_MAX_LENGTH, "palette.toggle window=%u", ctx->id));
-                    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
-                    return 0;
-                }
-            }
-
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             u32 codepoint = 0;
             if (is_high_surrogate(c))
@@ -4937,7 +4909,6 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("window.create"),          str("New Window"),               str(""), cmd_window_create,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("app.toggle_theme"),       str("Toggle Light/Dark Theme"),  str(""), cmd_toggle_theme,           &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("menu.toggle"),            str("Toggle Menu Popup"),        str(""), cmd_toggle_menu,            &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.toggle"),         str("Toggle Search Palette"),    str(""), cmd_toggle_palette,         &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("palette.close"),          str("Close Search Palette"),     str(""), cmd_close_palette,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_h"),          str("Split Panel Horizontally"), str(""), cmd_split_panel_h,          &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.split_v"),          str("Split Panel Vertically"),   str(""), cmd_split_panel_v,          &shared });
