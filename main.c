@@ -57,6 +57,9 @@
 #define WM_TRAY_CALLBACK         (WM_APP + 1)
 #define TRAY_ICON_ID             1
 #define HOTKEY_TOGGLE_FOREGROUND 1
+#define HOTKEY_QUICK_SEARCH      2
+#define QUICK_SEARCH_WINDOW_W    540
+#define QUICK_SEARCH_WINDOW_H    420
 
 /*
  * DictWordToken — per-word metadata for interaction hit-test.
@@ -210,6 +213,7 @@ typedef struct
     WindowContext* first_window;
     WindowContext* last_window;
     WindowContext* tray_window;
+    WindowContext* quick_search_window;
     HWND tray_hwnd;
     Arena cfg_arena;
     Arena cmd_arena;
@@ -296,6 +300,11 @@ struct WindowContext
 
     b32 in_frame;
     b32 mouse_tracked;
+
+    b32 is_quick_search;
+    i32 quick_search_confirmed_word_idx;
+    b32 quick_search_result_confirmed;
+    b32 quick_search_closing;
 };
 
 static DictDB* g_dict_db;
@@ -476,6 +485,8 @@ static void window_list_remove(AppShared* shared, WindowContext* ctx)
 
 // Forward declarations for global lookup helpers used by handlers
 static void process_frame(WindowContext* ctx);
+static WindowContext* create_quick_search_window(AppShared* shared);
+static WindowContext* find_quick_search_window(AppShared* shared);
 
 static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32 pos_x, i32 pos_y, u32 width,
                                     u32 height, b32 add_default_tab)
@@ -611,6 +622,82 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     process_frame(ctx);
     process_frame(ctx);
     ShowWindow(ctx->window, SW_SHOWDEFAULT);
+
+    return ctx;
+}
+
+static WindowContext* create_quick_search_window(AppShared* shared)
+{
+    WindowContext* ctx = (WindowContext*)calloc(1, sizeof(WindowContext));
+    Assert(ctx);
+    ctx->shared = shared;
+    ctx->id = s_window_next_id++;
+    ctx->is_quick_search = True;
+
+    UINT dpi = GetDpiForSystem();
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    u32 physical_w = (u32)(QUICK_SEARCH_WINDOW_W * dpi_scale);
+    u32 physical_h = (u32)(QUICK_SEARCH_WINDOW_H * dpi_scale);
+    i32 screen_w = GetSystemMetricsForDpi(SM_CXSCREEN, dpi);
+    i32 screen_h = GetSystemMetricsForDpi(SM_CYSCREEN, dpi);
+    i32 pos_x = (screen_w - (i32)physical_w) / 2;
+    i32 pos_y = (screen_h - (i32)physical_h) / 2;
+
+    ctx->window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"window class", L"", WS_POPUP, pos_x, pos_y,
+                                  (i32)physical_w, (i32)physical_h, NULL, NULL, GetModuleHandleW(NULL), ctx);
+    if (!ctx->window)
+    {
+        free(ctx);
+        return NULL;
+    }
+    {
+        BOOL use_dark = TRUE;
+        DwmSetWindowAttribute(ctx->window, DWMWA_USE_IMMERSIVE_DARK_MODE, &use_dark, sizeof(use_dark));
+        SetPropW(ctx->window, L"NonRudeHWND", (HANDLE)TRUE);
+    }
+
+    /* Init UI context */
+    UIRenderFunc render_fn = {
+        .flush_and_present = renderer_flush_and_present,
+        .on_resize = renderer_resize,
+        .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
+        .get_text_width = renderer_get_text_width_for_dpi,
+        .get_text_height = renderer_get_text_height_for_dpi,
+        .draw_rect = renderer_draw_rect,
+        .draw_text = renderer_draw_text,
+    };
+
+    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, ctx->ui.client_width, ctx->ui.client_height,
+            dpi, render_fn);
+    ctx->ui.clipboard_copy = win32_clipboard_copy;
+    ctx->ui.clipboard_paste = win32_clipboard_paste;
+
+    /* Init per-window renderer */
+    renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
+
+    /* Init palette text edit state */
+    ctx->palette_text_edit.base = ctx->palette_text_buf;
+    ctx->palette_text_edit.size = SEARCH_QUERY_BUF;
+    ctx->palette_selected_index = -1;
+    ctx->palette_prev_selected_index = -1;
+    ctx->palette_prev_query_len = 0;
+    ctx->palette_activate_pending = False;
+    ctx->palette_search_mode = PALETTE_MODE_WORD;
+    ctx->palette_effective_mode = PALETTE_MODE_WORD;
+    ctx->palette_switch_version = 0;
+
+    /* Save default IME context for IME enable/disable control */
+    ctx->default_himc = ImmGetContext(ctx->window);
+    ImmReleaseContext(ctx->window, ctx->default_himc);
+
+    shared->quick_search_window = ctx;
+
+    /* Palette opens automatically — set focus routing */
+    ctx->palette_popup.open = True;
+    ctx->ui.focused_hash = s_search_palette_input_hash;
+
+    /* Stay hidden until first global hotkey activation */
+    ShowWindow(ctx->window, SW_HIDE);
 
     return ctx;
 }
@@ -752,6 +839,49 @@ static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM 
                             ShowWindow(target, SW_RESTORE);
                     }
                 }
+            }
+            else if (shared && wparam == HOTKEY_QUICK_SEARCH)
+            {
+                if (!shared->dict_ready)
+                    return 0;
+
+                WindowContext* qs = find_quick_search_window(shared);
+
+                /* Quick-search already focused → close (toggle) */
+                if (qs && GetForegroundWindow() == qs->window)
+                {
+                    qs->palette_popup.open = False;
+                    qs->quick_search_result_confirmed = False;
+                    qs->ui.requested_frames = IDLE_WAKE_FRAMES;
+                    return 0;
+                }
+
+                if (!qs)
+                {
+                    qs = create_quick_search_window(shared);
+                    if (!qs)
+                        return 0;
+                }
+
+                /* Reset state for fresh activation */
+                qs->palette_popup.open = True;
+                qs->quick_search_result_confirmed = False;
+                qs->quick_search_closing = False;
+                qs->palette_selected_index = 0;
+                qs->palette_prev_selected_index = -1;
+                qs->palette_prev_query_len = 0;
+                qs->palette_activate_pending = False;
+                qs->palette_search_mode = PALETTE_MODE_WORD;
+                qs->palette_effective_mode = PALETTE_MODE_WORD;
+                qs->palette_switch_version = 0;
+                /* Preserve previous input, auto-select-all */
+                qs->palette_text_edit.cursor = qs->palette_text_edit.text_len;
+                qs->palette_text_edit.mark = 0;
+                qs->ui.focused_hash = s_search_palette_input_hash;
+                qs->ui.requested_frames = IDLE_WAKE_FRAMES;
+
+                ShowWindow(qs->window, SW_SHOW);
+                SetForegroundWindow(qs->window);
             }
             return 0;
         }
@@ -902,7 +1032,14 @@ static WindowContext* find_window_by_id(AppShared* shared, u32 id)
     for (WindowContext* w = shared->first_window; w; w = w->next)
         if (w->id == id)
             return w;
+    if (shared->quick_search_window && shared->quick_search_window->id == id)
+        return shared->quick_search_window;
     return NULL;
+}
+
+static WindowContext* find_quick_search_window(AppShared* shared)
+{
+    return shared->quick_search_window;
 }
 
 static Panel* find_panel_globally(AppShared* shared, u32 window_id, u32 panel_id)
@@ -2929,7 +3066,7 @@ static void search_palette_render(WindowContext* ctx)
     UIBox* popup = ui_box_begin(&(BoxConfig){
         .sizing = { fixed(popup_w), fixed(popup_h) },
         .flags = BoxFlag_Float,
-        .float_offset = { popup_x, -(client_h - 1) + popup_y },
+        .float_offset = { popup_x, ctx->is_quick_search ? popup_y : (-(client_h - 1) + popup_y) },
         .color = theme->palette_bg,
         .rect_style = {
             .corner_radius = 8,
@@ -3101,7 +3238,7 @@ static void search_palette_render(WindowContext* ctx)
                                     row_h = row_res.height;
 
                                     /* preview: auto-update tab content for selected item */
-                                    if (i == ctx->palette_selected_index)
+                                    if (i == ctx->palette_selected_index && !ctx->is_quick_search)
                                     {
                                         const DictWordIndex* w = item->entry;
                                         PanelTab* active = panel_tab_get_active(ctx->focused_panel);
@@ -3250,6 +3387,13 @@ static void search_palette_render(WindowContext* ctx)
                         /* close popup only if click wasn't consumed by scrollbar */
                         if (result_clicked && ui_ctx->mouse_captured_by_hash != scroll.hash)
                         {
+                            if (ctx->is_quick_search && ctx->palette_selected_index >= 0 &&
+                                ctx->palette_selected_index < item_count)
+                            {
+                                const DictWordIndex* w = items[ctx->palette_selected_index].entry;
+                                ctx->quick_search_confirmed_word_idx = (i32)(w - shared->dict_db.words);
+                                ctx->quick_search_result_confirmed = True;
+                            }
                             ctx->palette_popup.open = False;
                             ctx->palette_selected_index = -1;
                             ctx->palette_prev_selected_index = -1;
@@ -3451,6 +3595,68 @@ static void process_frame(WindowContext* ctx)
     if (ctx->in_frame)
         return;
     ctx->in_frame = True;
+
+    /* Quick-search overlay: render only the search palette, no panels */
+    if (ctx->is_quick_search)
+    {
+        AppShared* shared = ctx->shared;
+        if (ctx->palette_popup.open)
+            ImmAssociateContext(ctx->window, ctx->default_himc);
+        else
+            ImmAssociateContext(ctx->window, NULL);
+
+        f32 client_w = (f32)ctx->ui.client_width;
+        f32 client_h = (f32)ctx->ui.client_height;
+
+        isize arena_pos = ui_frame_begin(&ctx->ui);
+        UIBox* root = ui_box_begin(&(BoxConfig){
+            .sizing = { fixed(client_w), fixed(client_h) },
+            .color = shared->theme.palette_bg,
+        });
+        search_palette_render(ctx);
+        ui_box_end(root);
+        ui_frame_end(arena_pos);
+
+        if (!ctx->palette_popup.open)
+        {
+            if (ctx->quick_search_result_confirmed)
+            {
+                WindowContext* main = shared->first_window;
+                if (!main && shared->tray_window)
+                    main = shared->tray_window;
+                if (main)
+                {
+                    if (shared->tray_window == main)
+                        shared->tray_window = NULL;
+                    ShowWindow(main->window, SW_SHOW);
+                    SetForegroundWindow(main->window);
+                    if (IsIconic(main->window))
+                        ShowWindow(main->window, SW_RESTORE);
+                    i32 cd = (ctx->quick_search_confirmed_word_idx << 8) | 0;
+                    cmd_queue_push(
+                        &shared->cmd_queue,
+                        str_fmt(CMD_STR_MAX_LENGTH, "tab.open_word content_data=%d window=%u", cd, main->id));
+                    main->ui.requested_frames = IDLE_WAKE_FRAMES;
+                }
+            }
+            /* Hide and reset for next use */
+            ctx->palette_popup.open = False;
+            ctx->quick_search_result_confirmed = False;
+            ctx->quick_search_closing = False;
+            ctx->palette_selected_index = -1;
+            ctx->palette_prev_selected_index = -1;
+            ctx->palette_prev_query_len = 0;
+            ctx->palette_activate_pending = False;
+            ctx->palette_search_mode = PALETTE_MODE_WORD;
+            ctx->palette_switch_version = 0;
+            ctx->ui.requested_frames = 0;
+            ctx->in_frame = False;
+            ShowWindow(ctx->window, SW_HIDE);
+            return;
+        }
+        ctx->in_frame = False;
+        return;
+    }
 
     /* IME control: disable when palette closed (so keyboard shortcuts like 's' work),
        re-enable when palette open (so Chinese input works in search field). */
@@ -3724,6 +3930,17 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             if (!wparam)
                 return DefWindowProcW(window, message, wparam, lparam);
 
+            if (ctx && ctx->is_quick_search)
+            {
+                NCCALCSIZE_PARAMS* params = (NCCALCSIZE_PARAMS*)lparam;
+                u32 dpi = GetDpiForWindow(window);
+                ui_ctx->dpi = dpi;
+                f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+                ui_ctx->client_width = (u32)ceil((params->rgrc[0].right - params->rgrc[0].left) / dpi_scale);
+                ui_ctx->client_height = (u32)ceil((params->rgrc[0].bottom - params->rgrc[0].top) / dpi_scale);
+                return 0;
+            }
+
             u32 dpi = ui_ctx->dpi ? ui_ctx->dpi : GetDpiForWindow(window);
 
             /* Standard resize border thickness provided by Windows. */
@@ -3846,6 +4063,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
         case WM_ACTIVATE:
         {
+            if (ctx && ctx->is_quick_search && LOWORD(wparam) == WA_INACTIVE && !ctx->quick_search_closing)
+            {
+                ctx->palette_popup.open = False;
+                ctx->quick_search_result_confirmed = False;
+                ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                return 0;
+            }
             if (ctx)
                 ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             return DefWindowProcW(window, message, wparam, lparam);
@@ -4169,12 +4393,29 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             if (wparam == VK_F4 && alt && message == WM_SYSKEYDOWN)
             {
                 if (shared && ctx)
-                    DestroyWindow(window);
+                {
+                    if (ctx->is_quick_search)
+                    {
+                        ctx->palette_popup.open = False;
+                        ctx->quick_search_result_confirmed = False;
+                        ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                    }
+                    else
+                        DestroyWindow(window);
+                }
                 return 0;
             }
 
             if (wparam == VK_ESCAPE)
             {
+                /* Quick-search: close overlay and let process_frame hide the window */
+                if (ctx && ctx->is_quick_search)
+                {
+                    ctx->palette_popup.open = False;
+                    ctx->quick_search_result_confirmed = False;
+                    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                    return 0;
+                }
                 /* Close open overlays before destroying the window */
                 if (ctx)
                 {
@@ -4580,8 +4821,15 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 // First disconnect the association, so subsequent trailing messages (WM_NCDESTROY, etc.) get NULL
                 SetWindowLongPtrW(window, GWLP_USERDATA, 0);
 
-                window_list_remove(shared, ctx);
-                panel_free_tree(ctx->root_panel);
+                if (!ctx->is_quick_search)
+                {
+                    window_list_remove(shared, ctx);
+                    panel_free_tree(ctx->root_panel);
+                }
+                else
+                {
+                    shared->quick_search_window = NULL;
+                }
                 ui_deinit(&ctx->ui);
                 renderer_deinit(&ctx->renderer);
                 arena_release(&ctx->dict_token_arena);
@@ -4601,6 +4849,8 @@ static b32 any_window_needs_frames(const AppShared* shared)
     for (const WindowContext* w = shared->first_window; w; w = w->next)
         if (w->ui.requested_frames > 0)
             return True;
+    if (shared->quick_search_window && shared->quick_search_window->ui.requested_frames > 0)
+        return True;
     return False;
 }
 
@@ -4711,7 +4961,7 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_down"),      str("Resize Panel Down"),        str(""), cmd_panel_resize_down,      &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_up"),        str("Resize Panel Up"),          str(""), cmd_panel_resize_up,        &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("panel.resize_right"),     str("Resize Panel Right"),       str(""), cmd_panel_resize_right,     &shared });
-        cmd_register(&shared.cmd_registry, (CmdDef){ str("dict.pos_select"),       str("Select Part of Speech"),    str(""), cmd_dict_pos_select,        &shared });
+        cmd_register(&shared.cmd_registry, (CmdDef){ str("dict.pos_select"),       str("Select Part of Speech"),     str(""), cmd_dict_pos_select,        &shared });
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.open_word"),         str("Open Word in Tab"),          str(""), cmd_tab_open_word,          &shared });
 
         /* Bind shortcuts */
@@ -4823,6 +5073,7 @@ i32 WinMainCRTStartup()
     shared.tray_hwnd =
         CreateWindowExW(0, L"TrayIconClass", NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), &shared);
     RegisterHotKey(shared.tray_hwnd, HOTKEY_TOGGLE_FOREGROUND, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 'M');
+    RegisterHotKey(shared.tray_hwnd, HOTKEY_QUICK_SEARCH, MOD_CONTROL | MOD_ALT, 'M');
 
     /* Add system tray icon (persists until process exit) */
     {
@@ -4932,6 +5183,17 @@ i32 WinMainCRTStartup()
             }
         }
 
+        /* Quick-search window (tracked separately, not in main window list) */
+        {
+            WindowContext* qs = shared.quick_search_window;
+            if (qs && qs->ui.requested_frames > 0)
+            {
+                process_frame(qs);
+                if (qs->ui.requested_frames > 0)
+                    qs->ui.requested_frames--;
+            }
+        }
+
         /* Force cursor update during cross-window drag: WM_SETCURSOR
            is suppressed when another window captures mouse. Use
            authoritative source (cross-drag source or local drag-active
@@ -5036,6 +5298,10 @@ i32 WinMainCRTStartup()
         shared.drag_popup = NULL;
     }
 
+    /* Clean up quick-search window if still alive */
+    if (shared.quick_search_window)
+        DestroyWindow(shared.quick_search_window->window);
+
     /* Stop palette search worker */
     search_stop(&shared.palette_search);
 
@@ -5064,8 +5330,9 @@ i32 WinMainCRTStartup()
         Shell_NotifyIconW(NIM_DELETE, &nid);
     }
 
-    /* Unregister hotkey and destroy message-only tray window */
+    /* Unregister hotkeys and destroy message-only tray window */
     UnregisterHotKey(shared.tray_hwnd, HOTKEY_TOGGLE_FOREGROUND);
+    UnregisterHotKey(shared.tray_hwnd, HOTKEY_QUICK_SEARCH);
     if (shared.tray_hwnd)
         DestroyWindow(shared.tray_hwnd);
 
