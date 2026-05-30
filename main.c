@@ -3329,27 +3329,34 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 }
                 else
                 {
-                    UIBox* hint_container = ui_box_begin(
-                        &(BoxConfig){ .sizing = { fit({}), grow({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
-                    {
-                        TextConfig hint_text_cfg = {
-                            .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->hint, .wrap = True
-                        };
-                        UIBox* box = NULL;
-                        BoxConfig box_cfg = { .sizing = { fit({}), fit({}) },
-                                              .color = theme->active_bg,
-                                              .rect_style = { .corner_radius = 2 },
-                                              .padding = { 3, 3, 3, 3 } };
+                    // clang-format off
+                    TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->hint };
+                    UIBox* box = NULL;
+                    BoxConfig box_cfg = { .sizing = { fit({}), fit({}) }, .color = theme->active_bg, .rect_style = { .corner_radius = 2 }, .padding = { 3, 3, 3, 3 } };
+                    BoxConfig hint_cnt_cfg = { .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } };
+                    UIBox* hint_cnt = NULL;
 
-                        // clang-format off
-                        ui_text(str("Type "), &hint_text_cfg);
-                        box = ui_box_begin(&box_cfg); ui_text(str("/"), &hint_text_cfg); ui_box_end(box);
-                        ui_text(str(" or "), &hint_text_cfg);
-                        box = ui_box_begin(&box_cfg); ui_text(str("s"), &hint_text_cfg); ui_box_end(box);
-                        ui_text(str(" to search"), &hint_text_cfg);
-                        // clang-format on
+                    UIBox* cnt = ui_box_begin(&(BoxConfig){ .sizing = { fit({}), grow({}) }, .child_gap = 6, .direction = LAYOUT_TOP_TO_BOTTOM, .alignment = { ALIGN_CENTER, ALIGN_CENTER } });
+                    {
+                        hint_cnt = ui_box_begin(&hint_cnt_cfg);
+                        {
+                            ui_text(str("Type "), &hint_text_cfg);
+                            box = ui_box_begin(&box_cfg); ui_text(str("/"), &hint_text_cfg); ui_box_end(box);
+                            ui_text(str(" or "), &hint_text_cfg);
+                            box = ui_box_begin(&box_cfg); ui_text(str("s"), &hint_text_cfg); ui_box_end(box);
+                            ui_text(str(" to search"), &hint_text_cfg);
+                        }
+                        ui_box_end(hint_cnt);
+
+                        hint_cnt = ui_box_begin(&hint_cnt_cfg);
+                        {
+                            box = ui_box_begin(&box_cfg); ui_text(str("F1"), &hint_text_cfg); ui_box_end(box);
+                            ui_text(str(" to toggle help"), &hint_text_cfg);
+                        }
+                        ui_box_end(hint_cnt);
                     }
-                    ui_box_end(hint_container);
+                    ui_box_end(cnt);
+                    // clang-format on
                 }
             }
         }
@@ -4654,29 +4661,32 @@ i32 WinMainCRTStartup()
         cmd_register(&shared.cmd_registry, (CmdDef){ str("tab.open_word"),         str("Open Word in Tab"),          str(""), cmd_tab_open_word,          &shared });
 
         /* Bind shortcuts */
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'N' },          str("window.create"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'T' },          str("tab.new"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      'W' },          str("tab.close"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  VK_OEM_MINUS }, str("panel.split_h"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  VK_OEM_PLUS },  str("panel.split_v"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'H' },          str("tab.move delta=-1"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'L' },          str("tab.move delta=+1"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'F' },          str("tab.to_new_panel axis=X"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, 'G' },          str("tab.to_new_panel axis=Y"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      VK_TAB },       str("panel.focus_next"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT, VK_TAB },       str("panel.focus_prev"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'H' },          str("panel.focus_left"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'J' },          str("panel.focus_down"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'K' },          str("panel.focus_up"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,   'L' },          str("panel.focus_right"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'H' },          str("panel.resize_left"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'J' },          str("panel.resize_down"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'K' },          str("panel.resize_up"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,  'L' },          str("panel.resize_right"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT,                       'H' },          str("dict.pos_select delta=-1"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT,                       'L' },          str("dict.pos_select delta=+1"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                      VK_F11 },       str("app.toggle_theme"));
-        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                      VK_OEM_4 },     str("palette.close")); // ctrl+[
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT,                    'N' },          str("window.create"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                                         'T' },          str("tab.new"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                                         'W' },          str("tab.close"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,                     VK_OEM_MINUS }, str("panel.split_h"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,                     VK_OEM_PLUS },  str("panel.split_v"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT,                    'H' },          str("tab.activate_left"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT,                    'L' },          str("tab.activate_right"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT | SHORTCUT_MOD_ALT, 'H' },          str("tab.move delta=-1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT | SHORTCUT_MOD_ALT, 'L' },          str("tab.move delta=+1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT,                    'F' },          str("tab.to_new_panel axis=X"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT,                    'G' },          str("tab.to_new_panel axis=Y"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                                         VK_TAB },       str("panel.focus_next"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_SHIFT,                    VK_TAB },       str("panel.focus_prev"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,                      'H' },          str("panel.focus_left"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,                      'J' },          str("panel.focus_down"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,                      'K' },          str("panel.focus_up"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL | SHORTCUT_MOD_ALT,                      'L' },          str("panel.focus_right"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,                     'H' },          str("panel.resize_left"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,                     'J' },          str("panel.resize_down"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,                     'K' },          str("panel.resize_up"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT | SHORTCUT_MOD_SHIFT,                     'L' },          str("panel.resize_right"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT,                                          'H' },          str("dict.pos_select delta=-1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_ALT,                                          'L' },          str("dict.pos_select delta=+1"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                                         VK_F11 },       str("app.toggle_theme"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_NONE,                                         VK_F1 },        str("menu.toggle"));
+        shortcut_bind(&shared.shortcuts, (Shortcut){ SHORTCUT_MOD_CTRL,                                         VK_OEM_4 },     str("palette.close")); // ctrl+[
         Assert(!shortcut_detect_conflicts(&shared.shortcuts));
 
         /* Load cursors */
