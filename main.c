@@ -2816,8 +2816,8 @@ static void decoration_overlay(WindowContext* ctx)
             BoxConfig title_cnt_cfg = (BoxConfig){ .sizing = { fit_grow({}), fit({}) }, .padding = { 8, 0, 3, 0 }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } };
             BoxConfig cnt_cfg = (BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } };
             BoxConfig box_cfg = { .sizing = { fit({}), fit({}) }, .color = theme->active_bg, .rect_style = { .corner_radius = 2 }, .padding = { 3, 3, 3, 3 } };
-            TextConfig hint_title_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 12, .color = theme->accent_bg };
-            TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->bar_fg };
+            TextConfig hint_title_cfg = { .font = &shared->fonts[FONT_INDEX_ZH], .font_size = 11, .color = theme->accent_bg };
+            TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_ZH], .font_size = 10, .color = theme->bar_fg };
             UIBox* title_cnt = NULL;
             UIBox* cnt = NULL;
             UIBox* box = NULL;
@@ -2825,170 +2825,172 @@ static void decoration_overlay(WindowContext* ctx)
             /// window ---------------------------
 
             title_cnt = ui_box_begin(&title_cnt_cfg);
-            ui_text(str("Window"), &hint_title_cfg);
+            ui_text(str("窗口"), &hint_title_cfg);
             ui_box_end(title_cnt);
             {
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+N"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to create window"), &hint_text_cfg);
+                ui_text(str(" 创建窗口"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+W"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to destroy window"), &hint_text_cfg);
+                ui_text(str(" 销毁窗口"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to destroy window (The last will be hidden to the system tray)"), &hint_text_cfg);
+                ui_text(str(" 或 "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("鼠标右键"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" 销毁窗口（最后一个窗口将隐藏到系统托盘）"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
 
             /// panel ----------------------------
 
             title_cnt = ui_box_begin(&title_cnt_cfg);
-            ui_text(str("Panel"), &hint_title_cfg);
+            ui_text(str("面板"), &hint_title_cfg);
             ui_box_end(title_cnt);
             {
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+-/+"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to split panel"), &hint_text_cfg);
+                ui_text(str(" 分割面板"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+H/J/K/L"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to switch panel focus"), &hint_text_cfg);
+                ui_text(str(" 切换面板焦点"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Alt+Shift+H/J/K/L"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to resize"), &hint_text_cfg);
+                ui_text(str(" 调整大小"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
 
             /// tab ------------------------------
 
             title_cnt = ui_box_begin(&title_cnt_cfg);
-            ui_text(str("Tab"), &hint_title_cfg);
+            ui_text(str("标签页"), &hint_title_cfg);
             ui_box_end(title_cnt);
             {
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
-                ui_text(str("tab could be dragged to anywhere"), &hint_text_cfg);
+                ui_text(str("标签页可拖拽到任意位置"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+T"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to create tab"), &hint_text_cfg);
+                ui_text(str(" 创建标签页"), &hint_text_cfg);
                 ui_box_end(cnt);
                 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+W"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to destroy tab"), &hint_text_cfg);
+                ui_text(str(" 关闭标签页"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("4. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+H/L"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to focus left/right tab"), &hint_text_cfg);
+                ui_text(str(" 聚焦左/右标签页"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("5. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Shift+Alt+H/L"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to move tab to left/right"), &hint_text_cfg);
+                ui_text(str(" 向左/右移动标签页"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
 
             /// search palette -------------------
 
             title_cnt = ui_box_begin(&title_cnt_cfg);
-            ui_text(str("Search Palette"), &hint_title_cfg);
+            ui_text(str("搜索面板"), &hint_title_cfg);
             ui_box_end(title_cnt);
             {
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+M"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to open search palette"), &hint_text_cfg);
+                ui_text(str(" 打开搜索面板"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Esc"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" or "), &hint_text_cfg);
+                ui_text(str(" 或 "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+["), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to close search palette"), &hint_text_cfg);
+                ui_text(str(" 关闭搜索面板"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Tab"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to switch search mode in search palette"), &hint_text_cfg);
+                ui_text(str(" 在搜索面板中切换搜索模式"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("4. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Up/Down"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" or "), &hint_text_cfg);
+                ui_text(str(" 或 "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+P/N"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to navigate items in search palette"), &hint_text_cfg);
+                ui_text(str(" 在搜索面板中导航条目"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
 
             /// dictionary -----------------------
 
             title_cnt = ui_box_begin(&title_cnt_cfg);
-            ui_text(str("Dictionary"), &hint_title_cfg);
+            ui_text(str("词典"), &hint_title_cfg);
             ui_box_end(title_cnt);
             {
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
-                ui_text(str("The words in the definitions and examples are clickable"), &hint_text_cfg);
+                ui_text(str("释义和例句中的单词可点击"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Alt+H/L"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to navigate part of speech"), &hint_text_cfg);
+                ui_text(str(" 切换词性"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("J/K"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to scroll"), &hint_text_cfg);
+                ui_text(str(" 滚动"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
 
             /// Miscellany -----------------------
 
             title_cnt = ui_box_begin(&title_cnt_cfg);
-            ui_text(str("Miscellany"), &hint_title_cfg);
+            ui_text(str("其他"), &hint_title_cfg);
             ui_box_end(title_cnt);
             {
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("1. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("F11"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to toggle light/dark theme"), &hint_text_cfg);
+                ui_text(str(" 切换浅色/深色主题"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("2. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+Shift+M"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to toggle foreground (closes if multiple windows, hides to tray if last)"), &hint_text_cfg);
+                ui_text(str(" 切换前台（多窗口时关闭，最后一个隐藏到托盘）"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
-                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+left_click"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" to look up a word when hovering (no hint if no result is found)"), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+鼠标左键"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" 悬停时查词（未找到结果时无提示）"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
             cnt = ui_box_begin(&cnt_cfg);
