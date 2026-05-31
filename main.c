@@ -2648,7 +2648,7 @@ static void render_dict_pos_selector(void* userdata)
     AppShared* shared = ctx->shared;
     const Theme* theme = &shared->theme;
 
-    if (ctx->dict_pos_count <= 1 || !ctx->dict_content_active)
+    if (ctx->dict_pos_count < 1 || !ctx->dict_content_active)
         return;
 
     // spacer
