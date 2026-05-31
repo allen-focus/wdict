@@ -5233,13 +5233,36 @@ i32 WinMainCRTStartup()
     /* Create message-only window for tray icon callbacks (process-lifetime, independent of any real window) */
     shared.tray_hwnd =
         CreateWindowExW(0, L"TrayIconClass", NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), &shared);
-    RegisterHotKey(shared.tray_hwnd, HOTKEY_TOGGLE_FOREGROUND, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 'M');
-    RegisterHotKey(shared.tray_hwnd, HOTKEY_QUICK_SEARCH, MOD_CONTROL | MOD_ALT, 'M');
+    b32 hotkey_ok = True;
+    wchar_t hotkey_fail_buf[512] = L"";
+
+    if (!RegisterHotKey(shared.tray_hwnd, HOTKEY_TOGGLE_FOREGROUND, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 'M'))
+    {
+        hotkey_ok = False;
+        wcscat_s(hotkey_fail_buf, 512, L"Ctrl+Shift+Alt+M (toggle main window)\n");
+    }
+    if (!RegisterHotKey(shared.tray_hwnd, HOTKEY_QUICK_SEARCH, MOD_CONTROL | MOD_ALT, 'M'))
+    {
+        hotkey_ok = False;
+        wcscat_s(hotkey_fail_buf, 512, L"Ctrl+Alt+M (quick search palette)\n");
+    }
 
     /* Init WinRT OCR and install low-level mouse hook for Ctrl+Alt+Click word lookup */
     ocr_init();
     g_ocr_tray_hwnd = shared.tray_hwnd;
     g_mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, mouse_hook_proc, NULL, 0);
+    if (!g_mouse_hook)
+    {
+        hotkey_ok = False;
+        wcscat_s(hotkey_fail_buf, 512, L"Ctrl+Alt+MouseLeft (word lookup)\n");
+    }
+
+    if (!hotkey_ok)
+    {
+        wchar_t msg[640];
+        swprintf_s(msg, 640, L"The following global hotkeys failed to register:\n\n%ls\nPlease check for conflicts with other applications.", hotkey_fail_buf);
+        MessageBoxW(NULL, msg, L"Hotkey Registration Warning", MB_ICONWARNING | MB_OK);
+    }
 
     /* Add system tray icon (persists until process exit) */
     {
