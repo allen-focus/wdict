@@ -2924,7 +2924,7 @@ static void decoration_overlay(WindowContext* ctx)
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+W"), &hint_text_cfg); ui_box_end(box);
-                ui_text(str(" 关闭标签页"), &hint_text_cfg);
+                ui_text(str(" 关闭标签页（最后一个标签页将销毁窗口）"), &hint_text_cfg);
                 ui_box_end(cnt);
 
                 cnt = ui_box_begin(&cnt_cfg);
@@ -3026,6 +3026,8 @@ static void decoration_overlay(WindowContext* ctx)
             cnt = ui_box_begin(&cnt_cfg);
             ui_text(str(" "), &hint_text_cfg);
             ui_box_end(cnt);
+
+            ui_text(str("版本：2026.6.1"), &hint_text_cfg);
             // clang-format on
         }
         ui_box_end(popup);
@@ -3578,7 +3580,7 @@ static void search_palette_render(WindowContext* ctx)
                     {
                         ui_text(str("Searching..."), &(TextConfig){ .font = &shared->fonts[FONT_INDEX_UI],
                                                                     .font_size = 12.f,
-                                                                    .color = theme->accent_weak_fg });
+                                                                    .color = theme->hover_fg });
                     }
                     ui_box_end(loading_row);
                 }
