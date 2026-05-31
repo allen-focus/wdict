@@ -310,6 +310,7 @@ struct WindowContext
     b32 mouse_tracked;
 
     b32 is_quick_search;
+    b32 quick_search_live_preview;
     i32 quick_search_confirmed_word_idx;
     b32 quick_search_result_confirmed;
     b32 quick_search_closing;
@@ -791,6 +792,31 @@ static void quick_search_activate(AppShared* shared)
     qs->palette_text_edit.mark = 0;
     qs->ui.focused_hash = s_search_palette_input_hash;
     qs->ui.requested_frames = IDLE_WAKE_FRAMES;
+
+    /* Detect whether the foreground window before activation is one of our main windows.
+       Only then do we permit live preview updates to the focused tab content
+       (hidden/minimized/foreign windows are never foreground). */
+    {
+        qs->quick_search_live_preview = False;
+        HWND prev_fg = GetForegroundWindow();
+        if (prev_fg)
+        {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(prev_fg, &pid);
+            if (pid == GetCurrentProcessId())
+            {
+                for (WindowContext* w = shared->first_window; w; w = w->next)
+                {
+                    if (w->window == prev_fg)
+                    {
+                        qs->quick_search_live_preview = True;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     ShowWindow(qs->window, SW_SHOW);
     SetForegroundWindow(qs->window);
 }
@@ -3363,21 +3389,33 @@ static void search_palette_render(WindowContext* ctx)
                                     row_h = row_res.height;
 
                                     /* preview: auto-update tab content for selected item */
-                                    if (i == ctx->palette_selected_index && !ctx->is_quick_search)
                                     {
-                                        const DictWordIndex* w = item->entry;
-                                        PanelTab* active = panel_tab_get_active(ctx->focused_panel);
-                                        if (active)
+                                        WindowContext* tctx = NULL;
+                                        if (i == ctx->palette_selected_index)
                                         {
-                                            const char* wrd = DICT_STR(&shared->dict_db, w->word_stroff);
-                                            isize wlen = strlen(wrd);
-                                            memcpy(active->name, wrd, wlen);
-                                            active->name_len = wlen;
-                                            /* content_data encodes word_idx (upper bits) | pos_idx (lower 8 bits).
-                                               Start at pos 0 when selecting a new word from palette. */
-                                            active->content_data =
-                                                (void*)(isize)(((w - shared->dict_db.words) << 8) | 0);
-                                            active->render_fn = render_dict_content;
+                                            if (!ctx->is_quick_search)
+                                                tctx = ctx;
+                                            else if (ctx->quick_search_live_preview)
+                                                tctx = shared->last_active_main_window;
+                                        }
+                                        if (tctx)
+                                        {
+                                            const DictWordIndex* w = item->entry;
+                                            PanelTab* active = panel_tab_get_active(tctx->focused_panel);
+                                            if (active)
+                                            {
+                                                const char* wrd = DICT_STR(&shared->dict_db, w->word_stroff);
+                                                isize wlen = strlen(wrd);
+                                                memcpy(active->name, wrd, wlen);
+                                                active->name_len = wlen;
+                                                /* content_data encodes word_idx (upper bits) | pos_idx (lower 8 bits).
+                                                   Start at pos 0 when selecting a new word from palette. */
+                                                active->content_data =
+                                                    (void*)(isize)(((w - shared->dict_db.words) << 8) | 0);
+                                                active->render_fn = render_dict_content;
+                                                if (tctx != ctx)
+                                                    tctx->ui.requested_frames = 1;
+                                            }
                                         }
                                     }
 
@@ -3785,6 +3823,7 @@ static void process_frame(WindowContext* ctx)
             ctx->palette_popup.open = False;
             ctx->quick_search_result_confirmed = False;
             ctx->quick_search_closing = False;
+            ctx->quick_search_live_preview = False;
             ctx->palette_selected_index = -1;
             ctx->palette_prev_selected_index = -1;
             ctx->palette_prev_query_len = 0;
@@ -5260,7 +5299,10 @@ i32 WinMainCRTStartup()
     if (!hotkey_ok)
     {
         wchar_t msg[640];
-        swprintf_s(msg, 640, L"The following global hotkeys failed to register:\n\n%ls\nPlease check for conflicts with other applications.", hotkey_fail_buf);
+        swprintf_s(msg, 640,
+                   L"The following global hotkeys failed to register:\n\n%ls\nPlease check for conflicts with other "
+                   L"applications.",
+                   hotkey_fail_buf);
         MessageBoxW(NULL, msg, L"Hotkey Registration Warning", MB_ICONWARNING | MB_OK);
     }
 
