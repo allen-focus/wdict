@@ -9,7 +9,7 @@
 
 ///
 
-#define RASTER_CACHE_ARENA_CAPACITY MB(32)
+#define RASTER_CACHE_ARENA_CAPACITY MB(8)
 
 //
 // IUnknown object that owns font data buffer

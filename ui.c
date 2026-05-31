@@ -11,8 +11,8 @@
 #include "tracy_config.h" // IWYU pragma: keep
 
 #define EPSILON                   1e-4f
-#define UI_CONTEXT_ARENA_CAPACITY MB(32)
-#define BOX_CACHE_ARENA_CAPACITY  MB(16)
+#define UI_CONTEXT_ARENA_CAPACITY MB(2)
+#define BOX_CACHE_ARENA_CAPACITY  MB(2)
 #define BOX_CACHE_CAPACITY        2048 // must be a power of two
 
 ///

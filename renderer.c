@@ -31,7 +31,7 @@
 #define VERTEX_CAPACITY         32768
 #define VERTEX_IS_TEXT          1.0f
 #define VERTEX_IS_NOT_TEXT      0.0f
-#define CLIP_RECT_CAPACITY      256 // 1. must matches shader's define; 2. must be a power of two
+#define CLIP_RECT_CAPACITY      512 // 1. must matches shader's define; 2. must be a power of two
 #define CLIP_INDEX_SKIP         -1
 
 // White glyph: 3x3 solid white rect placed at bottom-right of atlas for solid-color rect rendering.

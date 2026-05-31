@@ -5090,7 +5090,7 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
         g_dict_db = &shared->dict_db;
     }
 
-    shared->search_aux_arena = arena_new(MB(20));
+    shared->search_aux_arena = arena_new(MB(16));
     shared->search_aux = dict_build_search_aux(&shared->dict_db, &shared->search_aux_arena);
     Assert(shared->search_aux);
     g_search_aux = shared->search_aux;
