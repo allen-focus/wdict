@@ -7,6 +7,7 @@
 #include "cmd.h"
 #include "dict.h"
 #include "glyph_cache.h"
+#include "ocr.h"
 #include "overlay_dcomp.h"
 #include "panel.h"
 #include "renderer.h"
@@ -239,6 +240,8 @@ typedef struct
 
     Color accent_border_color;
     b32 has_accent_border;
+
+    b32 ocr_async_active;
 } AppShared;
 
 struct WindowContext
@@ -318,6 +321,25 @@ static DictSearchAuxEntry* g_search_aux;
 static u64 s_search_palette_input_hash;
 static u32 s_window_next_id = 1;
 static u16 s_utf16_pending_high = 0;
+static HHOOK g_mouse_hook;
+static HWND g_ocr_tray_hwnd;
+
+static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+    if (nCode >= 0 && wParam == WM_LBUTTONDOWN)
+    {
+        if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_MENU) & 0x8000))
+        {
+            if (g_ocr_tray_hwnd)
+            {
+                MSLLHOOKSTRUCT* hs = (MSLLHOOKSTRUCT*)lParam;
+                PostMessageW(g_ocr_tray_hwnd, WM_APP_OCR_TRIGGER, (WPARAM)hs->pt.x, (LPARAM)hs->pt.y);
+            }
+            return 1;
+        }
+    }
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
+}
 
 //
 // Theme
@@ -904,6 +926,87 @@ static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM 
 
                 quick_search_activate(shared);
             }
+            return 0;
+        }
+        case WM_APP_OCR_TRIGGER:
+        {
+            if (!shared || !shared->dict_ready || shared->ocr_async_active)
+                return 0;
+            shared->ocr_async_active = True;
+
+            POINT cursor;
+            cursor.x = (i32)wparam;
+            cursor.y = (i32)lparam;
+
+            HMONITOR mon = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+            UINT dpiX = USER_DEFAULT_SCREEN_DPI, dpiY = USER_DEFAULT_SCREEN_DPI;
+            GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+            f32 scale = (f32)dpiX / USER_DEFAULT_SCREEN_DPI;
+            i32 half = (i32)(200.0f * scale);
+            i32 size = half * 2;
+
+            ocr_recognize_region_async(cursor.x - half, cursor.y - half, (u32)size, (u32)size, cursor.x, cursor.y,
+                                       window);
+            return 0;
+        }
+        case WM_APP_OCR_RESULT:
+        {
+            if (!shared)
+                return 0;
+            shared->ocr_async_active = False;
+
+            u8* text = (u8*)wparam;
+            OcrWordBbox* bbox = (OcrWordBbox*)lparam;
+
+            if (!text || !text[0])
+            {
+                if (text)
+                    free(text);
+                if (bbox)
+                    free(bbox);
+                return 0;
+            }
+
+            /* Strip leading/trailing punctuation so "--build" → "build", "apples." → "apples" */
+            ascii_word_strip((char*)text, (isize)strlen((const char*)text));
+            if (!text[0])
+            {
+                free(text);
+                if (bbox)
+                    free(bbox);
+                return 0;
+            }
+
+            i32 word_idx = dict_resolve(&shared->dict_db, (const char*)text);
+
+            if (word_idx >= 0)
+            {
+                /* Restore or find target main window */
+                WindowContext* main = shared->tray_window;
+                if (!main)
+                    main = shared->last_active_main_window;
+                if (!main)
+                    main = shared->first_window;
+                if (main)
+                {
+                    if (shared->tray_window == main)
+                        shared->tray_window = NULL;
+                    ShowWindow(main->window, SW_SHOW);
+                    SetForegroundWindow(main->window);
+                    if (IsIconic(main->window))
+                        ShowWindow(main->window, SW_RESTORE);
+
+                    cmd_queue_push(&shared->cmd_queue,
+                                   str_fmt(CMD_STR_MAX_LENGTH,
+                                           "tab.open_word content_data=%d window=%u replace_active=1",
+                                           (i32)(word_idx << 8), main->id));
+                    main->ui.requested_frames = IDLE_WAKE_FRAMES;
+                }
+            }
+
+            free(text);
+            if (bbox)
+                free(bbox);
             return 0;
         }
     }
@@ -1628,6 +1731,7 @@ static void cmd_tab_open_word(void* userdata, String cmd_text)
     i32 content_data = cmd_parse_i32(cmd_text, str("content_data"), -1);
     u32 window_id = cmd_parse_u32(cmd_text, str("window"), 0);
     u32 panel_id = cmd_parse_u32(cmd_text, str("panel"), 0);
+    b32 replace_active = (b32)cmd_parse_i32(cmd_text, str("replace_active"), 0);
 
     if (content_data < 0)
         return;
@@ -1646,12 +1750,37 @@ static void cmd_tab_open_word(void* userdata, String cmd_text)
     const char* word_str = DICT_STR(&shared->dict_db, shared->dict_db.words[word_idx].word_stroff);
     isize wlen = strlen(word_str);
 
-    PanelTab* tab = panel_tab_declare(p, (String){ (u8*)word_str, wlen });
-    if (tab)
+    if (replace_active)
     {
-        tab->content_data = (void*)(isize)content_data;
-        tab->render_fn = render_dict_content;
-        panel_tab_activate(p, tab);
+        PanelTab* active = panel_tab_get_active(p);
+        if (active && wlen < PANEL_TAB_NAME_MAX)
+        {
+            memcpy(active->name, word_str, wlen);
+            active->name_len = wlen;
+            active->content_data = (void*)(isize)content_data;
+            active->render_fn = render_dict_content;
+        }
+        else
+        {
+            /* Fallback: no active tab, create new one */
+            PanelTab* tab = panel_tab_declare(p, (String){ (u8*)word_str, wlen });
+            if (tab)
+            {
+                tab->content_data = (void*)(isize)content_data;
+                tab->render_fn = render_dict_content;
+                panel_tab_activate(p, tab);
+            }
+        }
+    }
+    else
+    {
+        PanelTab* tab = panel_tab_declare(p, (String){ (u8*)word_str, wlen });
+        if (tab)
+        {
+            tab->content_data = (void*)(isize)content_data;
+            tab->render_fn = render_dict_content;
+            panel_tab_activate(p, tab);
+        }
     }
 
     if (w->ui.requested_frames <= 0)
@@ -2097,19 +2226,7 @@ static void dict_build_tokens_for_block(WindowContext* wctx, UIBox* text_box, co
         lookup_buf[copy_len] = '\0';
 
         /* Strip leading/trailing punctuation so "apple." → "apple" */
-        const char* start = lookup_buf;
-        while (*start && strchr("\"'([{-", *start))
-            start++;
-        if (start > lookup_buf)
-        {
-            isize remain = (isize)strlen(start);
-            memmove(lookup_buf, start, (usize)remain);
-            lookup_buf[remain] = '\0';
-            copy_len = remain;
-        }
-        while (copy_len > 0 && strchr(".,!?;:\"')]}-", lookup_buf[copy_len - 1]))
-            copy_len--;
-        lookup_buf[copy_len] = '\0';
+        copy_len = ascii_word_strip(lookup_buf, copy_len);
 
         i32 idx = dict_resolve(db, lookup_buf);
         tok->dict_word_idx = (idx >= 0) ? (u32)idx : 0;
@@ -2866,6 +2983,12 @@ static void decoration_overlay(WindowContext* ctx)
                 ui_text(str("2. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+Shift+M"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" to toggle foreground (closes if multiple windows, hides to tray if last)"), &hint_text_cfg);
+                ui_box_end(cnt);
+
+                cnt = ui_box_begin(&cnt_cfg);
+                ui_text(str("3. "), &hint_text_cfg);
+                box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+Alt+left_click"), &hint_text_cfg); ui_box_end(box);
+                ui_text(str(" to look up a word when hovering (no hint if no result is found)"), &hint_text_cfg);
                 ui_box_end(cnt);
             }
             cnt = ui_box_begin(&cnt_cfg);
@@ -4301,6 +4424,21 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             ui_ctx->mouse_rclick = True;
+
+            // EXPERIMENT: Hide the window when right click
+            if (shared)
+            {
+                b32 is_last = (shared->first_window == shared->last_window && ctx == shared->first_window);
+                if (is_last)
+                {
+                    shared->tray_window = ctx;
+                    ShowWindow(window, SW_HIDE);
+                }
+                else
+                {
+                    DestroyWindow(window);
+                }
+            }
             return 0;
         }
 
@@ -5096,6 +5234,11 @@ i32 WinMainCRTStartup()
     RegisterHotKey(shared.tray_hwnd, HOTKEY_TOGGLE_FOREGROUND, MOD_CONTROL | MOD_ALT | MOD_SHIFT, 'M');
     RegisterHotKey(shared.tray_hwnd, HOTKEY_QUICK_SEARCH, MOD_CONTROL | MOD_ALT, 'M');
 
+    /* Init WinRT OCR and install low-level mouse hook for Ctrl+Alt+Click word lookup */
+    ocr_init();
+    g_ocr_tray_hwnd = shared.tray_hwnd;
+    g_mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, mouse_hook_proc, NULL, 0);
+
     /* Add system tray icon (persists until process exit) */
     {
         NOTIFYICONDATAW nid = { 0 };
@@ -5356,6 +5499,11 @@ i32 WinMainCRTStartup()
     UnregisterHotKey(shared.tray_hwnd, HOTKEY_QUICK_SEARCH);
     if (shared.tray_hwnd)
         DestroyWindow(shared.tray_hwnd);
+
+    /* Uninstall mouse hook and deinit OCR */
+    if (g_mouse_hook)
+        UnhookWindowsHookEx(g_mouse_hook);
+    ocr_deinit();
 
     ExitProcess(0);
 }

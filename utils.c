@@ -308,3 +308,33 @@ String str_fmt_impl(u8* buf, isize buf_size, const char* fmt, ...)
     Assert(len >= 0 && len < buf_size); // Must be `<` there as `vsnprintf` auto insert '\0' at the end
     return (String){ buf, len };
 }
+
+//
+// ascii text helpers
+//
+
+isize ascii_word_strip(char* buf, isize len)
+{
+    if (len <= 0)
+        return 0;
+
+    /* strip leading punctuation */
+    const char* start = buf;
+    while (*start && strchr("\"'([{-", *start))
+        start++;
+
+    if (start > buf)
+    {
+        isize remain = (isize)strlen(start);
+        memmove(buf, (void*)start, (usize)remain);
+        buf[remain] = '\0';
+        len = remain;
+    }
+
+    /* strip trailing punctuation */
+    while (len > 0 && strchr(".,!?;:\"')]}-", buf[len - 1]))
+        len--;
+    buf[len] = '\0';
+
+    return len;
+}
