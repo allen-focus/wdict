@@ -2742,7 +2742,7 @@ static void decoration_overlay(WindowContext* ctx)
                                                    ir.last_box->position.x + ir.last_box->size.width,
                                                    ir.last_box->position.y + ir.last_box->size.height };
                 }
-                ui_text(str(ICON_FONT_UTF8_MENU),
+                ui_text(str(ICON_FONT_UTF8_HELP),
                         &(TextConfig){ .font = &shared->fonts[FONT_INDEX_ICON], .font_size = 10, .color = fg });
             }
             ui_box_end(btn);

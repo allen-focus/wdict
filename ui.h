@@ -33,6 +33,7 @@
 #define ICON_FONT_UTF8_CANCEL "\xEE\xA0\x81"
 #define ICON_FONT_UTF8_MENU   "\xEF\x80\x88"
 #define ICON_FONT_UTF8_SEARCH "\xEF\x94\x8D"
+#define ICON_FONT_UTF8_HELP   "\xEE\xA0\x82"
 
 ///
 
