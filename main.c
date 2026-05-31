@@ -785,8 +785,12 @@ static void quick_search_activate(AppShared* shared)
     qs->palette_prev_query_len = 0;
     qs->palette_activate_pending = False;
     qs->palette_search_mode = PALETTE_MODE_WORD;
-    qs->palette_effective_mode = PALETTE_MODE_WORD;
+
+    /* Do NOT set palette_effective_mode — let render detect mismatch and reconfigure. */
+    // qs->palette_effective_mode = PALETTE_MODE_WORD;
+
     qs->palette_switch_version = 0;
+
     /* Preserve previous input, auto-select-all */
     qs->palette_text_edit.cursor = qs->palette_text_edit.text_len;
     qs->palette_text_edit.mark = 0;
