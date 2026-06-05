@@ -18,7 +18,7 @@
 #     Not worth doing manually; automate it in CI before enabling.
 
 cmake_minimum_required(VERSION 3.16)
-project(ui C CXX)
+project(wdict C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 #
