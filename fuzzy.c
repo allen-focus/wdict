@@ -420,7 +420,7 @@ static void run_test(const char* name, const char* q, const char* c, Arena* scra
 
 int main(void)
 {
-    Arena scratch = arena_new(MB(1));
+    Arena scratch = arena_new(MB(1), KB(64));
 
     printf("=== Fuzzy Match Tests ===\n\n");
 
@@ -526,7 +526,7 @@ int main(void)
     u32 total = db.hdr->word_count;
     printf("Dictionary: %u words\n\n", total);
 
-    Arena scratch = arena_new(MB(1));
+    Arena scratch = arena_new(MB(1), KB(64));
 
     typedef struct { const char* name; const char* text; } BenchQuery;
     BenchQuery queries[] = {

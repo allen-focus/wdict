@@ -328,7 +328,7 @@ static b32 is_same_glyph_key(const void* a, const void* b, isize size)
 
 void raster_cache_init(const DWriteContext* dwrite, GlyphRasterCache* cache, const isize glyphs_length)
 {
-    cache->arena = arena_new(RASTER_CACHE_ARENA_CAPACITY);
+    cache->arena = arena_new(RASTER_CACHE_ARENA_CAPACITY, MB(8));
     cache->lru_cache = lru_cache_create(&cache->arena, ((glyphs_length - 1) >> 1), glyphs_length, sizeof(GlyphKey),
                                         sizeof(GlyphRasterInfo), fnv1a_hash, is_same_glyph_key);
     cache->dwrite = dwrite;

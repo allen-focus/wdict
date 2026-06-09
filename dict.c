@@ -120,7 +120,7 @@ DictSearchAuxEntry* dict_build_search_aux(const DictDB* db, Arena* arena)
     /* Pass 1 — count total bytes and segments per entry                   */
     /* ------------------------------------------------------------------ */
 
-    Arena tmp = arena_new(MB(8));
+    Arena tmp = arena_new(MB(8), MB(8));
     i32* def_bytes_arr = arena_push(&tmp, sizeof(i32), _Alignof(i32), wc);
     i32* ex_bytes_arr = arena_push(&tmp, sizeof(i32), _Alignof(i32), wc);
     i32* def_segs_arr = arena_push(&tmp, sizeof(i32), _Alignof(i32), wc);
@@ -468,7 +468,7 @@ int main(void)
     /* Test 5-9: Search auxiliary (dict_build_search_aux)                  */
     /* ================================================================== */
 
-    Arena aux_arena = arena_new(MB(128));
+    Arena aux_arena = arena_new(MB(128), MB(8));
     DictSearchAuxEntry* aux = dict_build_search_aux(&db, &aux_arena);
     if (!aux)
     {

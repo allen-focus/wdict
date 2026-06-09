@@ -204,7 +204,7 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
     i32 my_id = wp->worker_id;
 
     /* Per-worker arena — tree in low region, fuzzy_match DP tables reuse the tail. */
-    Arena scratch = arena_new(MB(SEARCH_SCRATCH_MB));
+    Arena scratch = arena_new(MB(SEARCH_SCRATCH_MB), KB(64));
 
     while (state->running)
     {

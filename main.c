@@ -163,7 +163,9 @@ typedef struct
     Color warning_bg;
     Color warning_fg;
 
-    Color hint;
+    Color hint_bg;
+    Color hint_fg;
+
     Color border;
     Color scrollbar_thumb;
     Color scrollbar_track;
@@ -349,47 +351,49 @@ static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 // clang-format off
 static const Theme s_theme_light = {
     /* general */
-    .accent_bg        = rgba(53,  132, 228, 255),
-    .accent_fg        = rgba(255, 255, 255, 255),
-    .accent_subtle_bg = rgba(98,  160, 234, 255),
-    .accent_subtle_fg = rgba(255, 255, 255, 255),
-    .accent_weak_bg   = rgba(153, 193, 241, 255),
-    .accent_weak_fg   = rgba(255, 255, 255, 255),
+    .accent_bg          = rgba(53,  132, 228, 255),
+    .accent_fg          = rgba(255, 255, 255, 255),
+    .accent_subtle_bg   = rgba(98,  160, 234, 255),
+    .accent_subtle_fg   = rgba(255, 255, 255, 255),
+    .accent_weak_bg     = rgba(153, 193, 241, 255),
+    .accent_weak_fg     = rgba(255, 255, 255, 255),
 
-    .hover_bg         = rgba(222, 222, 224, 255),
-    .hover_fg         = rgba(61,  61,  61,  255),
-    .active_bg        = rgba(216, 216, 219, 255),
-    .active_fg        = rgba(34,  34,  34,  255),
-    .press_bg         = rgba(205, 205, 207, 255),
-    .press_fg         = rgba(0,   0,   0,   255),
+    .hover_bg           = rgba(222, 222, 224, 255),
+    .hover_fg           = rgba(61,  61,  61,  255),
+    .active_bg          = rgba(216, 216, 219, 255),
+    .active_fg          = rgba(34,  34,  34,  255),
+    .press_bg           = rgba(205, 205, 207, 255),
+    .press_fg           = rgba(0,   0,   0,   255),
 
-    .destructive_bg   = rgba(224, 27,  36,  255),
-    .destructive_fg   = rgba(255, 255, 255, 255),
-    .success_bg       = rgba(46,  194, 126, 255),
-    .success_fg       = rgba(255, 255, 255, 255),
-    .warning_bg       = rgba(229, 165, 10,  255),
-    .warning_fg       = rgba(0,   0,   0,   255),
+    .destructive_bg     = rgba(224, 27,  36,  255),
+    .destructive_fg     = rgba(255, 255, 255, 255),
+    .success_bg         = rgba(46,  194, 126, 255),
+    .success_fg         = rgba(255, 255, 255, 255),
+    .warning_bg         = rgba(229, 165, 10,  255),
+    .warning_fg         = rgba(0,   0,   0,   255),
 
-    .hint             = rgba(119, 118, 123, 255),
-    .border           = rgba(192, 191, 188, 255),
-    .scrollbar_thumb  = rgba(94,  92,  100, 80 ),
-    .scrollbar_track  = rgba(192, 191, 188, 80 ),
-    .shadow           = rgba(192, 191, 188, 255),
+    .hint_bg            = rgba(238, 238, 238, 255),
+    .hint_fg            = rgba(119, 118, 123, 255),
+
+    .border             = rgba(192, 191, 188, 255),
+    .scrollbar_thumb    = rgba(94,  92,  100, 80 ),
+    .scrollbar_track    = rgba(192, 191, 188, 80 ),
+    .shadow             = rgba(192, 191, 188, 255),
 
     /* specific */
-    .bar_bg           = rgba(228, 227, 227, 255),
-    .bar_fg           = rgba(0,   0,   0,   255),
+    .bar_bg             = rgba(228, 227, 227, 255),
+    .bar_fg             = rgba(0,   0,   0,   255),
 
-    .panel_bg         = rgba(255, 255, 255, 255),
-    .panel_fg         = rgba(0,   0,   0,   255),
+    .panel_bg           = rgba(255, 255, 255, 255),
+    .panel_fg           = rgba(0,   0,   0,   255),
 
-    .palette_bg       = rgba(246, 245, 244, 255),
-    .palette_fg       = rgba(0,   0,   0,   255),
+    .palette_bg         = rgba(246, 245, 244, 255),
+    .palette_fg         = rgba(0,   0,   0,   255),
 
-    .cursor_bar       = rgba(34,  34,  38,  255),
-    .cursor_trail     = rgba(46,  46,  46,  255),
-    .selection        = rgba(192, 191, 188, 255),
-    .selection_flash  = rgba(144, 83,  0,   255),
+    .cursor_bar         = rgba(34,  34,  38,  255),
+    .cursor_trail       = rgba(46,  46,  46,  255),
+    .selection          = rgba(192, 191, 188, 255),
+    .selection_flash    = rgba(144, 83,  0,   255),
 
     .dict_word_fg       = rgba(34,  34,  38,  255),
     .dict_phonetic_fg   = rgba(119, 118, 123, 255),
@@ -403,11 +407,11 @@ static const Theme s_theme_light = {
 
 static const Theme s_theme_dark = {
     /* general */
-    .accent_bg        = rgba(53,  132, 228, 255),
+    .accent_bg        = rgba(23,  102, 178, 255),
     .accent_fg        = rgba(255, 255, 255, 255),
-    .accent_subtle_bg = rgba(98,  160, 234, 255),
+    .accent_subtle_bg = rgba(38,  100, 154, 255),
     .accent_subtle_fg = rgba(255, 255, 255, 255),
-    .accent_weak_bg   = rgba(142, 182, 230, 255),
+    .accent_weak_bg   = rgba(102, 142, 190, 255),
     .accent_weak_fg   = rgba(255, 255, 255, 255),
 
     .hover_bg         = rgba(61,  61,  64,  255),
@@ -424,18 +428,20 @@ static const Theme s_theme_dark = {
     .warning_bg       = rgba(205, 147, 9,   255),
     .warning_fg       = rgba(0,   0,   0,   255),
 
-    .hint             = rgba(154, 153, 150, 255),
-    .border           = rgba(94,  92,  100, 255),
+    .hint_bg          = rgba(46,  46,  46,  255),
+    .hint_fg          = rgba(154, 153, 150, 255),
+
+    .border           = rgba(64,  64,  64,  255),
     .scrollbar_thumb  = rgba(192, 191, 188, 80 ),
     .scrollbar_track  = rgba(94,  92,  100, 80 ),
-    .shadow           = rgba(34,  34,  38,  255),
+    .shadow           = rgba(10,  10,  10,  255),
 
     /* specific */
-    .bar_bg           = rgba(55,  55,  55,  255),
-    .bar_fg           = rgba(255, 255, 255, 255),
+    .bar_bg           = rgba(35,  35,  35,  255),
+    .bar_fg           = rgba(210, 210, 210, 255),
 
-    .panel_bg         = rgba(34,  34,  34,  255),
-    .panel_fg         = rgba(255, 255, 255, 255),
+    .panel_bg         = rgba(19,  19,  19,  255),
+    .panel_fg         = rgba(210, 210, 210, 255),
 
     .palette_bg       = rgba(46,  46,  47,  255),
     .palette_fg       = rgba(255, 255, 255, 255),
@@ -448,9 +454,9 @@ static const Theme s_theme_dark = {
     .dict_word_fg       = rgba(255, 255, 255, 255),
     .dict_phonetic_fg   = rgba(154, 153, 150, 255),
     .dict_separator     = rgba(94,  92,  100, 255),
-    .dict_card_bg       = rgba(46,  46,  46,  255),
+    .dict_card_bg       = rgba(24,  24,  24,  255),
     .dict_definition_fg = rgba(246, 245, 244, 255),
-    .dict_example_bg    = rgba(55,  55,  55,  255),
+    .dict_example_bg    = rgba(36,  36,  36,  255),
     .dict_example_fg    = rgba(192, 191, 188, 255),
     .dict_example_zh_fg = rgba(154, 153, 150, 255),
 };
@@ -523,7 +529,7 @@ static WindowContext* create_window(AppShared* shared, const wchar_t* title, i32
     Assert(ctx);
     ctx->shared = shared;
     ctx->id = s_window_next_id++;
-    ctx->dict_token_arena = arena_new(MB(1));
+    ctx->dict_token_arena = arena_new(MB(1), KB(64));
 
     /* Copy title */
     wcsncpy_s(ctx->title, MAX_TITLE_LENGTH, title, _TRUNCATE);
@@ -2845,7 +2851,7 @@ static void decoration_overlay(WindowContext* ctx)
             // clang-format off
             BoxConfig title_cnt_cfg = (BoxConfig){ .sizing = { fit_grow({}), fit({}) }, .padding = { 8, 0, 3, 0 }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } };
             BoxConfig cnt_cfg = (BoxConfig){ .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } };
-            BoxConfig box_cfg = { .sizing = { fit({}), fit({}) }, .color = theme->active_bg, .rect_style = { .corner_radius = 2 }, .padding = { 3, 3, 3, 3 } };
+            BoxConfig box_cfg = { .sizing = { fit({}), fit({}) }, .color = theme->hint_bg, .rect_style = { .corner_radius = 2 }, .padding = { 3, 3, 3, 3 } };
             TextConfig hint_title_cfg = { .font = &shared->fonts[FONT_INDEX_ZH], .font_size = 11, .color = theme->accent_bg };
             TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_ZH], .font_size = 10, .color = theme->bar_fg };
             UIBox* title_cnt = NULL;
@@ -2920,7 +2926,7 @@ static void decoration_overlay(WindowContext* ctx)
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+T"), &hint_text_cfg); ui_box_end(box);
                 ui_text(str(" 创建标签页"), &hint_text_cfg);
                 ui_box_end(cnt);
-                
+
                 cnt = ui_box_begin(&cnt_cfg);
                 ui_text(str("3. "), &hint_text_cfg);
                 box = ui_box_begin(&box_cfg); ui_text(str("Ctrl+W"), &hint_text_cfg); ui_box_end(box);
@@ -3630,7 +3636,7 @@ static void panel_container(WindowContext* ctx, const Rect rect)
         .tab_bg            = theme->bar_bg,
         .tab_fg            = theme->bar_fg,
         .tab_active_bg     = theme->panel_bg,
-        .tab_active_fg     = theme->panel_fg,
+        .tab_active_fg     = theme->bar_fg,
         .tab_accent        = theme->accent_bg,
         .tab_accent_subtle = theme->accent_subtle_bg,
         .tab_accent_weak   = theme->accent_weak_bg,
@@ -3697,9 +3703,9 @@ static void panel_container(WindowContext* ctx, const Rect rect)
                 else
                 {
                     // clang-format off
-                    TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->hint };
+                    TextConfig hint_text_cfg = { .font = &shared->fonts[FONT_INDEX_UI], .font_size = 11, .color = theme->hint_fg };
                     UIBox* box = NULL;
-                    BoxConfig box_cfg = { .sizing = { fit({}), fit({}) }, .color = theme->active_bg, .rect_style = { .corner_radius = 2 }, .padding = { 3, 3, 3, 3 } };
+                    BoxConfig box_cfg = { .sizing = { fit({}), fit({}) }, .color = theme->hint_bg, .rect_style = { .corner_radius = 2 }, .padding = { 3, 3, 3, 3 } };
                     BoxConfig hint_cnt_cfg = { .sizing = { fit({}), fit({}) }, .alignment = { ALIGN_CENTER, ALIGN_CENTER } };
                     UIBox* hint_cnt = NULL;
 
@@ -4864,16 +4870,16 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 case 'A':
                     if (ctrl) action.flags |= TextActionFlag_SelectAll;
                     else return DefWindowProcW(window, message, wparam, lparam); break;
-                case 'C': 
-                    if (ctrl) action.flags |= TextActionFlag_Copy; 
+                case 'C':
+                    if (ctrl) action.flags |= TextActionFlag_Copy;
                     else return DefWindowProcW(window, message, wparam, lparam); break;
-                case 'X': 
-                    if (ctrl) action.flags |= TextActionFlag_Copy | TextActionFlag_Delete; 
+                case 'X':
+                    if (ctrl) action.flags |= TextActionFlag_Copy | TextActionFlag_Delete;
                     else return DefWindowProcW(window, message, wparam, lparam); break;
-                case 'V': 
-                    if (ctrl) action.flags |= TextActionFlag_Paste; 
+                case 'V':
+                    if (ctrl) action.flags |= TextActionFlag_Paste;
                     else return DefWindowProcW(window, message, wparam, lparam); break;
-                default: 
+                default:
                     if (message == WM_SYSKEYDOWN)
                         return 0;
                     return DefWindowProcW(window, message, wparam, lparam);
@@ -5081,7 +5087,7 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
         u64 dsize = ZSTD_getFrameContentSize(compressed, compressed_size);
         Assert(dsize != ZSTD_CONTENTSIZE_ERROR && dsize != ZSTD_CONTENTSIZE_UNKNOWN);
 
-        shared->dict_arena = arena_new((isize)dsize);
+        shared->dict_arena = arena_new((isize)dsize, MB(8));
         arena_push(&shared->dict_arena, (isize)dsize, 1, 1);
 
         usize result = ZSTD_decompress(shared->dict_arena.base, (size_t)dsize, compressed, compressed_size);
@@ -5092,7 +5098,7 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
         g_dict_db = &shared->dict_db;
     }
 
-    shared->search_aux_arena = arena_new(MB(16));
+    shared->search_aux_arena = arena_new(MB(16), MB(8));
     shared->search_aux = dict_build_search_aux(&shared->dict_db, &shared->search_aux_arena);
     Assert(shared->search_aux);
     g_search_aux = shared->search_aux;
@@ -5130,8 +5136,8 @@ i32 WinMainCRTStartup()
     shared.has_accent_border = win32_get_accent_border_color(&shared.accent_border_color);
 
     /* Init command infrastructure */
-    shared.cfg_arena = arena_new(KB(8));
-    shared.cmd_arena = arena_new(CMD_ARENA_SIZE);
+    shared.cfg_arena = arena_new(KB(8), KB(64));
+    shared.cmd_arena = arena_new(CMD_ARENA_SIZE, KB(64));
     cmd_registry_init(&shared.cmd_registry, &shared.cfg_arena, 32);
     shortcut_registry_init(&shared.shortcuts, &shared.cfg_arena, 64);
     cmd_queue_init(&shared.cmd_queue, &shared.cmd_arena);

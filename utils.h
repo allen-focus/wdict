@@ -144,10 +144,6 @@ isize utf16_encode(u16* str, const u32 codepoint);
 // arena
 //
 
-#if !defined(MEM_COMMIT_BLOCK_SIZE)
-#    define MEM_COMMIT_BLOCK_SIZE MB(8) // NOTE: must be a power of two
-#endif
-
 typedef struct
 {
     byte* base;
@@ -157,7 +153,7 @@ typedef struct
     isize commit_end;
 } Arena;
 
-Arena arena_new(isize capacity);
+Arena arena_new(isize capacity, isize commit_block_size);
 void arena_release(Arena* arena);
 void* arena_push(Arena* arena, const isize size, const isize align, const isize count);
 void arena_pop_to(Arena* arena, const isize pos);

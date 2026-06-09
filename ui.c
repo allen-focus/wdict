@@ -39,7 +39,7 @@ static b32 is_same_u64(const void* a, const void* b, isize size)
 
 static void box_cache_init(UIBoxCache* box_cache)
 {
-    box_cache->arena = arena_new(BOX_CACHE_ARENA_CAPACITY);
+    box_cache->arena = arena_new(BOX_CACHE_ARENA_CAPACITY, MB(1));
     box_cache->lru_cache = lru_cache_create(&box_cache->arena, (BOX_CACHE_CAPACITY >> 1), BOX_CACHE_CAPACITY,
                                             sizeof(u64), sizeof(UIBox), fnv1a_hash, is_same_u64);
 }
@@ -155,7 +155,7 @@ static void box_cache_remove_unused()
 void ui_init(const HWND window, UIContext* ui_ctx, struct Renderer* renderer, GlyphRasterCache* raster_cache, u32 width,
              u32 height, u32 dpi, UIRenderFunc render_fn)
 {
-    ui_ctx->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY);
+    ui_ctx->arena = arena_new(UI_CONTEXT_ARENA_CAPACITY, MB(1));
     box_cache_init(&ui_ctx->box_cache);
     ui_ctx->window = window;
     ui_ctx->renderer = renderer;
@@ -2356,8 +2356,7 @@ void ui_panel_end(PanelContext* panel_ctx)
             Color tc = panel_ctx->theme->tab_fg;
             f32 text_alpha = clamp((t - 0.3f) / 0.7f, 0.f, 1.f);
             tc.a = (u8)((f32)tc.a * text_alpha);
-            ui_text(str("This panel is focused"),
-                    &(TextConfig){ .font = panel_ctx->font_ui, .font_size = 10.5, .color = tc });
+            ui_text(str("Focused"), &(TextConfig){ .font = panel_ctx->font_ui, .font_size = 10.5, .color = tc });
 
             /* optional extra content (e.g. POS selector) */
             if (panel_ctx->bottom_bar_render_fn)
@@ -2455,9 +2454,9 @@ void ui_panel_end(PanelContext* panel_ctx)
                             f32 active_t = zone_interact_res.last_box ? zone_interact_res.last_box->active_t : 0.f;
 
                             Color dock_zone_inactive = panel_ctx->theme->tab_accent;
-                            dock_zone_inactive.a = (u8)(255 * 0.3f);
+                            dock_zone_inactive.a = (u8)(255 * 0.2f);
                             Color dock_zone_active = panel_ctx->theme->tab_accent;
-                            dock_zone_active.a = (u8)(255 * 0.6f);
+                            dock_zone_active.a = (u8)(255 * 0.5f);
 
                             Color dock_zone_inactive_now = lerp_color((Color){ 0 }, dock_zone_inactive, hot_t);
                             dock_zone->cfg.color = lerp_color(dock_zone_inactive_now, dock_zone_active, active_t);

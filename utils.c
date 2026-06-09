@@ -171,13 +171,13 @@ isize utf16_encode(u16* str, const u32 codepoint)
 // arena
 //
 
-Arena arena_new(const isize size)
+Arena arena_new(const isize size, const isize commit_block_size)
 {
     Arena arena = { 0 };
     arena.base = VirtualAlloc(0, size, MEM_RESERVE, PAGE_READWRITE);
     arena.pos = 0;
     arena.reserve_end = size;
-    arena.commit_block_size = MEM_COMMIT_BLOCK_SIZE;
+    arena.commit_block_size = commit_block_size;
     arena.commit_end = 0;
     return arena;
 }

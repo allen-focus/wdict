@@ -183,7 +183,7 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     renderer->shared = shared;
 
     /* Allocate vertex and clip arrays from a dedicated arena */
-    renderer->arena = arena_new(RENDERER_ARENA_CAPACITY);
+    renderer->arena = arena_new(RENDERER_ARENA_CAPACITY, MB(8));
     renderer->vertex_cache.data = arena_push(&renderer->arena, sizeof(Vertex), _Alignof(Vertex), VERTEX_CAPACITY);
     renderer->clip_cache.rects = arena_push(&renderer->arena, sizeof(Rect), _Alignof(Rect), CLIP_RECT_CAPACITY);
 
