@@ -1,12 +1,14 @@
-#include "ocr.h"
+#pragma comment(lib, "gdi32.lib")
 
 #define WINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION 0x130000
+#define COBJMACROS
 
 #include <roapi.h>
 #include <winstring.h>
 #include <windows.graphics.imaging.h>
 #include <windows.media.ocr.h>
 #include <windows.storage.streams.h>
+#include "ocr.h"
 
 #pragma comment(lib, "runtimeobject.lib")
 

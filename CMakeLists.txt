@@ -26,11 +26,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #
 
 if(NOT MSVC)
-    message(FATAL_ERROR "This project currently targets MSVC only.")
+  message(FATAL_ERROR "This project currently targets MSVC only.")
 endif()
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "Only x64 builds are supported.")
+  message(FATAL_ERROR "Only x64 builds are supported.")
 endif()
 
 #
@@ -44,7 +44,7 @@ endif()
 set(CMAKE_CONFIGURATION_TYPES "Debug;Profile;Release" CACHE STRING "" FORCE)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_GENERATOR MATCHES "Visual Studio")
-    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
 endif()
 
 #
@@ -77,7 +77,6 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 #
 
 target_link_options(${PROJECT_NAME} PRIVATE
-    dcomp.lib
     $<$<CONFIG:Debug>:/SUBSYSTEM:WINDOWS>
     $<$<CONFIG:Profile>:/SUBSYSTEM:WINDOWS>
     $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS /FIXED /INCREMENTAL:NO /OPT:ICF /OPT:REF>
@@ -96,9 +95,9 @@ target_link_options(${PROJECT_NAME} PRIVATE
 #
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/tracy/public/TracyClient.cpp")
-    add_subdirectory(thirdparty/tracy)
+  add_subdirectory(thirdparty/tracy)
 
-    target_link_libraries(${PROJECT_NAME} PRIVATE
+  target_link_libraries(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Profile>:tracy_client>
     )
 endif()
@@ -121,7 +120,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE zstd)
 #
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.manifest")
-    target_link_options(${PROJECT_NAME} PRIVATE
+  target_link_options(${PROJECT_NAME} PRIVATE
         /MANIFEST:EMBED
         /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/main.manifest
     )
@@ -132,11 +131,11 @@ endif()
 #
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
-    set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
-    set(FXC_FLAGS /nologo /O3 /WX /Zpc /Ges /Qstrip_reflect /Qstrip_debug /Qstrip_priv)
-    set(SHADER_STAMP "${SHADER_DIR}/shader_compile.stamp")
+  set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+  set(FXC_FLAGS /nologo /O3 /WX /Zpc /Ges /Qstrip_reflect /Qstrip_debug /Qstrip_priv)
+  set(SHADER_STAMP "${SHADER_DIR}/shader_compile.stamp")
 
-    add_custom_command(
+  add_custom_command(
         OUTPUT
             "${SHADER_DIR}/d3d11_vshader.h"
             "${SHADER_DIR}/d3d11_pshader.h"
@@ -158,12 +157,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shader.hlsl")
         VERBATIM
     )
 
-    add_custom_target(shaders DEPENDS "${SHADER_STAMP}")
-    foreach(source ${C_SOURCES})
-        set_source_files_properties(${source} PROPERTIES OBJECT_DEPENDS "${SHADER_STAMP}")
-    endforeach()
+  add_custom_target(shaders DEPENDS "${SHADER_STAMP}")
+  foreach(source ${C_SOURCES})
+    set_source_files_properties(${source} PROPERTIES OBJECT_DEPENDS "${SHADER_STAMP}")
+  endforeach()
 
-    add_dependencies(${PROJECT_NAME} shaders)
+  add_dependencies(${PROJECT_NAME} shaders)
 endif()
 
 #
@@ -171,11 +170,11 @@ endif()
 #
 
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc")
-    set(RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources")
-    set(RC_OUTPUT "${RESOURCE_DIR}/resource.res")
-    set(RESOURCE_STAMP "${RESOURCE_DIR}/resource_compile.stamp")
+  set(RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources")
+  set(RC_OUTPUT "${RESOURCE_DIR}/resource.res")
+  set(RESOURCE_STAMP "${RESOURCE_DIR}/resource_compile.stamp")
 
-    add_custom_command(
+  add_custom_command(
         OUTPUT "${RC_OUTPUT}" "${RESOURCE_STAMP}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${RESOURCE_DIR}"
         COMMAND rc /nologo /fo "${RC_OUTPUT}" "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc"
@@ -185,10 +184,10 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc")
         VERBATIM
     )
 
-    add_custom_target(resource_compile DEPENDS "${RESOURCE_STAMP}")
-    add_dependencies(${PROJECT_NAME} resource_compile)
+  add_custom_target(resource_compile DEPENDS "${RESOURCE_STAMP}")
+  add_dependencies(${PROJECT_NAME} resource_compile)
 
-    target_link_options(${PROJECT_NAME} PRIVATE "${RC_OUTPUT}")
+  target_link_options(${PROJECT_NAME} PRIVATE "${RC_OUTPUT}")
 endif()
 
 #
