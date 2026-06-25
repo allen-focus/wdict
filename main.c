@@ -3426,7 +3426,7 @@ static void search_palette_render(WindowContext* ctx)
                                 PaletteDisplayItem* item = &items[i];
 
                                 UIBox* row = ui_box_begin(&(BoxConfig){
-                                    .sizing = { fit_grow({}), fit({}) },
+                                    .sizing = { grow({}), fit({}) },
                                     .direction = LAYOUT_TOP_TO_BOTTOM,
                                     .padding = { 8, 8, 8, 8 },
                                     .child_gap = 6,
