@@ -316,6 +316,7 @@ struct WindowContext
     i32 quick_search_confirmed_word_idx;
     b32 quick_search_result_confirmed;
     b32 quick_search_closing;
+    b32 dpi_repositioning;
 };
 
 static DictDB* g_dict_db;
@@ -838,35 +839,56 @@ static void quick_search_activate(AppShared* shared)
         }
     }
 
-    /* Re-detect DPI — hidden windows may have missed WM_DPICHANGED
-       when monitor topology changed (undock, disconnect external display, etc.) */
+    /* DPI + position adaptation for primary monitor.
+       Hidden WS_POPUP windows don't receive WM_DPICHANGED, so GetDpiForWindow
+       returns stale values. Use GetDpiForMonitor on the primary monitor as ground truth. */
     {
-        UINT current_dpi = GetDpiForWindow(qs->window);
-        if (current_dpi != qs->ui.dpi)
+        HMONITOR mon = MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
+        UINT target_dpi = USER_DEFAULT_SCREEN_DPI;
         {
-            qs->ui.dpi = current_dpi;
-            renderer_recreate_glyph_atlas_texture(&qs->renderer);
-
-            f32 dpi_scale = (f32)current_dpi / USER_DEFAULT_SCREEN_DPI;
-            u32 physical_w = (u32)(QUICK_SEARCH_WINDOW_W * dpi_scale);
-            u32 physical_h = (u32)(QUICK_SEARCH_WINDOW_H * dpi_scale);
-
-            /* Re-center on the monitor the window is currently on */
-            HMONITOR mon = MonitorFromWindow(qs->window, MONITOR_DEFAULTTONEAREST);
-            MONITORINFO mi = { .cbSize = sizeof(mi) };
-            GetMonitorInfoW(mon, &mi);
-            i32 work_w = mi.rcWork.right - mi.rcWork.left;
-            i32 work_h = mi.rcWork.bottom - mi.rcWork.top;
-            i32 pos_x = mi.rcWork.left + (work_w - (i32)physical_w) / 2;
-            i32 pos_y = mi.rcWork.top + (work_h - (i32)physical_h) / 2;
-
-            /* SetWindowPos triggers WM_SIZE → renderer_resize + logical dims update */
-            SetWindowPos(qs->window, NULL, pos_x, pos_y, (i32)physical_w, (i32)physical_h,
-                         SWP_NOZORDER | SWP_NOACTIVATE);
+            UINT dx = 0, dy = 0;
+            GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dx, &dy);
+            if (dx > 0)
+                target_dpi = dx;
         }
+
+        if (target_dpi != qs->ui.dpi)
+        {
+            qs->ui.dpi = target_dpi;
+            renderer_recreate_glyph_atlas_texture(&qs->renderer);
+        }
+
+        f32 dpi_scale = (f32)target_dpi / USER_DEFAULT_SCREEN_DPI;
+        u32 physical_w = (u32)(QUICK_SEARCH_WINDOW_W * dpi_scale);
+        u32 physical_h = (u32)(QUICK_SEARCH_WINDOW_H * dpi_scale);
+
+        MONITORINFO mi = { .cbSize = sizeof(mi) };
+        GetMonitorInfoW(mon, &mi);
+        i32 work_w = mi.rcWork.right - mi.rcWork.left;
+        i32 work_h = mi.rcWork.bottom - mi.rcWork.top;
+        i32 pos_x = mi.rcWork.left + (work_w - (i32)physical_w) / 2;
+        i32 pos_y = mi.rcWork.top + (work_h - (i32)physical_h) / 2;
+
+        /* Guard: skip GetDpiForWindow in WM_NCCALCSIZE (stale — window hasn't moved yet) */
+        qs->dpi_repositioning = True;
+
+        /* Show before SetWindowPos so WM_NCCALCSIZE/WM_SIZE fire while visible on target monitor */
+        ShowWindow(qs->window, SW_SHOW);
+        SetWindowPos(qs->window, NULL, pos_x, pos_y, (i32)physical_w, (i32)physical_h,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+
+        /* Hidden WS_POPUP may not get WM_SIZE — manually update client dims + swapchain */
+        {
+            f32 s = (f32)qs->ui.dpi / USER_DEFAULT_SCREEN_DPI;
+            qs->ui.client_width = (u32)ceil(physical_w / s);
+            qs->ui.client_height = (u32)ceil(physical_h / s);
+            if (qs->ui.client_width > 0 && qs->ui.client_height > 0)
+                qs->ui.render_fn.on_resize(qs->ui.renderer, physical_w, physical_h);
+        }
+
+        qs->dpi_repositioning = False;
     }
 
-    ShowWindow(qs->window, SW_SHOW);
     SetForegroundWindow(qs->window);
 }
 
@@ -4162,7 +4184,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             if (ctx && ctx->is_quick_search)
             {
                 NCCALCSIZE_PARAMS* params = (NCCALCSIZE_PARAMS*)lparam;
-                u32 dpi = GetDpiForWindow(window);
+                /* During quick_search_activate repositioning, GetDpiForWindow returns
+                   stale DPI (window hasn't finished moving yet). Trust ui.dpi which was
+                   set from GetDpiForMonitor on the target primary monitor. */
+                u32 dpi = ctx->dpi_repositioning ? ui_ctx->dpi : GetDpiForWindow(window);
                 ui_ctx->dpi = dpi;
                 f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
                 ui_ctx->client_width = (u32)ceil((params->rgrc[0].right - params->rgrc[0].left) / dpi_scale);
