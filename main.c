@@ -668,14 +668,25 @@ static WindowContext* create_quick_search_window(AppShared* shared)
     ctx->id = s_window_next_id++;
     ctx->is_quick_search = True;
 
-    UINT dpi = GetDpiForSystem();
+    /* Use the DPI of the monitor where the last active main window lives,
+       not the system-wide DPI, so mixed-DPI multi-monitor setups work correctly. */
+    HMONITOR mon = MonitorFromWindow(shared->last_active_main_window ? shared->last_active_main_window->window : NULL, MONITOR_DEFAULTTONEAREST);
+    UINT dpi = USER_DEFAULT_SCREEN_DPI;
+    {
+        UINT dpi_x = 0, dpi_y = 0;
+        GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y);
+        if (dpi_x > 0)
+            dpi = dpi_x;
+    }
     f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
     u32 physical_w = (u32)(QUICK_SEARCH_WINDOW_W * dpi_scale);
     u32 physical_h = (u32)(QUICK_SEARCH_WINDOW_H * dpi_scale);
-    i32 screen_w = GetSystemMetricsForDpi(SM_CXSCREEN, dpi);
-    i32 screen_h = GetSystemMetricsForDpi(SM_CYSCREEN, dpi);
-    i32 pos_x = (screen_w - (i32)physical_w) / 2;
-    i32 pos_y = (screen_h - (i32)physical_h) / 2;
+    MONITORINFO mi = { .cbSize = sizeof(mi) };
+    GetMonitorInfoW(mon, &mi);
+    i32 work_w = mi.rcWork.right - mi.rcWork.left;
+    i32 work_h = mi.rcWork.bottom - mi.rcWork.top;
+    i32 pos_x = mi.rcWork.left + (work_w - (i32)physical_w) / 2;
+    i32 pos_y = mi.rcWork.top + (work_h - (i32)physical_h) / 2;
 
     ctx->window =
         CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"window class", L"", WS_POPUP,
@@ -824,6 +835,34 @@ static void quick_search_activate(AppShared* shared)
                     }
                 }
             }
+        }
+    }
+
+    /* Re-detect DPI — hidden windows may have missed WM_DPICHANGED
+       when monitor topology changed (undock, disconnect external display, etc.) */
+    {
+        UINT current_dpi = GetDpiForWindow(qs->window);
+        if (current_dpi != qs->ui.dpi)
+        {
+            qs->ui.dpi = current_dpi;
+            renderer_recreate_glyph_atlas_texture(&qs->renderer);
+
+            f32 dpi_scale = (f32)current_dpi / USER_DEFAULT_SCREEN_DPI;
+            u32 physical_w = (u32)(QUICK_SEARCH_WINDOW_W * dpi_scale);
+            u32 physical_h = (u32)(QUICK_SEARCH_WINDOW_H * dpi_scale);
+
+            /* Re-center on the monitor the window is currently on */
+            HMONITOR mon = MonitorFromWindow(qs->window, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi = { .cbSize = sizeof(mi) };
+            GetMonitorInfoW(mon, &mi);
+            i32 work_w = mi.rcWork.right - mi.rcWork.left;
+            i32 work_h = mi.rcWork.bottom - mi.rcWork.top;
+            i32 pos_x = mi.rcWork.left + (work_w - (i32)physical_w) / 2;
+            i32 pos_y = mi.rcWork.top + (work_h - (i32)physical_h) / 2;
+
+            /* SetWindowPos triggers WM_SIZE → renderer_resize + logical dims update */
+            SetWindowPos(qs->window, NULL, pos_x, pos_y, (i32)physical_w, (i32)physical_h,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
 
@@ -4049,6 +4088,7 @@ static void process_frame(WindowContext* ctx)
         ui_box_end(root_box_container);
     }
     ui_frame_end(arena_pos_backup);
+
     ctx->in_frame = False;
     TracyCZoneEnd(ctx_frame);
 }
