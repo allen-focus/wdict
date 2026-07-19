@@ -75,6 +75,138 @@ typedef enum
     PALETTE_VIEW_NO_MATCH,
 } PaletteViewState;
 
+typedef enum
+{
+    POS_DOMAIN_NAME,
+    POS_DOMAIN_SLANG,
+    POS_DOMAIN_CHEM,
+    POS_DOMAIN_MED,
+    POS_DOMAIN_ARCHAIC,
+    POS_DOMAIN_BIBLE,
+    POS_DOMAIN_GEO,
+    POS_DOMAIN_ARCH,
+    POS_DOMAIN_MECH,
+    POS_DOMAIN_LAW,
+    POS_DOMAIN_ELEC,
+    POS_DOMAIN_ECON,
+    POS_DOMAIN_NET,
+    POS_DOMAIN_SLANG_US,
+    POS_DOMAIN_COMP,
+    POS_ADJ,
+    POS_ABBR,
+    POS_ADV,
+    POS_ART,
+    POS_AUX,
+    POS_CONJ,
+    POS_INTERJ,
+    POS_NOUN,
+    POS_NUM,
+    POS_PL,
+    POS_PREF,
+    POS_PREP,
+    POS_PRON,
+    POS_SUFFIX,
+    POS_VERB,
+    POS_VBL,
+    POS_VERB_INTRANSITIVE,
+    POS_VERB_TRANSITIVE,
+    POS_UNKNOWN = 0xFF,
+} PosKind;
+
+typedef struct
+{
+    PosKind kind;
+    String def_text;
+} DefLine;
+
+static const char* s_pos_names[] = {
+    [POS_DOMAIN_NAME] = "[人名]",
+    [POS_DOMAIN_SLANG] = "[俚]",
+    [POS_DOMAIN_CHEM] = "[化]",
+    [POS_DOMAIN_MED] = "[医]",
+    [POS_DOMAIN_ARCHAIC] = "[古]",
+    [POS_DOMAIN_BIBLE] = "[圣经]",
+    [POS_DOMAIN_GEO] = "[地名]",
+    [POS_DOMAIN_ARCH] = "[建]",
+    [POS_DOMAIN_MECH] = "[机]",
+    [POS_DOMAIN_LAW] = "[法]",
+    [POS_DOMAIN_ELEC] = "[电]",
+    [POS_DOMAIN_ECON] = "[经]",
+    [POS_DOMAIN_NET] = "[网络]",
+    [POS_DOMAIN_SLANG_US] = "[美俚]",
+    [POS_DOMAIN_COMP] = "[计]",
+    [POS_ADJ] = "adj.",
+    [POS_ABBR] = "abbr.",
+    [POS_ADV] = "adv.",
+    [POS_ART] = "art.",
+    [POS_AUX] = "aux.",
+    [POS_CONJ] = "conj.",
+    [POS_INTERJ] = "interj.",
+    [POS_NOUN] = "noun",
+    [POS_NUM] = "num.",
+    [POS_PL] = "pl.",
+    [POS_PREF] = "pref.",
+    [POS_PREP] = "prep.",
+    [POS_PRON] = "pron.",
+    [POS_SUFFIX] = "suf.",
+    [POS_VERB] = "verb",
+    [POS_VBL] = "vbl.",
+    [POS_VERB_INTRANSITIVE] = "vi.",
+    [POS_VERB_TRANSITIVE] = "vt.",
+};
+
+static const struct
+{
+    const char* tag;
+    PosKind kind;
+} s_pos_tag_table[] = {
+    { "[人名]", POS_DOMAIN_NAME },
+    { "[俚]", POS_DOMAIN_SLANG },
+    { "[化]", POS_DOMAIN_CHEM },
+    { "[医]", POS_DOMAIN_MED },
+    { "[古]", POS_DOMAIN_ARCHAIC },
+    { "[圣经]", POS_DOMAIN_BIBLE },
+    { "[地名]", POS_DOMAIN_GEO },
+    { "[建]", POS_DOMAIN_ARCH },
+    { "[机]", POS_DOMAIN_MECH },
+    { "[法]", POS_DOMAIN_LAW },
+    { "[电]", POS_DOMAIN_ELEC },
+    { "[经]", POS_DOMAIN_ECON },
+    { "[网络]", POS_DOMAIN_NET },
+    { "[美俚]", POS_DOMAIN_SLANG_US },
+    { "[计]", POS_DOMAIN_COMP },
+    { "a", POS_ADJ },
+    { "abbr", POS_ABBR },
+    { "adv", POS_ADV },
+    { "art", POS_ART },
+    { "aux", POS_AUX },
+    { "conj", POS_CONJ },
+    { "int", POS_INTERJ },
+    { "interj", POS_INTERJ },
+    { "n", POS_NOUN },
+    { "num", POS_NUM },
+    { "pl", POS_PL },
+    { "pref", POS_PREF },
+    { "prep", POS_PREP },
+    { "pron", POS_PRON },
+    { "su", POS_SUFFIX },
+    { "v", POS_VERB },
+    { "vbl", POS_VBL },
+    { "vi", POS_VERB_INTRANSITIVE },
+    { "vt", POS_VERB_TRANSITIVE },
+};
+
+static PosKind pos_kind_from_tag(const u8* tag, isize tag_len)
+{
+    for (u32 i = 0; i < countof(s_pos_tag_table); i++)
+    {
+        if ((isize)strlen(s_pos_tag_table[i].tag) == tag_len &&
+            memcmp(s_pos_tag_table[i].tag, tag, (usize)tag_len) == 0)
+            return s_pos_tag_table[i].kind;
+    }
+    return POS_UNKNOWN;
+}
+
 typedef struct
 {
     b32 open;
@@ -87,7 +219,7 @@ typedef struct
     b32 active;
     char word[256];
     char phonetic[256];
-    String def_lines[32];
+    DefLine def_lines[32];
     i32 def_line_count;
     i32 anchor_x, anchor_y;
     u32 anchor_w, anchor_h;
@@ -759,24 +891,53 @@ static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* b
             {
                 if (s[i] == '\xef' && s[i + 1] == '\xbc' && s[i + 2] == '\x9b')
                 {
-                    if (i > (isize)(line_start - s))
-                    {
-                        popup->ocr_popup.def_lines[line_count] =
-                            (String){ (u8*)line_start, (isize)(s + i - line_start) };
-                        line_count++;
-                    }
-                    line_start = s + i + 3;
-                    i += 2;
+                    goto emit;
                 }
-                else if (s[i] == 0)
+                else if (s[i] != 0)
                 {
-                    if (i > (isize)(line_start - s))
-                    {
-                        popup->ocr_popup.def_lines[line_count] =
-                            (String){ (u8*)line_start, (isize)(s + i - line_start) };
-                        line_count++;
-                    }
+                    continue;
                 }
+            emit:
+                if (i > (isize)(line_start - s))
+                {
+                    isize seg_len = s + i - line_start;
+                    isize tag_len = 0;
+
+                    if (line_start[0] == '[')
+                    {
+                        while (tag_len < seg_len && line_start[tag_len] != ']')
+                            tag_len++;
+                        if (tag_len < seg_len)
+                            tag_len++;
+                    }
+                    else
+                    {
+                        while (tag_len < seg_len && ((u8)line_start[tag_len] < 0x80))
+                            tag_len++;
+                    }
+                    while (tag_len > 0 && (line_start[tag_len - 1] == ' ' || line_start[tag_len - 1] == '.'))
+                        tag_len--;
+
+                    if (tag_len > 0 && tag_len < seg_len)
+                    {
+                        popup->ocr_popup.def_lines[line_count].kind = pos_kind_from_tag((const u8*)line_start, tag_len);
+                        isize def_start = tag_len;
+                        while (def_start < seg_len && (line_start[def_start] == ' ' || line_start[def_start] == '.'))
+                            def_start++;
+                        popup->ocr_popup.def_lines[line_count].def_text =
+                            (String){ (u8*)(line_start + def_start), seg_len - def_start };
+                    }
+                    else
+                    {
+                        popup->ocr_popup.def_lines[line_count].kind = POS_UNKNOWN;
+                        popup->ocr_popup.def_lines[line_count].def_text = (String){ (u8*)line_start, seg_len };
+                    }
+                    line_count++;
+                }
+                line_start = s + i + 3;
+                i += 2;
+                if (s[i - 2] == 0)
+                    break;
             }
             popup->ocr_popup.def_line_count = line_count;
         }
@@ -1406,8 +1567,8 @@ static void render_highlighted_text(String text, i32 range_count, const FuzzyRan
 }
 
 static void render_dict_headline(String word_text, i32 word_range_count, const FuzzyRange* word_ranges,
-                                  const TextConfig* word_cfg, const TextConfig* word_hl_cfg,
-                                  String phonetic, const TextConfig* phon_cfg)
+                                 const TextConfig* word_cfg, const TextConfig* word_hl_cfg, String phonetic,
+                                 const TextConfig* phon_cfg)
 {
     UIBox* word_line = ui_box_begin(&(BoxConfig){
         .sizing = { fit_grow({}), fit({}) },
@@ -1783,9 +1944,8 @@ static void search_palette_render(WindowContext* ctx)
                                             .font_size = 11.f,
                                             .color = theme->dict_phonetic_fg,
                                         };
-                                        render_dict_headline(item->word_text, item->word_range_count,
-                                                              item->word_ranges, &normal_cfg, &highlight_cfg,
-                                                              item->phonetic, &phon_cfg);
+                                        render_dict_headline(item->word_text, item->word_range_count, item->word_ranges,
+                                                             &normal_cfg, &highlight_cfg, item->phonetic, &phon_cfg);
                                     }
 
                                     /* context line — shown for def/ex/all modes, truncated to 2 lines */
@@ -1983,14 +2143,14 @@ static void ocr_popup_render(WindowContext* ctx)
             .sizing = { grow({}), grow({}) },
             .padding = { pad, pad, pad, pad },
             .direction = LAYOUT_TOP_TO_BOTTOM,
-            .child_gap = 4,
+            .child_gap = 8,
         });
         {
             {
                 String word_str = { (u8*)ctx->ocr_popup.word, (isize)strlen(ctx->ocr_popup.word) };
                 String phon_str = { (u8*)ctx->ocr_popup.phonetic, (isize)strlen(ctx->ocr_popup.phonetic) };
                 TextConfig word_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
-                                        .font_size = 16.f,
+                                        .font_size = 14.f,
                                         .color = theme->dict_word_fg };
                 TextConfig word_hl_cfg = word_cfg;
                 TextConfig phon_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
@@ -2005,9 +2165,31 @@ static void ocr_popup_render(WindowContext* ctx)
 
             if (ctx->ocr_popup.def_line_count > 0)
             {
+                TextConfig pos_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
+                                       .font_size = 10.f,
+                                       .color = theme->accent_fg };
+                f32 pos_pad = 6.f;
+                f32 pos_box_w = 0.f;
+
+                for (i32 i = 0; i < ctx->ocr_popup.def_line_count; i++)
+                {
+                    const char* name = NULL;
+                    if ((u32)ctx->ocr_popup.def_lines[i].kind < countof(s_pos_names))
+                        name = s_pos_names[ctx->ocr_popup.def_lines[i].kind];
+                    if (!name)
+                        name = "?";
+                    String ns = { (u8*)name, (isize)strlen(name) };
+                    f32 w = renderer_get_text_width_for_dpi(&ctx->renderer, &shared->raster_cache, ns, pos_cfg.font,
+                                                            pos_cfg.font_size, ui_ctx->dpi);
+                    if (w > pos_box_w)
+                        pos_box_w = w;
+                }
+                pos_box_w += pos_pad * 2.f;
+
                 ScrollContext scroll = ui_scrollable_area_begin(&(ScrollableAreaConfig){
                     .hash_str = str("##ocr_defs"),
                     .sizing = { grow({}), grow({}) },
+                    .child_gap = 4.f,
                     .padding = { 2, 2, 2, 2 },
                     .bg = theme->palette_bg,
                     .thumb_color = theme->scrollbar_thumb,
@@ -2015,18 +2197,45 @@ static void ocr_popup_render(WindowContext* ctx)
                 });
                 {
                     TextConfig def_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
-                                           .font_size = 13.f,
+                                           .font_size = 11.f,
                                            .color = theme->dict_definition_fg,
+                                           .line_height = 16.5f,
                                            .wrap = True };
 
                     for (i32 i = 0; i < ctx->ocr_popup.def_line_count; i++)
                     {
                         UIBox* line = ui_box_begin(&(BoxConfig){
                             .sizing = { grow({}), fit({}) },
-                            .child_gap = 4,
+                            .direction = LAYOUT_LEFT_TO_RIGHT,
+                            .child_gap = 6,
                         });
                         {
-                            ui_text(ctx->ocr_popup.def_lines[i], &def_cfg);
+                            UIBox* pos_box = ui_box_begin(&(BoxConfig){
+                                .sizing = { fixed(pos_box_w), fit({}) },
+                                .padding = { pos_pad, pos_pad, pos_pad, pos_pad },
+                                .color = theme->accent_weak_bg,
+                                .rect_style = { .corner_radius = 3 },
+                                .alignment = { ALIGN_CENTER, ALIGN_CENTER },
+                            });
+                            {
+                                const char* name = NULL;
+                                if ((u32)ctx->ocr_popup.def_lines[i].kind < countof(s_pos_names))
+                                    name = s_pos_names[ctx->ocr_popup.def_lines[i].kind];
+                                if (!name)
+                                    name = "?";
+                                String ns = { (u8*)name, (isize)strlen(name) };
+                                ui_text(ns, &pos_cfg);
+                            }
+                            ui_box_end(pos_box);
+
+                            UIBox* def_box = ui_box_begin(&(BoxConfig){
+                                .sizing = { fit_grow({}), fit({}) },
+                                .padding = { 2, 0, 2, 0 },
+                            });
+                            {
+                                ui_text(ctx->ocr_popup.def_lines[i].def_text, &def_cfg);
+                            }
+                            ui_box_end(def_box);
                         }
                         ui_box_end(line);
                     }
