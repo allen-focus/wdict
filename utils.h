@@ -2,6 +2,21 @@
 
 #include <stdint.h>
 
+//
+// Memory tracking — prints to debug output in debug/tracy builds
+//
+#if !defined(NDEBUG) || defined(TRACY_ENABLE)
+#include <stdio.h>
+__declspec(dllimport) void __stdcall OutputDebugStringA(const char* lpOutputString);
+#define MEM_TRACK(...) do { \
+    char __mbuf[200]; \
+    int __mn = snprintf(__mbuf, sizeof(__mbuf), __VA_ARGS__); \
+    if (__mn > 0 && __mn < (int)sizeof(__mbuf)) OutputDebugStringA(__mbuf); \
+} while(0)
+#else
+#define MEM_TRACK(...) ((void)0)
+#endif
+
 ///
 
 // clang-format off

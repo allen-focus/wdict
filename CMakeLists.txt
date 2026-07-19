@@ -180,6 +180,7 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc")
         COMMAND rc /nologo /fo "${RC_OUTPUT}" "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc"
         COMMAND ${CMAKE_COMMAND} -E touch "${RESOURCE_STAMP}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resource.rc"
+                "${CMAKE_CURRENT_SOURCE_DIR}/data/dict.bin.zstd"
         COMMENT "Compiling resource file"
         VERBATIM
     )

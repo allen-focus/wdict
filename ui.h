@@ -2,7 +2,6 @@
 
 #include "utils.h"
 #include "glyph_cache.h"
-#include "panel.h"
 
 // NOTE: In FIT mode, min/max constraints act as bounds on content wrapping:
 // They define the range within which content can shrink or expand due to wrapping,
@@ -549,73 +548,6 @@ typedef struct
 } ScrollableAreaConfig;
 
 //
-// Panel
-//
-
-typedef struct
-{
-    Color hover_bg;
-    Color scrollbar_thumb;
-
-    Color panel_bg;
-    Color panel_border;
-
-    Color tab_bg;
-    Color tab_fg;
-    Color tab_active_bg;
-    Color tab_active_fg;
-    Color tab_border;
-    Color tab_accent;
-    Color tab_accent_subtle;
-    Color tab_accent_weak;
-} PanelTheme;
-
-typedef struct
-{
-    Panel* panel;
-    Rect root_rect;
-    Rect panel_rect; // pre-computed panel rect (set by caller; zero = compute internally)
-    f32 tab_bar_right_inset; // pixels to trim from tab bar right edge (0 = full width)
-    f32 tab_bar_left_inset; // pixels to trim from tab bar left edge (0 = full width)
-    const PanelTheme* theme;
-    const Font* font_ui;
-    f32 font_size;
-    CmdQueue* cmd_queue;
-    u32 window_id;
-    Padding padding;
-    f32 child_gap;
-    LayoutDirection direction;
-    Alignment alignment;
-    b32 show_bottom_bar; // draw bottom accent bar when this panel is focused
-
-    /* Optional callback to render extra content inside the bottom bar (after hint text, before bar end).
-       The callback runs inside the bottom bar's LAYOUT_LEFT_TO_RIGHT layout. Use a grow({}) spacer
-       before your content to push it to the right edge. */
-    void (*bottom_bar_render_fn)(void* userdata);
-    void* bottom_bar_userdata;
-} PanelConfig;
-
-typedef struct
-{
-    Panel* panel;
-    ScrollContext scroll_ctx;
-    UIBox* outer_box;
-    UIBoxInteractResult interact;
-    f32 panel_w;
-    f32 panel_h;
-    Rect tab_bar_spacer_rect; // output: absolute logical rect of tab bar spacer (filled by ui_panel_begin)
-    u32 window_id;
-    CmdQueue* cmd_queue;
-    const PanelTheme* theme;
-    const Font* font_ui;
-    f32 font_size;
-    b32 show_bottom_bar;
-
-    void (*bottom_bar_render_fn)(void* userdata);
-    void* bottom_bar_userdata;
-} PanelContext;
-
-//
 // Functions
 //
 
@@ -648,17 +580,9 @@ void ui_request_frames(void);
 ScrollContext ui_scrollable_area_begin(const ScrollableAreaConfig* cfg);
 void ui_scrollable_area_end(ScrollContext scroll_ctx);
 
-// panel
-
-void ui_panel_boundaries(const Panel* root, const Rect root_rect, const PanelTheme* theme);
-PanelContext ui_panel_begin(const PanelConfig* cfg);
-void ui_panel_end(PanelContext* pf);
-
 // widget
 UISignalFlags ui_button(const String text_with_hash_str, const Font* font, f32 font_size, Sizing sizing,
                         Padding padding, Color bg, Color fg, Color hover_bg);
-UISignalFlags ui_switchbox(const String hash_str, const Font* font, b32* check, const Color bg, const Color active_bg,
-                           const Color fg, const Color shadow_color);
 UISignalFlags ui_text_field(TextEditState* state, const String text_with_hash_str, const Font* font,
                             const f32 font_size, const SizingAxis sizing_x, const Padding padding, const Color bg,
                             const Color border_color, const Color fg, const Color thumb_color,

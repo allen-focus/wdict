@@ -64,8 +64,6 @@ typedef struct
 typedef enum
 {
     QN_TERM, // search a term in a set of fields
-    QN_AND, // both children must match
-    QN_OR, // either child matches
 } QueryNodeKind;
 
 typedef struct QueryNode QueryNode;
@@ -77,10 +75,6 @@ struct QueryNode
     String term;
     const FieldDef* fields;
     i32 field_count;
-
-    // QN_AND / QN_OR
-    QueryNode* left;
-    QueryNode* right;
 };
 
 //
@@ -114,8 +108,6 @@ MatchAgg query_eval(const QueryNode* node, const void* entry, Arena* scratch);
 //
 
 QueryNode* qn_term(Arena* a, String term, const FieldDef* fields, i32 field_count);
-QueryNode* qn_and(Arena* a, QueryNode* l, QueryNode* r);
-QueryNode* qn_or(Arena* a, QueryNode* l, QueryNode* r);
 
 //
 // Search result

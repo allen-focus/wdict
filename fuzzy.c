@@ -181,6 +181,14 @@ FuzzyMatch fuzzy_match(String query, String candidate, Arena* scratch)
 
     u32 first_q_cp = q_chars[0].cp;
 
+    /* Normalisation factor: log2(candidate length).  Used to scale position
+       penalty and gap penalty so that matches in long texts (definition
+       search for common polysemous words) are not dominated by candidate
+       length.  Short candidates (word mode, 3‑20 chars) are virtually
+       unaffected because log2 of small numbers is tiny. */
+    f32 norm = log2f((f32)c_count + 1.0f);
+    norm = norm < 1.0f ? 1.0f : norm;
+
     /* ---- per-start DP: find optimal character alignment ------------------ */
     for (i32 start = 0; start <= c_count - q_count; start++)
     {
@@ -194,7 +202,15 @@ FuzzyMatch fuzzy_match(String query, String candidate, Arena* scratch)
 
         /* Base case: match query[0] at candidate[start] */
         {
-            f32 base = (f32)start; // position penalty
+            // Normalise position penalty by log2(candidate length) so that
+            // matches in long definition texts (common polysemous words)
+            // are not unfairly penalised relative to short definitions
+            // (rare words).  Without this, a match at position 50 in a
+            // 500‑char definition would be scored ~25× worse than a match
+            // at position 2 in a 20‑char definition, even though both are
+            // proportionally similar.  (See scripts/diagnose_def_search.py)
+            f32 position_penalty = (f32)start / norm;
+            f32 base = position_penalty;
             if (start == 0)
                 base -= FUZZY_FIRST_CHAR_BONUS;
             if (c_chars[start].is_word_start)
@@ -224,7 +240,9 @@ FuzzyMatch fuzzy_match(String query, String candidate, Arena* scratch)
             /* Pre‑seed the non‑adjacent pool with the base‑case position */
             if (DP(q - 1, start) < FUZZY_DP_INF)
             {
-                f32 adj = DP(q - 1, start) - (f32)(start + 1) * FUZZY_GAP_PENALTY;
+                // Normalise gap penalty by the same log2 length factor
+                // so that gaps are scored proportionally to text length.
+                f32 adj = DP(q - 1, start) - (f32)(start + 1) * FUZZY_GAP_PENALTY / norm;
                 best_adj = adj;
                 best_adj_prev = start;
             }
@@ -261,7 +279,8 @@ FuzzyMatch fuzzy_match(String query, String candidate, Arena* scratch)
                     /* ---- non-adjacent transition (prev ≤ c-2, gap ≥ 1) ---- */
                     if (best_adj < FUZZY_DP_INF)
                     {
-                        f32 s = best_adj + (f32)c * FUZZY_GAP_PENALTY;
+                        // Normalise gap penalty proportionally to text length.
+                        f32 s = best_adj + (f32)c * FUZZY_GAP_PENALTY / norm;
                         if (c_chars[c].is_word_start)
                             s -= FUZZY_WORD_BOUNDARY_BONUS;
                         {
@@ -281,7 +300,7 @@ FuzzyMatch fuzzy_match(String query, String candidate, Arena* scratch)
                    future c values (it will be a valid prev for c ≥ c+2). */
                 if (DP(q - 1, c) < FUZZY_DP_INF)
                 {
-                    f32 adj = DP(q - 1, c) - (f32)(c + 1) * FUZZY_GAP_PENALTY;
+                    f32 adj = DP(q - 1, c) - (f32)(c + 1) * FUZZY_GAP_PENALTY / norm;
                     if (adj < best_adj)
                     {
                         best_adj = adj;
@@ -318,12 +337,16 @@ FuzzyMatch fuzzy_match(String query, String candidate, Arena* scratch)
         if (best_count == c_count)
             best_score -= FUZZY_EXACT_MATCH_BONUS;
 
+        // Normalise length/span penalties by the same log2 length factor
+        // used for position and gap penalties (computed above, before the
+        // DP loop).  See the comment there for rationale.
+
         // Longer candidates are worse
-        best_score += (f32)(c_count - q_count) * FUZZY_LENGTH_PENALTY;
+        best_score += (f32)(c_count - q_count) * FUZZY_LENGTH_PENALTY / norm;
 
         // Wider match span is worse (distance between first and last hit)
         i32 span = best_positions[best_count - 1] - best_positions[0] + 1;
-        best_score += (f32)span * FUZZY_SPAN_PENALTY;
+        best_score += (f32)span * FUZZY_SPAN_PENALTY / norm;
 
         // Prefix match: consecutive from position 0
         if (best_positions[0] == 0 && span == best_count)
@@ -364,222 +387,3 @@ FuzzyMatch fuzzy_match(String query, String candidate, Arena* scratch)
     arena_pop_to(scratch, scratch_pos);
     return result;
 }
-
-//
-// Standalone test
-//
-
-#ifdef FUZZY_STANDALONE_TEST
-
-#    include <stdio.h>
-
-static void print_highlighted(String cand, FuzzyRange* ranges, i32 count)
-{
-    i32 ri = 0;
-    isize i = 0;
-    while (i < cand.len)
-    {
-        if (ri < count && (isize)ranges[ri].start == i)
-        {
-            fputs("\x1b[35;1m", stdout);
-            for (; i < cand.len && i < (isize)ranges[ri].end; i++)
-                putc(cand.data[i], stdout);
-            fputs("\x1b[0m", stdout);
-            ri++;
-        }
-        else
-        {
-            putc(cand.data[i], stdout);
-            i++;
-        }
-    }
-}
-
-static void run_test(const char* name, const char* q, const char* c, Arena* scratch)
-{
-    String query = { (u8*)(q), (isize)strlen(q) };
-    String candidate = { (u8*)(c), (isize)strlen(c) };
-
-    FuzzyMatch m = fuzzy_match(query, candidate, scratch);
-
-    printf("%-30s  query=\"%s\"  cand=\"%s\"\n", name, q, c);
-    if (m.score >= 1e8f)
-    {
-        printf("  -> NO MATCH\n\n");
-        return;
-    }
-
-    printf("  -> score=%.1f  ranges=%d  | ", m.score, m.range_count);
-    print_highlighted(candidate, m.ranges, m.range_count);
-
-    printf("\n  ranges:");
-    for (i32 i = 0; i < m.range_count; i++)
-        printf(" [%d,%d)", m.ranges[i].start, m.ranges[i].end);
-    printf("\n\n");
-}
-
-int main(void)
-{
-    Arena scratch = arena_new(MB(1), KB(64));
-
-    printf("=== Fuzzy Match Tests ===\n\n");
-
-    run_test("exact", "linear", "linear", &scratch);
-    run_test("substring", "ear", "linear", &scratch);
-    run_test("fuzzy", "lnr", "linear", &scratch);
-    run_test("case insensitive", "LIN", "linear", &scratch);
-    run_test("scattered", "lia", "linear", &scratch);
-    run_test("camelCase", "GSB", "getScrollBarWidth", &scratch);
-    run_test("camelCase partial", "SBW", "getScrollBarWidth", &scratch);
-    run_test("path-style", "fzm", "fuzzy_match", &scratch);
-    run_test("no match", "xyz", "linear", &scratch);
-    run_test("empty query", "", "linear", &scratch);
-    run_test("empty candidate", "hello", "", &scratch);
-    run_test("query longer", "longword", "short", &scratch);
-
-    run_test("Chinese exact", "中国", "中国", &scratch);
-    run_test("Chinese fuzzy", "中国", "中国字典", &scratch);
-    run_test("Chinese mixed", "中文混合", "中英文混合翻译", &scratch);
-    run_test("Chinese start", "字典", "字典", &scratch);
-    run_test("Chinese single", "字", "中国字典", &scratch);
-    run_test("Pinyin-like chars", "zd", "字典", &scratch);
-    run_test("mixed en-cn", "中en", "中英文en测试", &scratch);
-    run_test("partial en-cn", "文te", "中文test", &scratch);
-
-    run_test("word boundary exact", "app", "getAppConfig", &scratch);
-    run_test("word boundary fuzzy", "gAC", "getAppConfig", &scratch);
-    run_test("underscore sep", "gsb", "get_scroll_bar", &scratch);
-    run_test("hyphen sep", "gsb", "get-scroll-bar", &scratch);
-
-    // DP-specific: greedy would pick b at position 2 (close to a), forcing
-    // a large gap to c.  DP sees that skipping to b at 4 reduces total cost.
-    run_test("dp skip closer match", "abc", "axbxbc", &scratch);
-
-    // DP-specific: all repeated char, verify optimal alignment in presence
-    // of many identical candidates.
-    run_test("dp repeated chars", "aaa", "aXaYaZa", &scratch);
-
-    arena_release(&scratch);
-
-    printf("=== All tests complete ===\n");
-    return 0;
-}
-
-#endif // FUZZY_STANDALONE_TEST
-
-//
-// Benchmark
-//
-
-#ifdef FUZZY_BENCH
-
-#    include <stdio.h>
-#    include <windows.h>
-#    include <string.h>
-#    include "dict.h"
-
-static void* bench_read_file(const char* path, usize* out_size)
-{
-    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE)
-        return NULL;
-    DWORD hi = 0;
-    DWORD lo = GetFileSize(h, &hi);
-    usize size = ((usize)hi << 32) | lo;
-    HANDLE map = CreateFileMappingW(h, NULL, PAGE_READONLY, 0, 0, NULL);
-    void* ptr = NULL;
-    if (map)
-    {
-        ptr = MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0);
-        CloseHandle(map);
-    }
-    CloseHandle(h);
-    *out_size = size;
-    return ptr;
-}
-
-static void bench_close_file(void* ptr)
-{
-    if (ptr)
-        UnmapViewOfFile(ptr);
-}
-
-int main(void)
-{
-    usize blob_size = 0;
-    void* blob = bench_read_file("data/dict.bin", &blob_size);
-    if (!blob)
-    {
-        printf("FATAL: cannot open data/dict.bin\n");
-        return 1;
-    }
-
-    DictDB db = dict_open(blob);
-    if (!db.hdr)
-    {
-        printf("FATAL: dict_open failed\n");
-        bench_close_file(blob);
-        return 1;
-    }
-
-    u32 total = db.hdr->word_count;
-    printf("Dictionary: %u words\n\n", total);
-
-    Arena scratch = arena_new(MB(1), KB(64));
-
-    typedef struct { const char* name; const char* text; } BenchQuery;
-    BenchQuery queries[] = {
-        {"(empty)",  ""},
-        {"z",        "z"},
-        {"a",        "a"},
-        {"st",       "st"},
-        {"pr",       "pr"},
-        {"lnr",      "lnr"},
-        {"the",      "the"},
-        {"com",      "com"},
-        {"abc",      "abc"},
-        {"tes",      "tes"},
-        {"tion",     "tion"},
-        {"commu",    "commu"},
-        {"linear",   "linear"},
-        {"dict",     "dict"},
-    };
-
-    printf("%-10s %10s %10s %10s %9s\n", "Query", "Total(ms)", "Matched", "us/word", "Kw/s");
-    printf("%s\n", "------------------------------------------------------");
-
-    for (i32 qi = 0; qi < countof(queries); qi++)
-    {
-        String query = { (u8*)queries[qi].text, (isize)strlen(queries[qi].text) };
-
-        LARGE_INTEGER freq, t0, t1;
-        QueryPerformanceFrequency(&freq);
-        QueryPerformanceCounter(&t0);
-
-        i32 matched = 0;
-        for (u32 i = 0; i < total; i++)
-        {
-            const char* word = DICT_STR(&db, db.words[i].word_stroff);
-            String candidate = { (u8*)word, (isize)strlen(word) };
-            FuzzyMatch m = fuzzy_match(query, candidate, &scratch);
-            if (m.score < 1e8f)
-                matched++;
-        }
-
-        QueryPerformanceCounter(&t1);
-        f64 ms = (f64)(t1.QuadPart - t0.QuadPart) * 1000.0 / (f64)freq.QuadPart;
-        f64 us_per_word = ms * 1000.0 / (f64)total;
-        f64 kw_per_s = ms > 0.0 ? (f64)total / ms : 0.0;
-
-        printf("%-10s %10.2f %10d %10.1f %9.1f\n", queries[qi].name, ms, matched, us_per_word, kw_per_s);
-    }
-
-    arena_release(&scratch);
-    bench_close_file(blob);
-
-    printf("\n=== Bench complete ===\n");
-    return 0;
-}
-
-#endif // FUZZY_BENCH

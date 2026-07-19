@@ -163,16 +163,6 @@ static String ime_read_str(const HWND window, Arena* arena, DWORD flag)
     return (String){ dst, utf8_len };
 }
 
-b32 win32_ime_is_composing(const HWND window)
-{
-    HIMC himc = ImmGetContext(window);
-    if (!himc)
-        return False;
-    LONG len = ImmGetCompositionStringW(himc, GCS_COMPSTR, NULL, 0);
-    ImmReleaseContext(window, himc);
-    return len > 0;
-}
-
 String win32_ime_get_composition(const HWND window, Arena* arena)
 {
     return ime_read_str(window, arena, GCS_COMPSTR);

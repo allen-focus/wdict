@@ -183,6 +183,7 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     renderer->shared = shared;
 
     /* Allocate vertex and clip arrays from a dedicated arena */
+    MEM_TRACK("[mem] renderer arena_new: RENDERER_ARENA_CAPACITY = MB(16), commit_block = MB(8)\n");
     renderer->arena = arena_new(RENDERER_ARENA_CAPACITY, MB(8));
     renderer->vertex_cache.data = arena_push(&renderer->arena, sizeof(Vertex), _Alignof(Vertex), VERTEX_CAPACITY);
     renderer->clip_cache.rects = arena_push(&renderer->arena, sizeof(Rect), _Alignof(Rect), CLIP_RECT_CAPACITY);
@@ -272,6 +273,8 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
             .pSysMem = renderer->cpu_atlas.bitmap,
             .SysMemPitch = renderer->cpu_atlas.w,
         };
+        MEM_TRACK("[mem] D3D11 CreateTexture2D: glyph atlas = %dx%d R8_UNORM (%lld MB) (DEFAULT pool)\n", desc.Width,
+                  desc.Height, (long long)(desc.Width * desc.Height / (1024 * 1024)));
         ID3D11Device_CreateTexture2D(shared->device, &desc, &data, &renderer->glyph_atlas_texture);
     }
 
@@ -288,6 +291,8 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
             .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
         };
         D3D11_SUBRESOURCE_DATA initial = { .pSysMem = renderer->vertex_cache.data };
+        MEM_TRACK("[mem] D3D11 CreateBuffer: vertex buffer (DYNAMIC) = %u B (%.1f MB)\n", desc.ByteWidth,
+                  desc.ByteWidth / (1024.0 * 1024.0));
         ID3D11Device_CreateBuffer(shared->device, &desc, &initial, &renderer->vertex_buffer);
     }
 
@@ -310,6 +315,7 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
             .BindFlags = D3D11_BIND_CONSTANT_BUFFER,
             .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
         };
+        MEM_TRACK("[mem] D3D11 CreateBuffer: clip rect buffer = %u B\n", desc.ByteWidth);
         ID3D11Device_CreateBuffer(shared->device, &desc, NULL, &renderer->clip_rect_buffer);
     }
 }
@@ -371,6 +377,8 @@ void renderer_recreate_glyph_atlas_texture(Renderer* renderer)
         .pSysMem = renderer->cpu_atlas.bitmap,
         .SysMemPitch = renderer->cpu_atlas.w,
     };
+    MEM_TRACK("[mem] D3D11 CreateTexture2D: glyph atlas re-create = %dx%d R8_UNORM (%lld MB) (DEFAULT pool)\n",
+              desc.Width, desc.Height, (long long)(desc.Width * desc.Height / (1024 * 1024)));
     ID3D11Device_CreateTexture2D(renderer->shared->device, &desc, &data, &renderer->glyph_atlas_texture);
 
     /* Create texture view (glyph atlas) */

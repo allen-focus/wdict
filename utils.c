@@ -179,6 +179,8 @@ Arena arena_new(const isize size, const isize commit_block_size)
     arena.reserve_end = size;
     arena.commit_block_size = commit_block_size;
     arena.commit_end = 0;
+    MEM_TRACK("[mem] arena_new: reserve=%lld B (%lld MB)  commit_block=%lld B\n", (long long)size,
+              (long long)(size / (1024 * 1024)), (long long)commit_block_size);
     return arena;
 }
 
@@ -207,6 +209,9 @@ void* arena_push(Arena* arena, const isize size, const isize align, const isize 
         isize commit_size = pos_next_commit - arena->commit_end;
         VirtualAlloc(arena->base + arena->commit_end, commit_size, MEM_COMMIT, PAGE_READWRITE);
         arena->commit_end = pos_next_commit;
+        MEM_TRACK("[mem] arena commit: +%lld B (total committed: %lld B / %lld B reserved, %lld MB / %lld MB)\n",
+                  (long long)commit_size, (long long)arena->commit_end, (long long)arena->reserve_end,
+                  (long long)(arena->commit_end / (1024 * 1024)), (long long)(arena->reserve_end / (1024 * 1024)));
     }
 
     return memset(p_aligned, 0, count * size);

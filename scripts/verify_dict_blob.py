@@ -13,7 +13,7 @@ with open(sys.argv[1], 'rb') as f:
  entdata_off, strpool_off, variant_off, variant_count) = struct.unpack_from('<IIIIIIII', blob, 0)
 
 assert magic    == 0x44494354, f'bad magic: 0x{magic:08X}'
-assert version in (2, 3),      f'bad version: {version}'
+assert version in (2, 3, 4),   f'bad version: {version}'
 assert words_off == 32
 
 if version == 2:
@@ -100,56 +100,68 @@ def rd_str(off):
 # ── Parse every EntryBlob and verify structural consistency ──
 errors = 0
 for wi, (word, _ws, eo, _fr) in enumerate(words):
-    pos = [entdata_off + eo]
+    blob_pos = entdata_off + eo
+    pos = [blob_pos]
     try:
-        # freq
-        freq = rd_u32(pos)
-        # brief_en
-        n_be = rd_u8(pos)
-        for _ in range(n_be):
-            rd_u32(pos)  # offset
-        # brief_zh
-        n_bz = rd_u8(pos)
-        for _ in range(n_bz):
-            rd_u32(pos)
-        # pos_node
-        pos_count = rd_u8(pos)
-        assert 0 < pos_count <= 32, f'bogus pos_count={pos_count}'
-        for _ in range(pos_count):
-            kind = rd_u8(pos)
-            assert kind <= 255, f'bogus pos_kind={kind}'
-            pron_off = rd_u32(pos)
-            # verify pron string is valid
-            if pron_off != 0:
-                rd_str(pron_off)
-            def_count = rd_u8(pos)
-            assert def_count <= 255, f'bogus def_count={def_count}'
-            for __ in range(def_count):
-                en_off = rd_u32(pos)
-                zh_off = rd_u32(pos)
-                if en_off:
-                    rd_str(en_off)
-                if zh_off:
-                    rd_str(zh_off)
-                ex_count = rd_u8(pos)
-                assert ex_count <= 255, f'bogus ex_count={ex_count}'
-                for ___ in range(ex_count):
-                    ex_en_off = rd_u32(pos)
-                    ex_zh_off = rd_u32(pos)
-                    if ex_en_off:
-                        rd_str(ex_en_off)
-                    if ex_zh_off:
-                        rd_str(ex_zh_off)
-        consumed = pos[0] - (entdata_off + eo)
+        if version >= 4:
+            # v4 flat EntryBlob: 4 x u32 (phonetic, definition, translation, exchange).
+            # No leading freq field. Offset 0 = empty string (strpool sentinel).
+            phon_off, def_off, tr_off, ex_off = (
+                rd_u32(pos), rd_u32(pos), rd_u32(pos), rd_u32(pos))
+            for name, off in (('phonetic', phon_off), ('definition', def_off),
+                              ('translation', tr_off), ('exchange', ex_off)):
+                if off != 0:
+                    assert off < len(blob) - strpool_off, \
+                        f'{word}: {name}_off={off} out of strpool range'
+                    rd_str(off)  # raises if no null terminator found
+            consumed = pos[0] - blob_pos
+            expected = 16
+        else:
+            # v2/v3 path (legacy): freq + brief arrays + pos_node.
+            freq = rd_u32(pos)
+            n_be = rd_u8(pos)
+            for _ in range(n_be):
+                rd_u32(pos)
+            n_bz = rd_u8(pos)
+            for _ in range(n_bz):
+                rd_u32(pos)
+            pos_count = rd_u8(pos)
+            assert 0 < pos_count <= 32, f'bogus pos_count={pos_count}'
+            for _ in range(pos_count):
+                kind = rd_u8(pos)
+                assert kind <= 255, f'bogus pos_kind={kind}'
+                pron_off = rd_u32(pos)
+                if pron_off != 0:
+                    rd_str(pron_off)
+                def_count = rd_u8(pos)
+                assert def_count <= 255, f'bogus def_count={def_count}'
+                for __ in range(def_count):
+                    en_off = rd_u32(pos)
+                    zh_off = rd_u32(pos)
+                    if en_off:
+                        rd_str(en_off)
+                    if zh_off:
+                        rd_str(zh_off)
+                    ex_count = rd_u8(pos)
+                    assert ex_count <= 255, f'bogus ex_count={ex_count}'
+                    for ___ in range(ex_count):
+                        ex_en_off = rd_u32(pos)
+                        ex_zh_off = rd_u32(pos)
+                        if ex_en_off:
+                            rd_str(ex_en_off)
+                        if ex_zh_off:
+                            rd_str(ex_zh_off)
+            consumed = pos[0] - blob_pos
+
         # Check that consumed bytes match distance to next entry (or end).
         if wi + 1 < len(words):
-            next_eo = words[wi + 1][2]  # next entry's absolute offset in entdata
-            expected = next_eo - eo     # byte count of this entry's blob
-            assert consumed == expected, \
-                f'{word}: consumed {consumed}B but expected {expected}B (next at {next_eo})'
+            next_eo = words[wi + 1][2]
+            exp = next_eo - eo
+            assert consumed == exp, \
+                f'{word}: consumed {consumed}B but expected {exp}B (next at {next_eo})'
         else:
-            # Last entry: check we don't overshoot entdata.
-            assert entdata_off + eo + consumed <= strpool_off
+            assert entdata_off + eo + consumed <= strpool_off, \
+                f'{word}: overshoots entdata by {entdata_off + eo + consumed - strpool_off}B'
     except Exception as e:
         print(f'ERROR in {word}: {e}')
         errors += 1
@@ -157,34 +169,42 @@ for wi, (word, _ws, eo, _fr) in enumerate(words):
 # ── Parse first entry in detail ──
 print(f'\n--- Detailed parse of first entry ---')
 pos = [entdata_off + words[0][2]]
-print(f'  word: {words[0][0]}')
-print(f'  freq: {rd_u32(pos)}')
-n_be = rd_u8(pos)
-print(f'  brief_en ({n_be}):')
-for i in range(n_be):
-    print(f'    [{i}] {rd_str(rd_u32(pos))}')
-n_bz = rd_u8(pos)
-print(f'  brief_zh ({n_bz}):')
-for i in range(n_bz):
-    print(f'    [{i}] {rd_str(rd_u32(pos))}')
-pc = rd_u8(pos)
-print(f'  pos_count: {pc}')
-for pi in range(min(pc, 2)):
-    kind = rd_u8(pos)
-    pron = rd_str(rd_u32(pos))
-    dc = rd_u8(pos)
-    print(f'    POS[{pi}] kind={kind} pron={pron} defs={dc}')
-    for di in range(min(dc, 2)):
-        en = rd_str(rd_u32(pos))
-        zh = rd_str(rd_u32(pos))
-        ec = rd_u8(pos)
-        print(f'      def[{di}] en={en[:60]}...' if len(en)>60 else f'      def[{di}] en={en}')
-        print(f'            zh={zh[:60]}...' if len(zh)>60 else f'            zh={zh}')
-        for ei in range(min(ec, 1)):
-            ex_en = rd_str(rd_u32(pos))
-            ex_zh = rd_str(rd_u32(pos))
-            print(f'        ex[{ei}] en={ex_en[:60]}...' if len(ex_en)>60 else f'        ex[{ei}] en={ex_en}')
-            print(f'              zh={ex_zh[:60]}...' if len(ex_zh)>60 else f'              zh={ex_zh}')
+if version >= 4:
+    phon, dfn, tr, ex = (rd_u32(pos), rd_u32(pos), rd_u32(pos), rd_u32(pos))
+    print(f'  word:     {words[0][0]}')
+    print(f'  phonetic: {rd_str(phon)}')
+    print(f'  definit:  {rd_str(dfn)[:80]}')
+    print(f'  translat: {rd_str(tr)[:80]}')
+    print(f'  exchange: {rd_str(ex)}')
+else:
+    print(f'  word: {words[0][0]}')
+    print(f'  freq: {rd_u32(pos)}')
+    n_be = rd_u8(pos)
+    print(f'  brief_en ({n_be}):')
+    for i in range(n_be):
+        print(f'    [{i}] {rd_str(rd_u32(pos))}')
+    n_bz = rd_u8(pos)
+    print(f'  brief_zh ({n_bz}):')
+    for i in range(n_bz):
+        print(f'    [{i}] {rd_str(rd_u32(pos))}')
+    pc = rd_u8(pos)
+    print(f'  pos_count: {pc}')
+    for pi in range(min(pc, 2)):
+        kind = rd_u8(pos)
+        pron = rd_str(rd_u32(pos))
+        dc = rd_u8(pos)
+        print(f'    POS[{pi}] kind={kind} pron={pron} defs={dc}')
+        for di in range(min(dc, 2)):
+            en = rd_str(rd_u32(pos))
+            zh = rd_str(rd_u32(pos))
+            ec = rd_u8(pos)
+            print(f'      def[{di}] en={en[:60]}...' if len(en)>60 else f'      def[{di}] en={en}')
+            print(f'            zh={zh[:60]}...' if len(zh)>60 else f'            zh={zh}')
+            for ei in range(min(ec, 1)):
+                ex_en = rd_str(rd_u32(pos))
+                ex_zh = rd_str(rd_u32(pos))
+                print(f'        ex[{ei}] en={ex_en[:60]}...' if len(ex_en)>60 else f'        ex[{ei}] en={ex_en}')
+                print(f'              zh={ex_zh[:60]}...' if len(ex_zh)>60 else f'              zh={ex_zh}')
 
 # ── Summary ──
 print(f'\n--- Result ---')
