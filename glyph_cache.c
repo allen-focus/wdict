@@ -264,6 +264,7 @@ void atlas_glyph_map_init(AtlasGlyphMap* map, Arena* arena)
 
 AtlasGlyphFindResult atlas_glyph_map_find(const AtlasGlyphMap* map, const GlyphKey* key)
 {
+    Assert(map->count < map->capacity);
     AtlasGlyphFindResult result = { 0 };
     if (map->count == 0)
         return result;
