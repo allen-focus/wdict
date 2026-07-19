@@ -48,8 +48,8 @@
 #define HOTKEY_QUICK_SEARCH   2
 #define QUICK_SEARCH_WINDOW_W 540
 #define QUICK_SEARCH_WINDOW_H 420
-#define OCR_POPUP_WINDOW_W     340
-#define OCR_POPUP_WINDOW_H     200
+#define OCR_POPUP_WINDOW_W    320
+#define OCR_POPUP_WINDOW_H    200
 
 typedef enum
 {
@@ -484,8 +484,8 @@ static WindowContext* create_ocr_popup_window(AppShared* shared)
     u32 physical_h = (u32)(OCR_POPUP_WINDOW_H * dpi_scale);
 
     ctx->window =
-        CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"window class", L"", WS_POPUP,
-                        0, 0, (i32)physical_w, (i32)physical_h, NULL, NULL, GetModuleHandleW(NULL), ctx);
+        CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"window class", L"", WS_POPUP, 0,
+                        0, (i32)physical_w, (i32)physical_h, NULL, NULL, GetModuleHandleW(NULL), ctx);
     if (!ctx->window)
     {
         free(ctx);
@@ -761,9 +761,8 @@ static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* b
                 {
                     if (i > (isize)(line_start - s))
                     {
-                        popup->ocr_popup.def_lines[line_count] = (String){
-                            (u8*)line_start, (isize)(s + i - line_start)
-                        };
+                        popup->ocr_popup.def_lines[line_count] =
+                            (String){ (u8*)line_start, (isize)(s + i - line_start) };
                         line_count++;
                     }
                     line_start = s + i + 3;
@@ -773,9 +772,8 @@ static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* b
                 {
                     if (i > (isize)(line_start - s))
                     {
-                        popup->ocr_popup.def_lines[line_count] = (String){
-                            (u8*)line_start, (isize)(s + i - line_start)
-                        };
+                        popup->ocr_popup.def_lines[line_count] =
+                            (String){ (u8*)line_start, (isize)(s + i - line_start) };
                         line_count++;
                     }
                 }
@@ -851,7 +849,8 @@ static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* b
 
     popup->dpi_repositioning = True;
     ShowWindow(popup->window, SW_SHOW);
-    SetWindowPos(popup->window, NULL, popup_x, popup_y, (i32)physical_w, (i32)physical_h, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(popup->window, NULL, popup_x, popup_y, (i32)physical_w, (i32)physical_h,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
 
     {
         f32 s = (f32)popup->ui.dpi / USER_DEFAULT_SCREEN_DPI;
@@ -1324,10 +1323,7 @@ static String dict_def_extract(const void* entry)
     {
         if (aux->def_segs[i].kind == AUXSEG_DEF_ZH)
         {
-            return (String){
-                (u8*)aux->def_search_text + aux->def_segs[i].offset,
-                aux->def_segs[i].len
-            };
+            return (String){ (u8*)aux->def_search_text + aux->def_segs[i].offset, aux->def_segs[i].len };
         }
     }
     return (String){ 0 };
@@ -1484,8 +1480,7 @@ static void search_palette_render(WindowContext* ctx)
         // workers, spawns new ones, and immediately triggers a search
         // round — if score_adjust is changed afterwards the workers will
         // have already processed the query with the old weighting.
-        shared->palette_search.score_adjust =
-            (mode == PALETTE_MODE_DEF) ? dict_freq_weight_def : dict_freq_weight;
+        shared->palette_search.score_adjust = (mode == PALETTE_MODE_DEF) ? dict_freq_weight_def : dict_freq_weight;
 
         search_reconfigure(&shared->palette_search, fields, field_count);
         ctx->palette_effective_mode = mode;
@@ -1950,7 +1945,7 @@ static void ocr_popup_render(WindowContext* ctx)
     f32 client_h = (f32)ui_ctx->client_height;
     f32 popup_w = client_w - 10.f;
     f32 popup_h = client_h - 10.f;
-    f32 pad = 6.f;
+    f32 pad = 12.f;
 
     UIBox* popup = ui_box_begin(&(BoxConfig){
         .sizing = { fixed(popup_w), fixed(popup_h) },
@@ -1985,20 +1980,30 @@ static void ocr_popup_render(WindowContext* ctx)
             .child_gap = 4,
         });
         {
-            String word_str = { (u8*)ctx->ocr_popup.word, (isize)strlen(ctx->ocr_popup.word) };
-            TextConfig word_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
-                                    .font_size = 16.f,
-                                    .color = theme->dict_word_fg };
-            ui_text(word_str, &word_cfg);
-
-            if (ctx->ocr_popup.phonetic[0])
+            UIBox* word_line = ui_box_begin(&(BoxConfig){
+                .sizing = { fit_grow({}), fit({}) },
+                .direction = LAYOUT_LEFT_TO_RIGHT,
+                .child_gap = 8,
+            });
             {
-                String phon_str = { (u8*)ctx->ocr_popup.phonetic, (isize)strlen(ctx->ocr_popup.phonetic) };
-                TextConfig phon_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
-                                        .font_size = 12.f,
-                                        .color = theme->dict_phonetic_fg };
-                ui_text(phon_str, &phon_cfg);
+                String word_str = { (u8*)ctx->ocr_popup.word, (isize)strlen(ctx->ocr_popup.word) };
+                TextConfig word_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
+                                        .font_size = 16.f,
+                                        .color = theme->dict_word_fg };
+                ui_text(word_str, &word_cfg);
+
+                if (ctx->ocr_popup.phonetic[0])
+                {
+                    String phon_str = { (u8*)ctx->ocr_popup.phonetic, (isize)strlen(ctx->ocr_popup.phonetic) };
+                    TextConfig phon_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
+                                            .font_size = 11.f,
+                                            .color = theme->dict_phonetic_fg };
+                    ui_text(str("/"), &phon_cfg);
+                    ui_text(phon_str, &phon_cfg);
+                    ui_text(str("/"), &phon_cfg);
+                }
             }
+            ui_box_end(word_line);
 
             /* separator */
             ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->dict_separator }));
@@ -2270,8 +2275,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 {
                     OcrPopupState* p = &ctx->ocr_popup;
                     if (p->active && p->popup_rect.xmax > p->popup_rect.xmin)
-                        if (!(lx >= p->popup_rect.xmin && lx < p->popup_rect.xmax &&
-                              ly >= p->popup_rect.ymin && ly < p->popup_rect.ymax))
+                        if (!(lx >= p->popup_rect.xmin && lx < p->popup_rect.xmax && ly >= p->popup_rect.ymin &&
+                              ly < p->popup_rect.ymax))
                             p->active = False;
                 }
             }
