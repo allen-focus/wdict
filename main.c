@@ -2968,7 +2968,7 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
         u64 dsize = ZSTD_getFrameContentSize(compressed, compressed_size);
         Assert(dsize != ZSTD_CONTENTSIZE_ERROR && dsize != ZSTD_CONTENTSIZE_UNKNOWN);
 
-        shared->dict_arena = arena_new((isize)dsize, MB(8));
+        shared->dict_arena = arena_new((isize)dsize, MB(1));
         MEM_TRACK("[mem] dict_arena push: decompressed dict = %lld B (%lld MB)\n", (long long)dsize,
                   (long long)(dsize / (1024 * 1024)));
         arena_push(&shared->dict_arena, (isize)dsize, 1, 1);
@@ -2981,8 +2981,8 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
         g_dict_db = &shared->dict_db;
     }
 
-    MEM_TRACK("[mem] search_aux_arena: arena_new(MB(16), MB(8))\n");
-    shared->search_aux_arena = arena_new(MB(16), MB(8));
+    MEM_TRACK("[mem] search_aux_arena: arena_new(MB(16), MB(2))\n");
+    shared->search_aux_arena = arena_new(MB(16), MB(2));
     shared->search_aux = dict_build_search_aux(&shared->dict_db, &shared->search_aux_arena);
     Assert(shared->search_aux);
     g_search_aux = shared->search_aux;
@@ -3074,8 +3074,8 @@ i32 WinMainCRTStartup()
     shared.main_thread_id = GetCurrentThreadId();
     {
         StartupThreadParam startup_param = { .shared = &shared };
-        MEM_TRACK("[mem] CreateThread: startup_dict_thread (default stack = 1 MB reserved)\n");
-        HANDLE h_dict = CreateThread(NULL, 0, startup_dict_thread, &startup_param, 0, NULL);
+        MEM_TRACK("[mem] CreateThread: startup_dict_thread (stack = %lld KB)\n", (long long)(KB(64) / 1024));
+        HANDLE h_dict = CreateThread(NULL, KB(64), startup_dict_thread, &startup_param, 0, NULL);
         CloseHandle(h_dict); /* detached — OS reclaims thread stack on exit */
     }
 

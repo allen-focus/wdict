@@ -21,7 +21,6 @@
 
 #define SEARCH_MAX_RESULTS 200
 #define SEARCH_QUERY_BUF   512
-#define SEARCH_SCRATCH_MB  1
 #define SEARCH_MAX_WORKERS 8
 
 //

@@ -9,7 +9,6 @@
 
 #define DICT_MAGIC           0x44494354u /* "DICT" */
 #define DICT_VERSION         4u /* v4: flat 5-field format (phonetic, definition, translation, exchange) */
-#define DICT_SEARCH_SEP_CHAR ((char)0x01)
 
 //
 // On-disk binary structures
@@ -95,7 +94,7 @@ typedef struct
 
 typedef struct
 {
-    char*       def_search_text; // \x01-concatenated definition strings (def_en + def_zh per POS)
+    const char* def_search_text; // points into DictDB strpool (no copy)
     i32 def_len;
     AuxSegment* def_segs; // [def_seg_count] — arena-allocated
     i32 def_seg_count;

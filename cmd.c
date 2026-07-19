@@ -1,4 +1,5 @@
 #include "cmd.h"
+#include <string.h>
 
 #include "thirdparty/tracy/public/tracy/TracyC.h"
 #include "tracy_config.h" // IWYU pragma: keep

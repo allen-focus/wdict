@@ -27,8 +27,8 @@
 
 ///
 
-#define RENDERER_ARENA_CAPACITY MB(16)
-#define VERTEX_CAPACITY         32768
+#define RENDERER_ARENA_CAPACITY MB(4)
+#define VERTEX_CAPACITY         8192
 #define VERTEX_IS_TEXT          1.0f
 #define VERTEX_IS_NOT_TEXT      0.0f
 #define CLIP_RECT_CAPACITY      512 // 1. must matches shader's define; 2. must be a power of two
@@ -140,6 +140,44 @@ void renderer_shared_init(RendererShared* shared)
         ID3D11Device_CreateInputLayout(shared->device, desc, ARRAYSIZE(desc), d3d11_vshader, sizeof(d3d11_vshader),
                                        &shared->layout);
     }
+
+    /* Create shared glyph atlas (one atlas serves all windows — only one visible at a time) */
+    {
+        MEM_TRACK("[mem] shared glyph atlas arena = MB(10), commit_block = MB(1)\n");
+        shared->shared_atlas_arena = arena_new(MB(10), MB(1));
+
+        shared->shared_cpu_atlas.w = GLYPH_ATLAS_WIDTH;
+        shared->shared_cpu_atlas.h = GLYPH_ATLAS_HEIGHT;
+        shared->shared_cpu_atlas.bitmap =
+            arena_push(&shared->shared_atlas_arena, sizeof(u8), _Alignof(u8), GLYPH_ATLAS_WIDTH * GLYPH_ATLAS_HEIGHT);
+
+        atlas_glyph_map_init(&shared->shared_atlas_map, &shared->shared_atlas_arena);
+
+        for (isize y = 0; y < WHITE_GLYPH_H; y++)
+            for (isize x = 0; x < WHITE_GLYPH_W; x++)
+                shared->shared_cpu_atlas.bitmap[(WHITE_GLYPH_Y + y) * GLYPH_ATLAS_WIDTH + (WHITE_GLYPH_X + x)] = 255;
+
+        D3D11_TEXTURE2D_DESC tex_desc = {
+            .Width = shared->shared_cpu_atlas.w,
+            .Height = shared->shared_cpu_atlas.h,
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = DXGI_FORMAT_R8_UNORM,
+            .SampleDesc.Count = 1,
+            .Usage = D3D11_USAGE_DEFAULT,
+            .BindFlags = D3D11_BIND_SHADER_RESOURCE,
+        };
+        D3D11_SUBRESOURCE_DATA tex_data = {
+            .pSysMem = shared->shared_cpu_atlas.bitmap,
+            .SysMemPitch = shared->shared_cpu_atlas.w,
+        };
+        MEM_TRACK("[mem] D3D11 CreateTexture2D: shared glyph atlas = %dx%d R8_UNORM (%lld MB) (DEFAULT pool)\n",
+                  tex_desc.Width, tex_desc.Height, (long long)(tex_desc.Width * tex_desc.Height / (1024 * 1024)));
+        ID3D11Device_CreateTexture2D(shared->device, &tex_desc, &tex_data, &shared->shared_glyph_atlas_texture);
+
+        ID3D11Device_CreateShaderResourceView(shared->device, (ID3D11Resource*)shared->shared_glyph_atlas_texture, 0,
+                                              &shared->shared_glyph_atlas_shader_resource_view);
+    }
 }
 
 void renderer_deinit(Renderer* renderer)
@@ -148,8 +186,6 @@ void renderer_deinit(Renderer* renderer)
     ID3D11Buffer_Release(renderer->vertex_buffer);
     ID3D11Buffer_Release(renderer->mvp_buffer);
     ID3D11Buffer_Release(renderer->clip_rect_buffer);
-    ID3D11Texture2D_Release(renderer->glyph_atlas_texture);
-    ID3D11ShaderResourceView_Release(renderer->glyph_atlas_shader_resource_view);
     IDXGISwapChain2_Release(renderer->swapchain2);
     IDXGISwapChain1_Release(renderer->swapchain);
     arena_release(&renderer->arena);
@@ -158,6 +194,9 @@ void renderer_deinit(Renderer* renderer)
 
 void renderer_shared_deinit(RendererShared* shared)
 {
+    ID3D11ShaderResourceView_Release(shared->shared_glyph_atlas_shader_resource_view);
+    ID3D11Texture2D_Release(shared->shared_glyph_atlas_texture);
+    arena_release(&shared->shared_atlas_arena);
     ID3D11InputLayout_Release(shared->layout);
     ID3D11VertexShader_Release(shared->vertex_shader);
     ID3D11PixelShader_Release(shared->pixel_shader);
@@ -183,24 +222,10 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     renderer->shared = shared;
 
     /* Allocate vertex and clip arrays from a dedicated arena */
-    MEM_TRACK("[mem] renderer arena_new: RENDERER_ARENA_CAPACITY = MB(16), commit_block = MB(8)\n");
-    renderer->arena = arena_new(RENDERER_ARENA_CAPACITY, MB(8));
+    MEM_TRACK("[mem] renderer arena_new: RENDERER_ARENA_CAPACITY = MB(16), commit_block = MB(2)\n");
+    renderer->arena = arena_new(RENDERER_ARENA_CAPACITY, MB(2));
     renderer->vertex_cache.data = arena_push(&renderer->arena, sizeof(Vertex), _Alignof(Vertex), VERTEX_CAPACITY);
     renderer->clip_cache.rects = arena_push(&renderer->arena, sizeof(Rect), _Alignof(Rect), CLIP_RECT_CAPACITY);
-
-    /* Create per-window CPU-side glyph atlas */
-    renderer->cpu_atlas.w = GLYPH_ATLAS_WIDTH;
-    renderer->cpu_atlas.h = GLYPH_ATLAS_HEIGHT;
-    renderer->cpu_atlas.bitmap =
-        arena_push(&renderer->arena, sizeof(u8), _Alignof(u8), GLYPH_ATLAS_WIDTH * GLYPH_ATLAS_HEIGHT);
-
-    /* Create per-window atlas glyph map */
-    atlas_glyph_map_init(&renderer->atlas_map, &renderer->arena);
-
-    /* Insert white glyph at bottom-right corner of atlas */
-    for (isize y = 0; y < WHITE_GLYPH_H; y++)
-        for (isize x = 0; x < WHITE_GLYPH_W; x++)
-            renderer->cpu_atlas.bitmap[(WHITE_GLYPH_Y + y) * GLYPH_ATLAS_WIDTH + (WHITE_GLYPH_X + x)] = 255;
 
     /* Create swapchain */
     {
@@ -256,31 +281,6 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
                                             &renderer->render_target_view);
         ID3D11Texture2D_Release(texture);
     }
-
-    /* Create texture (glyph atlas) */
-    {
-        D3D11_TEXTURE2D_DESC desc = {
-            .Width = renderer->cpu_atlas.w,
-            .Height = renderer->cpu_atlas.h,
-            .MipLevels = 1,
-            .ArraySize = 1,
-            .Format = DXGI_FORMAT_R8_UNORM,
-            .SampleDesc.Count = 1,
-            .Usage = D3D11_USAGE_DEFAULT,
-            .BindFlags = D3D11_BIND_SHADER_RESOURCE,
-        };
-        D3D11_SUBRESOURCE_DATA data = {
-            .pSysMem = renderer->cpu_atlas.bitmap,
-            .SysMemPitch = renderer->cpu_atlas.w,
-        };
-        MEM_TRACK("[mem] D3D11 CreateTexture2D: glyph atlas = %dx%d R8_UNORM (%lld MB) (DEFAULT pool)\n", desc.Width,
-                  desc.Height, (long long)(desc.Width * desc.Height / (1024 * 1024)));
-        ID3D11Device_CreateTexture2D(shared->device, &desc, &data, &renderer->glyph_atlas_texture);
-    }
-
-    /* Create texture view (glyph atlas) */
-    ID3D11Device_CreateShaderResourceView(shared->device, (ID3D11Resource*)renderer->glyph_atlas_texture, 0,
-                                          &renderer->glyph_atlas_shader_resource_view);
 
     /* Create vertex buffer */
     {
@@ -353,19 +353,19 @@ static void renderer_upload_glyph(Renderer* renderer, u16 atlas_x, u16 atlas_y, 
         .bottom = atlas_y + h,
         .back = 1,
     };
-    const u8* src = renderer->cpu_atlas.bitmap + atlas_y * renderer->cpu_atlas.w + atlas_x;
-    ID3D11DeviceContext_UpdateSubresource(renderer->shared->context, (ID3D11Resource*)renderer->glyph_atlas_texture, 0,
-                                          &box, src, renderer->cpu_atlas.w, 0);
+    const u8* src = renderer->shared->shared_cpu_atlas.bitmap + atlas_y * renderer->shared->shared_cpu_atlas.w + atlas_x;
+    ID3D11DeviceContext_UpdateSubresource(renderer->shared->context, (ID3D11Resource*)renderer->shared->shared_glyph_atlas_texture, 0,
+                                          &box, src, renderer->shared->shared_cpu_atlas.w, 0);
 }
 
 void renderer_recreate_glyph_atlas_texture(Renderer* renderer)
 {
-    ID3D11Texture2D_Release(renderer->glyph_atlas_texture);
-    ID3D11ShaderResourceView_Release(renderer->glyph_atlas_shader_resource_view);
+    ID3D11ShaderResourceView_Release(renderer->shared->shared_glyph_atlas_shader_resource_view);
+    ID3D11Texture2D_Release(renderer->shared->shared_glyph_atlas_texture);
 
     D3D11_TEXTURE2D_DESC desc = {
-        .Width = renderer->cpu_atlas.w,
-        .Height = renderer->cpu_atlas.h,
+        .Width = renderer->shared->shared_cpu_atlas.w,
+        .Height = renderer->shared->shared_cpu_atlas.h,
         .MipLevels = 1,
         .ArraySize = 1,
         .Format = DXGI_FORMAT_R8_UNORM,
@@ -374,29 +374,26 @@ void renderer_recreate_glyph_atlas_texture(Renderer* renderer)
         .BindFlags = D3D11_BIND_SHADER_RESOURCE,
     };
     D3D11_SUBRESOURCE_DATA data = {
-        .pSysMem = renderer->cpu_atlas.bitmap,
-        .SysMemPitch = renderer->cpu_atlas.w,
+        .pSysMem = renderer->shared->shared_cpu_atlas.bitmap,
+        .SysMemPitch = renderer->shared->shared_cpu_atlas.w,
     };
     MEM_TRACK("[mem] D3D11 CreateTexture2D: glyph atlas re-create = %dx%d R8_UNORM (%lld MB) (DEFAULT pool)\n",
               desc.Width, desc.Height, (long long)(desc.Width * desc.Height / (1024 * 1024)));
-    ID3D11Device_CreateTexture2D(renderer->shared->device, &desc, &data, &renderer->glyph_atlas_texture);
+    ID3D11Device_CreateTexture2D(renderer->shared->device, &desc, &data, &renderer->shared->shared_glyph_atlas_texture);
 
-    /* Create texture view (glyph atlas) */
-    ID3D11Device_CreateShaderResourceView(renderer->shared->device, (ID3D11Resource*)renderer->glyph_atlas_texture, 0,
-                                          &renderer->glyph_atlas_shader_resource_view);
+    ID3D11Device_CreateShaderResourceView(renderer->shared->device, (ID3D11Resource*)renderer->shared->shared_glyph_atlas_texture, 0,
+                                          &renderer->shared->shared_glyph_atlas_shader_resource_view);
 
-    /* Reset atlas packing state and map */
-    renderer->cpu_atlas.next_x = 0;
-    renderer->cpu_atlas.next_y = 0;
-    renderer->cpu_atlas.maxy = 0;
-    memset(renderer->cpu_atlas.bitmap, 0, GLYPH_ATLAS_WIDTH * GLYPH_ATLAS_HEIGHT);
-    memset(renderer->atlas_map.keys, 0, sizeof(GlyphKey) * renderer->atlas_map.capacity);
-    renderer->atlas_map.count = 0;
+    renderer->shared->shared_cpu_atlas.next_x = 0;
+    renderer->shared->shared_cpu_atlas.next_y = 0;
+    renderer->shared->shared_cpu_atlas.maxy = 0;
+    memset(renderer->shared->shared_cpu_atlas.bitmap, 0, GLYPH_ATLAS_WIDTH * GLYPH_ATLAS_HEIGHT);
+    memset(renderer->shared->shared_atlas_map.keys, 0, sizeof(GlyphKey) * renderer->shared->shared_atlas_map.capacity);
+    renderer->shared->shared_atlas_map.count = 0;
 
-    /* Re-insert white glyph */
     for (isize y = 0; y < WHITE_GLYPH_H; y++)
         for (isize x = 0; x < WHITE_GLYPH_W; x++)
-            renderer->cpu_atlas.bitmap[(WHITE_GLYPH_Y + y) * GLYPH_ATLAS_WIDTH + (WHITE_GLYPH_X + x)] = 255;
+            renderer->shared->shared_cpu_atlas.bitmap[(WHITE_GLYPH_Y + y) * GLYPH_ATLAS_WIDTH + (WHITE_GLYPH_X + x)] = 255;
 }
 
 static void map_vertex_buffer(Renderer* renderer)
@@ -483,7 +480,7 @@ void renderer_flush_and_present(Renderer* renderer, const u32 client_width, cons
     ID3D11DeviceContext_PSSetConstantBuffers(s->context, 1, 1, &renderer->clip_rect_buffer);
     ID3D11DeviceContext_RSSetViewports(s->context, 1, &viewport);
     ID3D11DeviceContext_PSSetShader(s->context, renderer->is_composition ? s->pixel_shader_comp : s->pixel_shader, NULL, 0);
-    ID3D11DeviceContext_PSSetShaderResources(s->context, 0, 1, &renderer->glyph_atlas_shader_resource_view);
+    ID3D11DeviceContext_PSSetShaderResources(s->context, 0, 1, &renderer->shared->shared_glyph_atlas_shader_resource_view);
     ID3D11DeviceContext_PSSetSamplers(s->context, 0, 1, &s->sampler_state);
     ID3D11DeviceContext_OMSetRenderTargets(s->context, 1, &renderer->render_target_view, NULL);
     ID3D11DeviceContext_OMSetBlendState(s->context, renderer->is_composition ? s->blend_state_premul : s->blend_state, NULL, 0xffffffff);
@@ -540,7 +537,7 @@ void renderer_flush_overlay_and_present(Renderer* renderer, const u32 client_wid
     ID3D11DeviceContext_PSSetConstantBuffers(s->context, 1, 1, &renderer->clip_rect_buffer);
     ID3D11DeviceContext_RSSetViewports(s->context, 1, &viewport);
     ID3D11DeviceContext_PSSetShader(s->context, renderer->is_composition ? s->pixel_shader_comp : s->pixel_shader, NULL, 0);
-    ID3D11DeviceContext_PSSetShaderResources(s->context, 0, 1, &renderer->glyph_atlas_shader_resource_view);
+    ID3D11DeviceContext_PSSetShaderResources(s->context, 0, 1, &renderer->shared->shared_glyph_atlas_shader_resource_view);
     ID3D11DeviceContext_PSSetSamplers(s->context, 0, 1, &s->sampler_state);
     ID3D11DeviceContext_OMSetRenderTargets(s->context, 1, &renderer->render_target_view, NULL);
     ID3D11DeviceContext_OMSetBlendState(s->context, renderer->is_composition ? s->blend_state_premul : s->blend_state, NULL, 0xffffffff);
@@ -720,7 +717,7 @@ static void renderer_push_rect(Renderer* renderer, const Rect target_rect, const
 static AtlasGlyphPosition renderer_ensure_glyph_in_atlas(Renderer* renderer, GlyphRasterInfo* info, const GlyphKey* key)
 {
     TracyCZoneNC(ctx_gal, "GlyphAtlas", TracyColor_Glyph, TRACY_SUBSYSTEMS & TracySys_Glyph);
-    AtlasGlyphFindResult find_result = atlas_glyph_map_find(&renderer->atlas_map, key);
+    AtlasGlyphFindResult find_result = atlas_glyph_map_find(&renderer->shared->shared_atlas_map, key);
     AtlasGlyphPosition pos;
     if (find_result.found)
     {
@@ -729,8 +726,8 @@ static AtlasGlyphPosition renderer_ensure_glyph_in_atlas(Renderer* renderer, Gly
     }
 
     /* Not in this window's atlas yet — pack it and upload */
-    pos = atlas_insert_glyph(&renderer->cpu_atlas, info->w, info->h, info->bitmap);
-    atlas_glyph_map_insert(&renderer->atlas_map, key, pos.atlas_x, pos.atlas_y);
+    pos = atlas_insert_glyph(&renderer->shared->shared_cpu_atlas, info->w, info->h, info->bitmap);
+    atlas_glyph_map_insert(&renderer->shared->shared_atlas_map, key, pos.atlas_x, pos.atlas_y);
     renderer_upload_glyph(renderer, pos.atlas_x, pos.atlas_y, info->w, info->h);
 
 end:

@@ -59,6 +59,13 @@ typedef struct RendererShared
     ID3D11VertexShader*  vertex_shader;
     ID3D11PixelShader*   pixel_shader;
     ID3D11PixelShader*   pixel_shader_comp;
+
+    // Shared glyph atlas — serves all windows (only one visible at a time)
+    GlyphAtlas                shared_cpu_atlas;
+    AtlasGlyphMap             shared_atlas_map;
+    ID3D11Texture2D*          shared_glyph_atlas_texture;
+    ID3D11ShaderResourceView* shared_glyph_atlas_shader_resource_view;
+    Arena                     shared_atlas_arena;
 } RendererShared;
 // clang-format on
 
@@ -69,15 +76,11 @@ typedef struct Renderer
     IDXGISwapChain2*          swapchain2;
     HANDLE                    frame_latency_waitable_object;
     ID3D11RenderTargetView*   render_target_view;
-    ID3D11Texture2D*          glyph_atlas_texture;
-    ID3D11ShaderResourceView* glyph_atlas_shader_resource_view;
     ID3D11Buffer*             vertex_buffer;
     ID3D11Buffer*             mvp_buffer;
     ID3D11Buffer*             clip_rect_buffer;
     VertexCache               vertex_cache;
     ClipCache                 clip_cache;
-    GlyphAtlas                cpu_atlas;
-    AtlasGlyphMap             atlas_map;
     RendererShared*           shared;
     Arena                     arena;
     b32                       is_composition;

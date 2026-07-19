@@ -164,59 +164,40 @@ DictSearchAuxEntry* dict_build_search_aux(const DictDB* db, Arena* arena)
     if (wc == 0)
         return NULL;
 
-    /* ------------------------------------------------------------------ */
-    /* Pass 1 — count total bytes and segments per entry                   */
-    /* ------------------------------------------------------------------ */
+    /* Pass 1 — count segments per entry */
 
-    MEM_TRACK("[mem] dict_build_search_aux: tmp counting arena = MB(8)\n");
-    Arena tmp = arena_new(MB(8), MB(8));
-    i32* def_bytes_arr = arena_push(&tmp, sizeof(i32), _Alignof(i32), wc);
+    MEM_TRACK("[mem] dict_build_search_aux: tmp counting arena = KB(128)\n");
+    Arena tmp = arena_new(KB(128), KB(128));
     i32* def_segs_arr = arena_push(&tmp, sizeof(i32), _Alignof(i32), wc);
 
-    usize total_def_bytes = 0;
     i32 total_def_segs = 0;
 
     for (u32 i = 0; i < wc; i++)
     {
         const DictWordIndex* w = &db->words[i];
         const u8* p = db->entdata + w->entdata_off;
-        i32 def_bytes = 0, def_segs = 0;
+        i32 def_segs = 0;
 
-        /* Flat v4 EntryBlob: 4 x u32 offsets (phonetic, definition, translation, exchange).
-           No leading freq field — the first u32 IS phonetic_off. */
         dict_rd_u32(&p); /* phonetic_off */
         u32 def_off = dict_rd_u32(&p);
         u32 tr_off = dict_rd_u32(&p);
         dict_rd_u32(&p); /* exchange_off */
 
-        /* DEF search text = definition + translation (each its own segment) */
         if (def_off)
-        {
-            def_bytes += (i32)strlen(DICT_STR(db, def_off)) + 1;
             def_segs++;
-        }
         if (tr_off)
-        {
-            def_bytes += (i32)strlen(DICT_STR(db, tr_off)) + 1;
             def_segs++;
-        }
 
-        def_bytes_arr[i] = def_bytes;
         def_segs_arr[i] = def_segs;
-        total_def_bytes += (usize)def_bytes;
         total_def_segs += def_segs;
     }
 
-    /* Ensure at least 1 byte/slot so pointers are always valid */
-    total_def_bytes = total_def_bytes > 0 ? total_def_bytes : 1;
     total_def_segs = total_def_segs > 0 ? total_def_segs : 1;
 
-    /* ------------------------------------------------------------------ */
-    /* Allocate all data from the caller's arena                           */
-    /* ------------------------------------------------------------------ */
+    /* Allocate entry array + segment pool from the caller's arena.
+       def_search_text points directly into db->strpool — no string copy. */
 
-    isize needed =
-        (isize)(wc * sizeof(DictSearchAuxEntry) + total_def_bytes + (usize)total_def_segs * sizeof(AuxSegment));
+    isize needed = (isize)(wc * sizeof(DictSearchAuxEntry) + (usize)total_def_segs * sizeof(AuxSegment));
     if (arena->pos + needed > arena->reserve_end)
     {
         arena_release(&tmp);
@@ -226,72 +207,49 @@ DictSearchAuxEntry* dict_build_search_aux(const DictDB* db, Arena* arena)
     MEM_TRACK("[mem] dict_build_search_aux: entries array = %u entries x %zu B = %zu B\n", wc,
               sizeof(DictSearchAuxEntry), (usize)wc * sizeof(DictSearchAuxEntry));
     DictSearchAuxEntry* entries = arena_push(arena, sizeof(DictSearchAuxEntry), _Alignof(DictSearchAuxEntry), wc);
-    MEM_TRACK("[mem] dict_build_search_aux: def_buf = %zu B (%.1f MB)\n", total_def_bytes,
-              total_def_bytes / (1024.0 * 1024.0));
-    char* def_buf = arena_push(arena, 1, 1, total_def_bytes);
     MEM_TRACK("[mem] dict_build_search_aux: def_seg_pool = %d segs x %zu B = %zu B\n", total_def_segs,
               sizeof(AuxSegment), (usize)total_def_segs * sizeof(AuxSegment));
     AuxSegment* def_seg_pool = arena_push(arena, sizeof(AuxSegment), _Alignof(AuxSegment), total_def_segs);
 
-    /* ------------------------------------------------------------------ */
-    /* Pass 2 — fill strings and segment tables                             */
-    /* ------------------------------------------------------------------ */
+    /* Pass 2 — fill segment tables (offsets are strpool offsets, text lives in dict_arena) */
 
-    usize def_off = 0;
     i32 def_seg_off = 0;
 
     for (u32 i = 0; i < wc; i++)
     {
         const DictWordIndex* w = &db->words[i];
         const u8* p = db->entdata + w->entdata_off;
-        i32 def_bytes = def_bytes_arr[i];
         i32 def_segs = def_segs_arr[i];
 
-        entries[i].def_search_text = def_buf + def_off;
-        entries[i].def_len = def_bytes;
+        entries[i].def_search_text = db->strpool;
+        entries[i].def_len = 0;
         entries[i].def_segs = def_seg_pool + def_seg_off;
         entries[i].def_seg_count = def_segs;
 
-        char* dptr = entries[i].def_search_text;
-        u32 def_cur = 0;
         i32 dsi = 0;
 
-        /* Flat v4 EntryBlob: 4 x u32 offsets (phonetic, definition, translation, exchange).
-           No leading freq field — the first u32 IS phonetic_off. */
         dict_rd_u32(&p); /* phonetic_off */
         u32 blob_def_off = dict_rd_u32(&p);
         u32 blob_tr_off = dict_rd_u32(&p);
         dict_rd_u32(&p); /* exchange_off */
 
-        /* DEF search text: definition (segment 0) + translation (segment 1) */
+        if (dsi < def_segs && blob_def_off)
         {
             const char* s = DICT_STR(db, blob_def_off);
             i32 sl = (i32)strlen(s);
-            if (dsi < def_segs && sl > 0)
-            {
-                memcpy(dptr, s, sl);
-                dptr[sl] = DICT_SEARCH_SEP_CHAR;
+            if (sl > 0)
                 entries[i].def_segs[dsi++] =
-                    (AuxSegment){ .offset = def_cur, .len = (u32)sl, .kind = AUXSEG_DEF_EN, .def_index = 0 };
-                dptr += sl + 1;
-                def_cur += (u32)sl + 1;
-            }
+                    (AuxSegment){ .offset = blob_def_off, .len = (u32)sl, .kind = AUXSEG_DEF_EN, .def_index = 0 };
         }
+        if (dsi < def_segs && blob_tr_off)
         {
             const char* s = DICT_STR(db, blob_tr_off);
             i32 sl = (i32)strlen(s);
-            if (dsi < def_segs && sl > 0)
-            {
-                memcpy(dptr, s, sl);
-                dptr[sl] = DICT_SEARCH_SEP_CHAR;
+            if (sl > 0)
                 entries[i].def_segs[dsi++] =
-                    (AuxSegment){ .offset = def_cur, .len = (u32)sl, .kind = AUXSEG_DEF_ZH, .def_index = 0 };
-                dptr += sl + 1;
-                def_cur += (u32)sl + 1;
-            }
+                    (AuxSegment){ .offset = blob_tr_off, .len = (u32)sl, .kind = AUXSEG_DEF_ZH, .def_index = 0 };
         }
 
-        def_off += (usize)def_bytes;
         def_seg_off += def_segs;
     }
 

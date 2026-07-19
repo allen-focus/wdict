@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SEARCH_THREAD_STACK_SIZE KB(64)
+
 //
 // Query DSL evaluator
 //
@@ -139,8 +141,8 @@ static DWORD WINAPI search_worker_thread(LPVOID param)
     i32 my_id = wp->worker_id;
 
     /* Per-worker arena — tree in low region, fuzzy_match DP tables reuse the tail. */
-    MEM_TRACK("[mem] search worker %d: scratch arena = MB(%d), commit_block = KB(64)\n", my_id, SEARCH_SCRATCH_MB);
-    Arena scratch = arena_new(MB(SEARCH_SCRATCH_MB), KB(64));
+    MEM_TRACK("[mem] search worker %d: scratch arena = KB(256), commit_block = KB(64)\n", my_id);
+    Arena scratch = arena_new(KB(256), KB(64));
 
     while (state->running)
     {
@@ -334,8 +336,8 @@ b32 search_start(SearchState* state)
     {
         state->worker_params[i].state = state;
         state->worker_params[i].worker_id = i;
-        MEM_TRACK("[mem] CreateThread: search worker %d (default stack = 1 MB reserved)\n", i);
-        state->worker_handles[i] = CreateThread(NULL, 0, search_worker_thread, &state->worker_params[i], 0, NULL);
+        MEM_TRACK("[mem] CreateThread: search worker %d (stack = %lld KB)\n", i, (long long)(SEARCH_THREAD_STACK_SIZE / 1024));
+        state->worker_handles[i] = CreateThread(NULL, SEARCH_THREAD_STACK_SIZE, search_worker_thread, &state->worker_params[i], 0, NULL);
         if (!state->worker_handles[i])
         {
             state->running = 0;
@@ -485,8 +487,8 @@ void search_reconfigure(SearchState* state, const FieldDef* fields, i32 field_co
     {
         state->worker_params[i].state = state;
         state->worker_params[i].worker_id = i;
-        MEM_TRACK("[mem] CreateThread: search worker %d (reconfigure, default stack = 1 MB reserved)\n", i);
-        state->worker_handles[i] = CreateThread(NULL, 0, search_worker_thread, &state->worker_params[i], 0, NULL);
+        MEM_TRACK("[mem] CreateThread: search worker %d (reconfigure, stack = %lld KB)\n", i, (long long)(SEARCH_THREAD_STACK_SIZE / 1024));
+        state->worker_handles[i] = CreateThread(NULL, SEARCH_THREAD_STACK_SIZE, search_worker_thread, &state->worker_params[i], 0, NULL);
     }
 
     /* 5. Re-trigger search with current query — inline slice setup

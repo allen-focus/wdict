@@ -7,10 +7,10 @@
 #define GLYPH_ATLAS_WIDTH  4096
 #define GLYPH_ATLAS_HEIGHT 2048
 
-#define GLYPHS_CP_LENGTH 8192 // must be a power of two
+#define GLYPHS_CP_LENGTH 4096 // must be a power of two
 #define GLYPHS_LENGTH    (GLYPHS_CP_LENGTH + 1) // plus an additional white rectangle glyph
 
-#define ATLAS_GLYPH_MAP_CAPACITY 8192 // power of two
+#define ATLAS_GLYPH_MAP_CAPACITY 2048 // power of two
 
 ///
 
