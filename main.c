@@ -2003,12 +2003,36 @@ static void ocr_popup_render(WindowContext* ctx)
             /* separator */
             ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->dict_separator }));
 
-            TextConfig def_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
-                                   .font_size = 13.f,
-                                   .color = theme->dict_definition_fg };
+            if (ctx->ocr_popup.def_line_count > 0)
+            {
+                ScrollContext scroll = ui_scrollable_area_begin(&(ScrollableAreaConfig){
+                    .hash_str = str("##ocr_defs"),
+                    .sizing = { grow({}), grow({}) },
+                    .padding = { 2, 2, 2, 2 },
+                    .bg = theme->palette_bg,
+                    .thumb_color = theme->scrollbar_thumb,
+                    .direction = LAYOUT_TOP_TO_BOTTOM,
+                });
+                {
+                    TextConfig def_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
+                                           .font_size = 13.f,
+                                           .color = theme->dict_definition_fg,
+                                           .wrap = True };
 
-            for (i32 i = 0; i < ctx->ocr_popup.def_line_count; i++)
-                ui_text(ctx->ocr_popup.def_lines[i], &def_cfg);
+                    for (i32 i = 0; i < ctx->ocr_popup.def_line_count; i++)
+                    {
+                        UIBox* line = ui_box_begin(&(BoxConfig){
+                            .sizing = { grow({}), fit({}) },
+                            .child_gap = 2,
+                        });
+                        {
+                            ui_text(ctx->ocr_popup.def_lines[i], &def_cfg);
+                        }
+                        ui_box_end(line);
+                    }
+                }
+                ui_scrollable_area_end(scroll);
+            }
         }
         ui_box_end(vbox);
     }
