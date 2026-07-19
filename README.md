@@ -1,5 +1,9 @@
 # wdict
 
+## Demo
+
+![](assets/demo.gif)
+
 ## Features
 
 - Tiny single-file executable (~1.2 MB) with no runtime dependencies and no data written to disk;
