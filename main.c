@@ -1405,6 +1405,43 @@ static void render_highlighted_text(String text, i32 range_count, const FuzzyRan
     }
 }
 
+static void render_dict_headline(String word_text, i32 word_range_count, const FuzzyRange* word_ranges,
+                                  const TextConfig* word_cfg, const TextConfig* word_hl_cfg,
+                                  String phonetic, const TextConfig* phon_cfg)
+{
+    UIBox* word_line = ui_box_begin(&(BoxConfig){
+        .sizing = { fit_grow({}), fit({}) },
+        .child_gap = 8.f,
+    });
+    {
+        UIBox* word_inner = ui_box_begin(&(BoxConfig){
+            .sizing = { fit({}), fit({}) },
+            .direction = LAYOUT_LEFT_TO_RIGHT,
+            .child_gap = 0.f,
+        });
+        {
+            render_highlighted_text(word_text, word_range_count, word_ranges, word_cfg, word_hl_cfg);
+        }
+        ui_box_end(word_inner);
+
+        if (phonetic.len > 0)
+        {
+            UIBox* phon_inner = ui_box_begin(&(BoxConfig){
+                .sizing = { fit({}), fit({}) },
+                .direction = LAYOUT_LEFT_TO_RIGHT,
+                .child_gap = 0.f,
+            });
+            {
+                ui_text(str("/"), phon_cfg);
+                ui_text(phonetic, phon_cfg);
+                ui_text(str("/"), phon_cfg);
+            }
+            ui_box_end(phon_inner);
+        }
+    }
+    ui_box_end(word_line);
+}
+
 /* Returns byte length of the longest prefix of `text` whose rendered width plus
    the width of "..." fits within `max_w` (logical px). Used to truncate palette
    context lines at the visible right edge rather than at a fixed char count. */
@@ -1741,45 +1778,14 @@ static void search_palette_render(WindowContext* ctx)
 
                                     /* word line — always shown, in horizontal box */
                                     {
-                                        UIBox* word_line = ui_box_begin(
-                                            &(BoxConfig){ .sizing = { fit_grow({}), fit({}) }, .child_gap = 8.f });
-                                        {
-                                            /* Inner box with zero gap so highlight sub-segments
-                                               (normal | match | normal) stay tight; the 8px gap on
-                                               word_line only separates the word from the phonetic. */
-                                            UIBox* word_inner =
-                                                ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
-                                                                           .direction = LAYOUT_LEFT_TO_RIGHT,
-                                                                           .child_gap = 0.f });
-                                            {
-                                                render_highlighted_text(item->word_text, item->word_range_count,
-                                                                        item->word_ranges, &normal_cfg, &highlight_cfg);
-                                            }
-                                            ui_box_end(word_inner);
-
-                                            if (item->phonetic.len > 0)
-                                            {
-                                                TextConfig phon_cfg = normal_cfg;
-                                                phon_cfg.font = &shared->fonts[FONT_INDEX_UI];
-                                                phon_cfg.font_size = 11.f;
-                                                phon_cfg.color = theme->dict_phonetic_fg;
-                                                /* Inner box (gap 0) so "/phonetic/" stays tight;
-                                                   word_line's 8px gap separates it from the word. */
-                                                UIBox* phon_inner =
-                                                    ui_box_begin(&(BoxConfig){ .sizing = { fit({}), fit({}) },
-                                                                               .direction = LAYOUT_LEFT_TO_RIGHT,
-                                                                               .child_gap = 0.f });
-                                                {
-                                                    /* Three stable (non-temp) strings avoid a stack
-                                                       buffer that would dangle by render time. */
-                                                    ui_text(str("/"), &phon_cfg);
-                                                    ui_text(item->phonetic, &phon_cfg);
-                                                    ui_text(str("/"), &phon_cfg);
-                                                }
-                                                ui_box_end(phon_inner);
-                                            }
-                                        }
-                                        ui_box_end(word_line);
+                                        TextConfig phon_cfg = {
+                                            .font = &shared->fonts[FONT_INDEX_UI],
+                                            .font_size = 11.f,
+                                            .color = theme->dict_phonetic_fg,
+                                        };
+                                        render_dict_headline(item->word_text, item->word_range_count,
+                                                              item->word_ranges, &normal_cfg, &highlight_cfg,
+                                                              item->phonetic, &phon_cfg);
                                     }
 
                                     /* context line — shown for def/ex/all modes, truncated to 2 lines */
@@ -1980,30 +1986,19 @@ static void ocr_popup_render(WindowContext* ctx)
             .child_gap = 4,
         });
         {
-            UIBox* word_line = ui_box_begin(&(BoxConfig){
-                .sizing = { fit_grow({}), fit({}) },
-                .direction = LAYOUT_LEFT_TO_RIGHT,
-                .child_gap = 8,
-            });
             {
                 String word_str = { (u8*)ctx->ocr_popup.word, (isize)strlen(ctx->ocr_popup.word) };
+                String phon_str = { (u8*)ctx->ocr_popup.phonetic, (isize)strlen(ctx->ocr_popup.phonetic) };
                 TextConfig word_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
                                         .font_size = 16.f,
                                         .color = theme->dict_word_fg };
-                ui_text(word_str, &word_cfg);
+                TextConfig word_hl_cfg = word_cfg;
+                TextConfig phon_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
+                                        .font_size = 11.f,
+                                        .color = theme->dict_phonetic_fg };
 
-                if (ctx->ocr_popup.phonetic[0])
-                {
-                    String phon_str = { (u8*)ctx->ocr_popup.phonetic, (isize)strlen(ctx->ocr_popup.phonetic) };
-                    TextConfig phon_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
-                                            .font_size = 11.f,
-                                            .color = theme->dict_phonetic_fg };
-                    ui_text(str("/"), &phon_cfg);
-                    ui_text(phon_str, &phon_cfg);
-                    ui_text(str("/"), &phon_cfg);
-                }
+                render_dict_headline(word_str, 0, NULL, &word_cfg, &word_hl_cfg, phon_str, &phon_cfg);
             }
-            ui_box_end(word_line);
 
             /* separator */
             ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->dict_separator }));
@@ -2028,7 +2023,7 @@ static void ocr_popup_render(WindowContext* ctx)
                     {
                         UIBox* line = ui_box_begin(&(BoxConfig){
                             .sizing = { grow({}), fit({}) },
-                            .child_gap = 2,
+                            .child_gap = 4,
                         });
                         {
                             ui_text(ctx->ocr_popup.def_lines[i], &def_cfg);
