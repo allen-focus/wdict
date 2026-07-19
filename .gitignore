@@ -2,7 +2,9 @@
 /shaders/
 /resources/
 /docs/
-/data/
+
+/data/*
+!/data/dict.bin.zstd
 
 /.cache/
 

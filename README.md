@@ -112,3 +112,4 @@ All strings are concatenated as UTF-8, each terminated with `\0`. Offset 0 is th
 - [Tracy](https://github.com/wolfpld/tracy) (trimmed to `public/` only, version 0.13.1): Licensed under the BSD 3‑Clause License. See the full terms in `thirdparty/tracy/LICENSE`.
 - Icon fonts: Generated using [Fontello](https://fontello.com/). Contains icons from:
   - MFG Labs: Licensed under the [SIL Open Font License](http://scripts.sil.org/OFL). See the full terms in `thirdparty/fontello/LICENSE.txt`.
+- [ECDICT](https://github.com/skywind3000/ECDICT) (trimmed and compressed dictionary data, generated via `scripts/build_dict_from_stardict.py` and `scripts/compress_dict.py`): Licensed under the MIT License. See the full terms in `data/LICENSE`.
