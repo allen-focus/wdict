@@ -86,6 +86,9 @@ typedef struct
 {
     b32 active;
     char word[256];
+    char phonetic[256];
+    String def_lines[32];
+    i32 def_line_count;
     i32 anchor_x, anchor_y;
     u32 anchor_w, anchor_h;
     Rect popup_rect;
@@ -715,6 +718,7 @@ static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* b
         if (base_idx >= 0)
         {
             display_word = DICT_STR(&shared->dict_db, shared->dict_db.words[base_idx].word_stroff);
+            lookup_idx = dict_lookup(&shared->dict_db, display_word);
         }
     }
 
@@ -723,6 +727,62 @@ static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* b
         dwlen = 255;
     memcpy(popup->ocr_popup.word, display_word, (usize)dwlen);
     popup->ocr_popup.word[dwlen] = 0;
+
+    popup->ocr_popup.phonetic[0] = 0;
+    popup->ocr_popup.def_line_count = 0;
+
+    if (lookup_idx >= 0)
+    {
+        const u8* p = shared->dict_db.entdata + shared->dict_db.words[lookup_idx].entdata_off;
+        u32 phon_off = dict_rd_u32(&p);
+        dict_rd_u32(&p); /* def_off (English) */
+        u32 tr_off = dict_rd_u32(&p);
+
+        if (phon_off)
+        {
+            const char* s = DICT_STR(&shared->dict_db, phon_off);
+            isize plen = (isize)strlen(s);
+            if (plen > 255)
+                plen = 255;
+            memcpy(popup->ocr_popup.phonetic, s, (usize)plen);
+            popup->ocr_popup.phonetic[plen] = 0;
+        }
+
+        if (tr_off)
+        {
+            const char* s = DICT_STR(&shared->dict_db, tr_off);
+            isize slen = (isize)strlen(s);
+            const char* line_start = s;
+            i32 line_count = 0;
+
+            for (isize i = 0; i <= slen && line_count < 32; i++)
+            {
+                if (s[i] == '\xef' && s[i + 1] == '\xbc' && s[i + 2] == '\x9b')
+                {
+                    if (i > (isize)(line_start - s))
+                    {
+                        popup->ocr_popup.def_lines[line_count] = (String){
+                            (u8*)line_start, (isize)(s + i - line_start)
+                        };
+                        line_count++;
+                    }
+                    line_start = s + i + 3;
+                    i += 2;
+                }
+                else if (s[i] == 0)
+                {
+                    if (i > (isize)(line_start - s))
+                    {
+                        popup->ocr_popup.def_lines[line_count] = (String){
+                            (u8*)line_start, (isize)(s + i - line_start)
+                        };
+                        line_count++;
+                    }
+                }
+            }
+            popup->ocr_popup.def_line_count = line_count;
+        }
+    }
 
     i32 anchor_x, anchor_y;
     u32 anchor_w, anchor_h;
@@ -1917,6 +1977,40 @@ static void ocr_popup_render(WindowContext* ctx)
                 ir.last_box->position.y + ir.last_box->size.height,
             };
         }
+
+        UIBox* vbox = ui_box_begin(&(BoxConfig){
+            .sizing = { grow({}), grow({}) },
+            .padding = { pad, pad, pad, pad },
+            .direction = LAYOUT_TOP_TO_BOTTOM,
+            .child_gap = 4,
+        });
+        {
+            String word_str = { (u8*)ctx->ocr_popup.word, (isize)strlen(ctx->ocr_popup.word) };
+            TextConfig word_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
+                                    .font_size = 16.f,
+                                    .color = theme->dict_word_fg };
+            ui_text(word_str, &word_cfg);
+
+            if (ctx->ocr_popup.phonetic[0])
+            {
+                String phon_str = { (u8*)ctx->ocr_popup.phonetic, (isize)strlen(ctx->ocr_popup.phonetic) };
+                TextConfig phon_cfg = { .font = &shared->fonts[FONT_INDEX_UI],
+                                        .font_size = 12.f,
+                                        .color = theme->dict_phonetic_fg };
+                ui_text(phon_str, &phon_cfg);
+            }
+
+            /* separator */
+            ui_box_end(ui_box_begin(&(BoxConfig){ .sizing = { grow({}), fixed(1) }, .color = theme->dict_separator }));
+
+            TextConfig def_cfg = { .font = &shared->fonts[FONT_INDEX_ZH],
+                                   .font_size = 13.f,
+                                   .color = theme->dict_definition_fg };
+
+            for (i32 i = 0; i < ctx->ocr_popup.def_line_count; i++)
+                ui_text(ctx->ocr_popup.def_lines[i], &def_cfg);
+        }
+        ui_box_end(vbox);
     }
     ui_box_end(popup);
 }
