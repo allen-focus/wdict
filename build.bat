@@ -65,7 +65,7 @@ set CommonCompilerFlags=/nologo /W3 /WX /MP /utf-8 /D_CRT_SECURE_NO_WARNINGS /It
 set CompilerDebugFlags=/Od /Zi /RTC1
 set CompilerReleaseFlags=/O2 /GS- /DNDEBUG
 
-set LinkerReleaseFlags=/fixed /incremental:no /opt:icf /opt:ref /subsystem:windows
+set LinkerReleaseFlags=/fixed /dynamicbase:no /incremental:no /opt:icf /opt:ref /subsystem:windows
 set LinkerDebugFlags=
 
 if %IsRelease%==1 (

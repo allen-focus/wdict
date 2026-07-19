@@ -18,6 +18,9 @@
 #     Not worth doing manually; automate it in CI before enabling.
 
 cmake_minimum_required(VERSION 3.16)
+
+set(CMAKE_CONFIGURATION_TYPES "Debug;Profile;Release" CACHE STRING "" FORCE)
+
 project(wdict C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -40,8 +43,6 @@ endif()
 #   Profile – optimised + Tracy                   (/O2 /Zi + TRACY_ENABLE)
 #   Release – ship build, zero overhead           (/O2 /GS- + linker opts)
 #
-
-set(CMAKE_CONFIGURATION_TYPES "Debug;Profile;Release" CACHE STRING "" FORCE)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_GENERATOR MATCHES "Visual Studio")
   set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
@@ -79,7 +80,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 target_link_options(${PROJECT_NAME} PRIVATE
     $<$<CONFIG:Debug>:/SUBSYSTEM:WINDOWS>
     $<$<CONFIG:Profile>:/SUBSYSTEM:WINDOWS>
-    $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS /FIXED /INCREMENTAL:NO /OPT:ICF /OPT:REF>
+    $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS /FIXED /DYNAMICBASE:NO /INCREMENTAL:NO /OPT:ICF /OPT:REF>
 )
 
 #
