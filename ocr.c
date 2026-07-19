@@ -198,6 +198,10 @@ OcrHandler_Invoke(__FIAsyncOperationCompletedHandler_1_Windows__CMedia__COcr__CO
                                 free(pBbox);
                             }
                         }
+                        else
+                        {
+                            free(pBbox);
+                        }
                     }
                 }
                 WindowsDeleteString(hsText);
@@ -430,6 +434,11 @@ void ocr_recognize_region_async(i32 x, i32 y, u32 w, u32 h, i32 cursor_x, i32 cu
         {
             __FIAsyncOperationCompletedHandler_1_Windows__CMedia__COcr__COcrResult_Release(
                 (__FIAsyncOperationCompletedHandler_1_Windows__CMedia__COcr__COcrResult*)handler);
+            __FIAsyncOperationCompletedHandler_1_Windows__CMedia__COcr__COcrResult_Release(
+                (__FIAsyncOperationCompletedHandler_1_Windows__CMedia__COcr__COcrResult*)handler);
+        }
+        else
+        {
             __FIAsyncOperationCompletedHandler_1_Windows__CMedia__COcr__COcrResult_Release(
                 (__FIAsyncOperationCompletedHandler_1_Windows__CMedia__COcr__COcrResult*)handler);
         }
