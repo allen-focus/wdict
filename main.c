@@ -2395,6 +2395,15 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             return 0;
         }
+
+        case WM_SETCURSOR:
+        {
+            Cursor shape = ui_ctx ? ui_ctx->desired_cursor : UI_CURSOR_ARROW;
+            if (shape < 0 || shape >= UI_CURSOR_COUNT)
+                shape = UI_CURSOR_ARROW;
+            SetCursor(shared->cursors[shape]);
+            return TRUE;
+        }
         /* Compute client size from the (frame-less) window rect. */
         case WM_NCCALCSIZE:
         {
