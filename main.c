@@ -48,6 +48,8 @@
 #define HOTKEY_QUICK_SEARCH   2
 #define QUICK_SEARCH_WINDOW_W 540
 #define QUICK_SEARCH_WINDOW_H 420
+#define OCR_POPUP_WINDOW_W     340
+#define OCR_POPUP_WINDOW_H     200
 
 typedef enum
 {
@@ -79,6 +81,15 @@ typedef struct
     f32 t;
     Rect rect;
 } OverlayPopup;
+
+typedef struct
+{
+    b32 active;
+    char word[256];
+    i32 anchor_x, anchor_y;
+    u32 anchor_w, anchor_h;
+    Rect popup_rect;
+} OcrPopupState;
 
 typedef struct
 {
@@ -146,6 +157,7 @@ typedef struct
     RendererShared renderer_shared;
     HCURSOR cursors[UI_CURSOR_COUNT];
     WindowContext* quick_search_window;
+    WindowContext* ocr_popup_window;
     HWND tray_hwnd;
     Arena cfg_arena;
     Arena cmd_arena;
@@ -200,6 +212,9 @@ struct WindowContext
     b32 quick_search_result_confirmed;
     b32 quick_search_closing;
     b32 dpi_repositioning;
+
+    b32 is_ocr_popup;
+    OcrPopupState ocr_popup;
 };
 
 static DictDB* g_dict_db;
@@ -344,6 +359,9 @@ static const Theme s_theme_dark = {
 static void process_frame(WindowContext* ctx);
 static WindowContext* create_quick_search_window(AppShared* shared);
 static WindowContext* find_quick_search_window(AppShared* shared);
+static WindowContext* create_ocr_popup_window(AppShared* shared);
+static WindowContext* find_ocr_popup_window(AppShared* shared);
+static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* bbox);
 
 static WindowContext* create_quick_search_window(AppShared* shared)
 {
@@ -436,6 +454,73 @@ static WindowContext* create_quick_search_window(AppShared* shared)
     ctx->ui.focused_hash = s_search_palette_input_hash;
 
     /* Stay hidden until first global hotkey activation */
+    ShowWindow(ctx->window, SW_HIDE);
+
+    return ctx;
+}
+
+static WindowContext* create_ocr_popup_window(AppShared* shared)
+{
+    WindowContext* ctx = (WindowContext*)calloc(1, sizeof(WindowContext));
+    Assert(ctx);
+    MEM_TRACK("[mem] calloc: ocr-popup WindowContext = %zu B\n", sizeof(WindowContext));
+    ctx->shared = shared;
+    ctx->id = s_window_next_id++;
+    ctx->is_ocr_popup = True;
+
+    HMONITOR mon = MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
+    UINT dpi = USER_DEFAULT_SCREEN_DPI;
+    {
+        UINT dpi_x = 0, dpi_y = 0;
+        GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y);
+        if (dpi_x > 0)
+            dpi = dpi_x;
+    }
+    f32 dpi_scale = (f32)dpi / USER_DEFAULT_SCREEN_DPI;
+    u32 physical_w = (u32)(OCR_POPUP_WINDOW_W * dpi_scale);
+    u32 physical_h = (u32)(OCR_POPUP_WINDOW_H * dpi_scale);
+
+    ctx->window =
+        CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"window class", L"", WS_POPUP,
+                        0, 0, (i32)physical_w, (i32)physical_h, NULL, NULL, GetModuleHandleW(NULL), ctx);
+    if (!ctx->window)
+    {
+        free(ctx);
+        return NULL;
+    }
+    {
+        BOOL use_dark = TRUE;
+        DwmSetWindowAttribute(ctx->window, DWMWA_USE_IMMERSIVE_DARK_MODE, &use_dark, sizeof(use_dark));
+        SetPropW(ctx->window, L"NonRudeHWND", (HANDLE)TRUE);
+    }
+
+    UIRenderFunc render_fn = {
+        .flush_and_present = renderer_flush_overlay_and_present,
+        .on_resize = renderer_resize,
+        .wait_for_last_submitted_frame = renderer_wait_for_last_submitted_frame,
+        .get_text_width = renderer_get_text_width_for_dpi,
+        .get_text_height = renderer_get_text_height_for_dpi,
+        .draw_rect = renderer_draw_rect,
+        .draw_text = renderer_draw_text,
+    };
+
+    ui_init(ctx->window, &ctx->ui, &ctx->renderer, &shared->raster_cache, ctx->ui.client_width, ctx->ui.client_height,
+            dpi, render_fn);
+    ctx->ui.clipboard_copy = win32_clipboard_copy;
+    ctx->ui.clipboard_paste = win32_clipboard_paste;
+
+    ctx->renderer.is_composition = True;
+    ctx->renderer.initial_width = physical_w;
+    ctx->renderer.initial_height = physical_h;
+
+    renderer_init(&ctx->renderer, &shared->renderer_shared, ctx->window);
+    renderer_init_dcomp(&ctx->renderer, ctx->window, &ctx->dcomp_device, &ctx->dcomp_target, &ctx->dcomp_visual);
+
+    ctx->default_himc = ImmGetContext(ctx->window);
+    ImmReleaseContext(ctx->window, ctx->default_himc);
+
+    shared->ocr_popup_window = ctx;
+
     ShowWindow(ctx->window, SW_HIDE);
 
     return ctx;
@@ -593,6 +678,134 @@ static void quick_search_open_with_query(AppShared* shared, const u8* query)
     quick_search_activate(shared);
 }
 
+static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* bbox)
+{
+    if (!InterlockedOr(&shared->dict_ready, 0))
+        return;
+
+    WindowContext* popup = find_ocr_popup_window(shared);
+    if (!popup)
+    {
+        popup = create_ocr_popup_window(shared);
+        if (!popup)
+            return;
+    }
+
+    popup->ocr_popup.active = False;
+
+    isize wlen = (isize)strlen((const char*)word);
+    if (wlen > 255)
+        wlen = 255;
+
+    u8 lower_buf[256];
+    for (isize i = 0; i < wlen; i++)
+    {
+        u8 c = word[i];
+        if (c >= 'A' && c <= 'Z')
+            c = (u8)(c + ('a' - 'A'));
+        lower_buf[i] = c;
+    }
+    lower_buf[wlen] = 0;
+
+    const char* display_word = (const char*)lower_buf;
+    i32 lookup_idx = dict_lookup(&shared->dict_db, (const char*)lower_buf);
+    if (lookup_idx < 0)
+    {
+        i32 base_idx = dict_resolve(&shared->dict_db, (const char*)lower_buf);
+        if (base_idx >= 0)
+        {
+            display_word = DICT_STR(&shared->dict_db, shared->dict_db.words[base_idx].word_stroff);
+        }
+    }
+
+    isize dwlen = (isize)strlen(display_word);
+    if (dwlen > 255)
+        dwlen = 255;
+    memcpy(popup->ocr_popup.word, display_word, (usize)dwlen);
+    popup->ocr_popup.word[dwlen] = 0;
+
+    i32 anchor_x, anchor_y;
+    u32 anchor_w, anchor_h;
+    if (bbox)
+    {
+        anchor_x = bbox->screen_x;
+        anchor_y = bbox->screen_y;
+        anchor_w = bbox->screen_w;
+        anchor_h = bbox->screen_h;
+    }
+    else
+    {
+        POINT pt;
+        GetCursorPos(&pt);
+        anchor_x = pt.x;
+        anchor_y = pt.y;
+        anchor_w = 0;
+        anchor_h = 0;
+    }
+
+    popup->ocr_popup.anchor_x = anchor_x;
+    popup->ocr_popup.anchor_y = anchor_y;
+    popup->ocr_popup.anchor_w = anchor_w;
+    popup->ocr_popup.anchor_h = anchor_h;
+
+    POINT anchor_pt = { anchor_x, anchor_y };
+    HMONITOR mon = MonitorFromPoint(anchor_pt, MONITOR_DEFAULTTONEAREST);
+    UINT target_dpi = USER_DEFAULT_SCREEN_DPI;
+    {
+        UINT dpi_x = 0, dpi_y = 0;
+        GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y);
+        if (dpi_x > 0)
+            target_dpi = dpi_x;
+    }
+
+    if (target_dpi != popup->ui.dpi)
+    {
+        popup->ui.dpi = target_dpi;
+        renderer_recreate_glyph_atlas_texture(&popup->renderer);
+    }
+
+    f32 dpi_scale = (f32)target_dpi / USER_DEFAULT_SCREEN_DPI;
+    u32 physical_w = (u32)(OCR_POPUP_WINDOW_W * dpi_scale);
+    u32 physical_h = (u32)(OCR_POPUP_WINDOW_H * dpi_scale);
+
+    MONITORINFO mi = { .cbSize = sizeof(mi) };
+    GetMonitorInfoW(mon, &mi);
+
+    i32 gap = 8;
+    i32 word_center_x = anchor_x + (i32)anchor_w / 2;
+    i32 popup_x = word_center_x - (i32)physical_w / 2;
+    i32 popup_y = anchor_y + (i32)anchor_h + gap;
+
+    if (popup_x < mi.rcWork.left)
+        popup_x = mi.rcWork.left;
+    if (popup_x + (i32)physical_w > mi.rcWork.right)
+        popup_x = mi.rcWork.right - (i32)physical_w;
+
+    i32 popup_bottom = popup_y + (i32)physical_h;
+    if (popup_bottom > mi.rcWork.bottom)
+    {
+        popup_y = anchor_y - (i32)physical_h - gap;
+        if (popup_y < mi.rcWork.top)
+            popup_y = mi.rcWork.top;
+    }
+
+    popup->dpi_repositioning = True;
+    ShowWindow(popup->window, SW_SHOW);
+    SetWindowPos(popup->window, NULL, popup_x, popup_y, (i32)physical_w, (i32)physical_h, SWP_NOZORDER | SWP_NOACTIVATE);
+
+    {
+        f32 s = (f32)popup->ui.dpi / USER_DEFAULT_SCREEN_DPI;
+        popup->ui.client_width = (u32)ceil(physical_w / s);
+        popup->ui.client_height = (u32)ceil(physical_h / s);
+        if (popup->ui.client_width > 0 && popup->ui.client_height > 0)
+            popup->ui.render_fn.on_resize(popup->ui.renderer, physical_w, physical_h);
+    }
+
+    popup->dpi_repositioning = False;
+    popup->ocr_popup.active = True;
+    popup->ui.requested_frames = IDLE_WAKE_FRAMES;
+}
+
 static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
     AppShared* shared = NULL;
@@ -726,8 +939,7 @@ static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM 
                 return 0;
             }
 
-            /* Open the quick-search palette, prefilled with the OCR word and auto-querying. */
-            quick_search_open_with_query(shared, text);
+            ocr_popup_activate(shared, text, bbox);
 
             free(text);
             if (bbox)
@@ -741,6 +953,11 @@ static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM 
 static WindowContext* find_quick_search_window(AppShared* shared)
 {
     return shared->quick_search_window;
+}
+
+static WindowContext* find_ocr_popup_window(AppShared* shared)
+{
+    return shared->ocr_popup_window;
 }
 
 //
@@ -1660,6 +1877,50 @@ static void search_palette_render(WindowContext* ctx)
     ui_box_end(popup);
 }
 
+static void ocr_popup_render(WindowContext* ctx)
+{
+    if (!ctx->ocr_popup.active)
+        return;
+
+    AppShared* shared = ctx->shared;
+    UIContext* ui_ctx = &ctx->ui;
+    const Theme* theme = &shared->theme;
+
+    f32 client_w = (f32)ui_ctx->client_width;
+    f32 client_h = (f32)ui_ctx->client_height;
+    f32 popup_w = client_w - 10.f;
+    f32 popup_h = client_h - 10.f;
+    f32 pad = 6.f;
+
+    UIBox* popup = ui_box_begin(&(BoxConfig){
+        .sizing = { fixed(popup_w), fixed(popup_h) },
+        .flags = BoxFlag_Float,
+        .float_offset = { 5, 5 },
+        .color = theme->palette_bg,
+        .rect_style = {
+            .corner_radius = 8,
+            .shadow_color = theme->shadow,
+            .shadow_offset = { 0, 2 },
+            .shadow_sigma = 4,
+            .border_color = theme->border,
+            .border_thickness = 1,
+        },
+    });
+    {
+        UIBoxInteractResult ir = ui_box_interact(popup, str("##ocr_popup"));
+        if (ir.last_box)
+        {
+            ctx->ocr_popup.popup_rect = (Rect){
+                ir.last_box->position.x,
+                ir.last_box->position.y,
+                ir.last_box->position.x + ir.last_box->size.width,
+                ir.last_box->position.y + ir.last_box->size.height,
+            };
+        }
+    }
+    ui_box_end(popup);
+}
+
 static void process_frame(WindowContext* ctx)
 {
     if (IsIconic(ctx->window))
@@ -1705,6 +1966,34 @@ static void process_frame(WindowContext* ctx)
             ctx->palette_activate_pending = False;
             ctx->palette_search_mode = PALETTE_MODE_WORD;
             ctx->palette_switch_version = 0;
+            ctx->ui.requested_frames = 0;
+            ctx->in_frame = False;
+            ShowWindow(ctx->window, SW_HIDE);
+            return;
+        }
+        ctx->in_frame = False;
+        return;
+    }
+
+    if (ctx->is_ocr_popup)
+    {
+        ImmAssociateContext(ctx->window, NULL);
+
+        f32 client_w = (f32)ctx->ui.client_width;
+        f32 client_h = (f32)ctx->ui.client_height;
+
+        isize arena_pos = ui_frame_begin(&ctx->ui);
+        UIBox* root = ui_box_begin(&(BoxConfig){
+            .sizing = { fixed(client_w), fixed(client_h) },
+        });
+        ocr_popup_render(ctx);
+        ui_box_end(root);
+        ui_frame_end(arena_pos);
+        if (ctx->dcomp_device)
+            IDCompositionDevice_Commit(ctx->dcomp_device);
+
+        if (!ctx->ocr_popup.active)
+        {
             ctx->ui.requested_frames = 0;
             ctx->in_frame = False;
             ShowWindow(ctx->window, SW_HIDE);
@@ -1765,8 +2054,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
         {
             if (ctx && LOWORD(wparam) == WA_INACTIVE && !ctx->quick_search_closing)
             {
-                ctx->palette_popup.open = False;
-                ctx->quick_search_result_confirmed = False;
+                if (ctx->is_quick_search)
+                {
+                    ctx->palette_popup.open = False;
+                    ctx->quick_search_result_confirmed = False;
+                }
+                if (ctx->is_ocr_popup)
+                    ctx->ocr_popup.active = False;
                 ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
             }
             if (ctx)
@@ -1836,22 +2130,32 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             ui_ctx->last_lclick_pos.y = (f32)click_y;
 
             /* Close palette when clicking outside its popup rect */
-            OverlayPopup* popups[] = { &ctx->palette_popup };
-            f32 dpi_scale = (f32)ctx->ui.dpi / USER_DEFAULT_SCREEN_DPI;
-            f32 lx = click_x / dpi_scale;
-            f32 ly = click_y / dpi_scale;
-            for (isize i = 0; i < (isize)countof(popups); i++)
             {
-                OverlayPopup* p = popups[i];
-                if (p->open && p->rect.xmax > p->rect.xmin)
-                    if (!(lx >= p->rect.xmin && lx < p->rect.xmax && ly >= p->rect.ymin && ly < p->rect.ymax))
-                    {
-                        p->open = False;
-                        ctx->palette_selected_index = -1;
-                        ctx->palette_prev_selected_index = -1;
-                        ctx->palette_activate_pending = False;
-                        break;
-                    }
+                f32 dpi_scale = (f32)ctx->ui.dpi / USER_DEFAULT_SCREEN_DPI;
+                f32 lx = click_x / dpi_scale;
+                f32 ly = click_y / dpi_scale;
+
+                if (ctx->is_quick_search)
+                {
+                    OverlayPopup* p = &ctx->palette_popup;
+                    if (p->open && p->rect.xmax > p->rect.xmin)
+                        if (!(lx >= p->rect.xmin && lx < p->rect.xmax && ly >= p->rect.ymin && ly < p->rect.ymax))
+                        {
+                            p->open = False;
+                            ctx->palette_selected_index = -1;
+                            ctx->palette_prev_selected_index = -1;
+                            ctx->palette_activate_pending = False;
+                        }
+                }
+
+                if (ctx->is_ocr_popup)
+                {
+                    OcrPopupState* p = &ctx->ocr_popup;
+                    if (p->active && p->popup_rect.xmax > p->popup_rect.xmin)
+                        if (!(lx >= p->popup_rect.xmin && lx < p->popup_rect.xmax &&
+                              ly >= p->popup_rect.ymin && ly < p->popup_rect.ymax))
+                            p->active = False;
+                }
             }
 
             ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
@@ -1975,6 +2279,11 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                     ctx->quick_search_result_confirmed = False;
                     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
                 }
+                if (ctx && ctx->is_ocr_popup)
+                {
+                    ctx->ocr_popup.active = False;
+                    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                }
                 return 0;
             }
 
@@ -1984,6 +2293,12 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 {
                     ctx->palette_popup.open = False;
                     ctx->quick_search_result_confirmed = False;
+                    ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+                    return 0;
+                }
+                if (ctx && ctx->is_ocr_popup)
+                {
+                    ctx->ocr_popup.active = False;
                     ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
                     return 0;
                 }
@@ -2227,7 +2542,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
             if (shared && ctx)
             {
                 SetWindowLongPtrW(window, GWLP_USERDATA, 0);
-                shared->quick_search_window = NULL;
+                if (ctx->is_quick_search)
+                    shared->quick_search_window = NULL;
+                if (ctx->is_ocr_popup)
+                    shared->ocr_popup_window = NULL;
                 ui_deinit(&ctx->ui);
                 if (ctx->dcomp_visual)
                 {
@@ -2247,7 +2565,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 renderer_deinit(&ctx->renderer);
                 free(ctx);
             }
-            PostQuitMessage(0);
+            if (!ctx || !ctx->is_ocr_popup)
+                PostQuitMessage(0);
             return 0;
         }
     }
@@ -2258,6 +2577,8 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 static b32 any_window_needs_frames(const AppShared* shared)
 {
     if (shared->quick_search_window && shared->quick_search_window->ui.requested_frames > 0)
+        return True;
+    if (shared->ocr_popup_window && shared->ocr_popup_window->ui.requested_frames > 0)
         return True;
     return False;
 }
@@ -2517,7 +2838,7 @@ i32 WinMainCRTStartup()
 
         TracyCZoneNC(ctx_main_loop, "MainLoop", TracyColor_Frame, TRACY_SUBSYSTEMS & TracySys_Frame);
 
-        /* Only the quick-search window needs frames */
+        /* Quick-search and OCR popup windows need frames */
         {
             WindowContext* qs = shared.quick_search_window;
             if (qs && qs->ui.requested_frames > 0)
@@ -2525,6 +2846,14 @@ i32 WinMainCRTStartup()
                 process_frame(qs);
                 if (qs->ui.requested_frames > 0)
                     qs->ui.requested_frames--;
+            }
+
+            WindowContext* op = shared.ocr_popup_window;
+            if (op && op->ui.requested_frames > 0)
+            {
+                process_frame(op);
+                if (op->ui.requested_frames > 0)
+                    op->ui.requested_frames--;
             }
         }
 
@@ -2534,6 +2863,10 @@ i32 WinMainCRTStartup()
     /* Clean up quick-search window if still alive */
     if (shared.quick_search_window)
         DestroyWindow(shared.quick_search_window->window);
+
+    /* Clean up OCR popup window if still alive */
+    if (shared.ocr_popup_window)
+        DestroyWindow(shared.ocr_popup_window->window);
 
     /* Stop palette search worker */
     search_stop(&shared.palette_search);
