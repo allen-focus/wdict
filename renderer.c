@@ -178,12 +178,24 @@ void renderer_shared_init(RendererShared* shared)
         ID3D11Device_CreateShaderResourceView(shared->device, (ID3D11Resource*)shared->shared_glyph_atlas_texture, 0,
                                               &shared->shared_glyph_atlas_shader_resource_view);
     }
+
+    /* Create shared vertex buffer */
+    {
+        D3D11_BUFFER_DESC desc = {
+            .ByteWidth = sizeof(Vertex) * VERTEX_CAPACITY,
+            .Usage = D3D11_USAGE_DYNAMIC,
+            .BindFlags = D3D11_BIND_VERTEX_BUFFER,
+            .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
+        };
+        MEM_TRACK("[mem] D3D11 CreateBuffer: shared vertex buffer (DYNAMIC) = %u B (%.1f MB)\n", desc.ByteWidth,
+                  desc.ByteWidth / (1024.0 * 1024.0));
+        ID3D11Device_CreateBuffer(shared->device, &desc, NULL, &shared->shared_vertex_buffer);
+    }
 }
 
 void renderer_deinit(Renderer* renderer)
 {
     ID3D11RenderTargetView_Release(renderer->render_target_view);
-    ID3D11Buffer_Release(renderer->vertex_buffer);
     ID3D11Buffer_Release(renderer->mvp_buffer);
     ID3D11Buffer_Release(renderer->clip_rect_buffer);
     IDXGISwapChain2_Release(renderer->swapchain2);
@@ -196,6 +208,7 @@ void renderer_shared_deinit(RendererShared* shared)
 {
     ID3D11ShaderResourceView_Release(shared->shared_glyph_atlas_shader_resource_view);
     ID3D11Texture2D_Release(shared->shared_glyph_atlas_texture);
+    ID3D11Buffer_Release(shared->shared_vertex_buffer);
     arena_release(&shared->shared_atlas_arena);
     ID3D11InputLayout_Release(shared->layout);
     ID3D11VertexShader_Release(shared->vertex_shader);
@@ -222,7 +235,7 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
     renderer->shared = shared;
 
     /* Allocate vertex and clip arrays from a dedicated arena */
-    MEM_TRACK("[mem] renderer arena_new: RENDERER_ARENA_CAPACITY = MB(16), commit_block = MB(2)\n");
+    MEM_TRACK("[mem] renderer arena_new: RENDERER_ARENA_CAPACITY = MB(4), commit_block = MB(2)\n");
     renderer->arena = arena_new(RENDERER_ARENA_CAPACITY, MB(2));
     renderer->vertex_cache.data = arena_push(&renderer->arena, sizeof(Vertex), _Alignof(Vertex), VERTEX_CAPACITY);
     renderer->clip_cache.rects = arena_push(&renderer->arena, sizeof(Rect), _Alignof(Rect), CLIP_RECT_CAPACITY);
@@ -280,20 +293,6 @@ void renderer_init(Renderer* renderer, RendererShared* shared, const HWND window
         ID3D11Device_CreateRenderTargetView(shared->device, (ID3D11Resource*)texture, &desc,
                                             &renderer->render_target_view);
         ID3D11Texture2D_Release(texture);
-    }
-
-    /* Create vertex buffer */
-    {
-        D3D11_BUFFER_DESC desc = {
-            .ByteWidth = sizeof(Vertex) * VERTEX_CAPACITY,
-            .Usage = D3D11_USAGE_DYNAMIC,
-            .BindFlags = D3D11_BIND_VERTEX_BUFFER,
-            .CPUAccessFlags = D3D11_CPU_ACCESS_WRITE,
-        };
-        D3D11_SUBRESOURCE_DATA initial = { .pSysMem = renderer->vertex_cache.data };
-        MEM_TRACK("[mem] D3D11 CreateBuffer: vertex buffer (DYNAMIC) = %u B (%.1f MB)\n", desc.ByteWidth,
-                  desc.ByteWidth / (1024.0 * 1024.0));
-        ID3D11Device_CreateBuffer(shared->device, &desc, &initial, &renderer->vertex_buffer);
     }
 
     /* Create constant buffer for delivering MVP (Model View Projection) */
@@ -400,10 +399,10 @@ static void map_vertex_buffer(Renderer* renderer)
 {
     TracyCZoneNC(ctx_map_vb, "MapVertexBuf", TracyColor_Render, TRACY_SUBSYSTEMS & TracySys_Render);
     D3D11_MAPPED_SUBRESOURCE mapped;
-    ID3D11DeviceContext_Map(renderer->shared->context, (ID3D11Resource*)renderer->vertex_buffer, 0,
+    ID3D11DeviceContext_Map(renderer->shared->context, (ID3D11Resource*)renderer->shared->shared_vertex_buffer, 0,
                             D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     memcpy(mapped.pData, renderer->vertex_cache.data, sizeof(Vertex) * renderer->vertex_cache.count);
-    ID3D11DeviceContext_Unmap(renderer->shared->context, (ID3D11Resource*)renderer->vertex_buffer, 0);
+    ID3D11DeviceContext_Unmap(renderer->shared->context, (ID3D11Resource*)renderer->shared->shared_vertex_buffer, 0);
     TracyCZoneEnd(ctx_map_vb);
 }
 
@@ -473,8 +472,8 @@ void renderer_flush_and_present(Renderer* renderer, const u32 client_width, cons
     u32 offset = 0;
     ID3D11DeviceContext_IASetInputLayout(s->context, s->layout);
     ID3D11DeviceContext_IASetPrimitiveTopology(s->context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->vertex_buffer, &stride, &offset);
-    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->vertex_buffer, &stride, &offset);
+    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->shared->shared_vertex_buffer, &stride, &offset);
+    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->shared->shared_vertex_buffer, &stride, &offset);
     ID3D11DeviceContext_VSSetConstantBuffers(s->context, 0, 1, &renderer->mvp_buffer);
     ID3D11DeviceContext_VSSetShader(s->context, s->vertex_shader, NULL, 0);
     ID3D11DeviceContext_PSSetConstantBuffers(s->context, 1, 1, &renderer->clip_rect_buffer);
@@ -530,8 +529,8 @@ void renderer_flush_overlay_and_present(Renderer* renderer, const u32 client_wid
     u32 offset = 0;
     ID3D11DeviceContext_IASetInputLayout(s->context, s->layout);
     ID3D11DeviceContext_IASetPrimitiveTopology(s->context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->vertex_buffer, &stride, &offset);
-    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->vertex_buffer, &stride, &offset);
+    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->shared->shared_vertex_buffer, &stride, &offset);
+    ID3D11DeviceContext_IASetVertexBuffers(s->context, 0, 1, &renderer->shared->shared_vertex_buffer, &stride, &offset);
     ID3D11DeviceContext_VSSetConstantBuffers(s->context, 0, 1, &renderer->mvp_buffer);
     ID3D11DeviceContext_VSSetShader(s->context, s->vertex_shader, NULL, 0);
     ID3D11DeviceContext_PSSetConstantBuffers(s->context, 1, 1, &renderer->clip_rect_buffer);

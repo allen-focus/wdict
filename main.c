@@ -2981,8 +2981,8 @@ static DWORD WINAPI startup_dict_thread(LPVOID param)
         g_dict_db = &shared->dict_db;
     }
 
-    MEM_TRACK("[mem] search_aux_arena: arena_new(MB(16), MB(2))\n");
-    shared->search_aux_arena = arena_new(MB(16), MB(2));
+    MEM_TRACK("[mem] search_aux_arena: arena_new(MB(16), MB(1))\n");
+    shared->search_aux_arena = arena_new(MB(16), MB(1));
     shared->search_aux = dict_build_search_aux(&shared->dict_db, &shared->search_aux_arena);
     Assert(shared->search_aux);
     g_search_aux = shared->search_aux;

@@ -66,6 +66,9 @@ typedef struct RendererShared
     ID3D11Texture2D*          shared_glyph_atlas_texture;
     ID3D11ShaderResourceView* shared_glyph_atlas_shader_resource_view;
     Arena                     shared_atlas_arena;
+
+    // Shared vertex buffer — one buffer for all windows (rendering is serial)
+    ID3D11Buffer*             shared_vertex_buffer;
 } RendererShared;
 // clang-format on
 
@@ -76,7 +79,6 @@ typedef struct Renderer
     IDXGISwapChain2*          swapchain2;
     HANDLE                    frame_latency_waitable_object;
     ID3D11RenderTargetView*   render_target_view;
-    ID3D11Buffer*             vertex_buffer;
     ID3D11Buffer*             mvp_buffer;
     ID3D11Buffer*             clip_rect_buffer;
     VertexCache               vertex_cache;
