@@ -1,3 +1,14 @@
+# wdict
+
+## Features
+
+- Tiny single-file executable (~1.2 MB) with no runtime dependencies and no data written to disk;
+- Built-in English–Chinese dictionary, ready to use out of the box;
+- `Ctrl+Alt+M` opens a fuzzy-search palette (e.g. "preent" → "present") with full keyboard navigation;
+- Definition lookup mode to find words by meaning (e.g. "劳动" → "labor");
+- `Ctrl+Alt` + left-click any text to look it up, showing a popup card;
+- Automatically follows the system light/dark theme.
+
 ## Build
 
 To build the binary from source code, have [Visual Studio][VS] installed first, then you can use either of the following methods:
