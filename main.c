@@ -358,21 +358,45 @@ static DictSearchAuxEntry* g_search_aux;
 static u64 s_search_palette_input_hash;
 static u32 s_window_next_id = 1;
 static u16 s_utf16_pending_high = 0;
+#define WM_APP_OCR_DISMISS (WM_APP + 0x102)
+
 static HHOOK g_mouse_hook;
 static HWND g_ocr_tray_hwnd;
+static HWND g_ocr_popup_hwnd;
 
 static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-    if (nCode >= 0 && wParam == WM_LBUTTONDOWN)
+    if (nCode >= 0)
     {
-        if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_MENU) & 0x8000))
+        if (wParam == WM_LBUTTONDOWN)
         {
-            if (g_ocr_tray_hwnd)
+            if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_MENU) & 0x8000))
             {
-                MSLLHOOKSTRUCT* hs = (MSLLHOOKSTRUCT*)lParam;
-                PostMessageW(g_ocr_tray_hwnd, WM_APP_OCR_TRIGGER, (WPARAM)hs->pt.x, (LPARAM)hs->pt.y);
+                if (g_ocr_tray_hwnd)
+                {
+                    MSLLHOOKSTRUCT* hs = (MSLLHOOKSTRUCT*)lParam;
+                    PostMessageW(g_ocr_tray_hwnd, WM_APP_OCR_TRIGGER, (WPARAM)hs->pt.x, (LPARAM)hs->pt.y);
+                }
+                return 1;
             }
-            return 1;
+        }
+
+        if (g_ocr_popup_hwnd && IsWindowVisible(g_ocr_popup_hwnd))
+        {
+            switch (wParam)
+            {
+                case WM_LBUTTONDOWN:
+                case WM_RBUTTONDOWN:
+                case WM_MBUTTONDOWN:
+                case WM_MOUSEWHEEL:
+                {
+                    MSLLHOOKSTRUCT* hs = (MSLLHOOKSTRUCT*)lParam;
+                    HWND hovered = WindowFromPoint(hs->pt);
+                    if (hovered != g_ocr_popup_hwnd)
+                        PostMessageW(g_ocr_popup_hwnd, WM_APP_OCR_DISMISS, 0, 0);
+                    break;
+                }
+            }
         }
     }
     return CallNextHookEx(NULL, nCode, wParam, lParam);
@@ -1024,6 +1048,7 @@ static void ocr_popup_activate(AppShared* shared, const u8* word, OcrWordBbox* b
     popup->dpi_repositioning = False;
     popup->ocr_popup.active = True;
     popup->ui.requested_frames = IDLE_WAKE_FRAMES;
+    g_ocr_popup_hwnd = popup->window;
 }
 
 static LRESULT CALLBACK tray_window_procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
@@ -2321,6 +2346,7 @@ static void process_frame(WindowContext* ctx)
 
         if (!ctx->ocr_popup.active)
         {
+            g_ocr_popup_hwnd = NULL;
             ctx->ui.requested_frames = 0;
             ctx->in_frame = False;
             ShowWindow(ctx->window, SW_HIDE);
@@ -2362,6 +2388,13 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
 
     switch (message)
     {
+        case WM_APP_OCR_DISMISS:
+        {
+            if (ctx && ctx->is_ocr_popup)
+                ctx->ocr_popup.active = False;
+            ctx->ui.requested_frames = IDLE_WAKE_FRAMES;
+            return 0;
+        }
         /* Compute client size from the (frame-less) window rect. */
         case WM_NCCALCSIZE:
         {
@@ -2872,7 +2905,10 @@ static LRESULT CALLBACK window_procedure(const HWND window, const u32 message, c
                 if (ctx->is_quick_search)
                     shared->quick_search_window = NULL;
                 if (ctx->is_ocr_popup)
+                {
                     shared->ocr_popup_window = NULL;
+                    g_ocr_popup_hwnd = NULL;
+                }
                 ui_deinit(&ctx->ui);
                 if (ctx->dcomp_visual)
                 {
