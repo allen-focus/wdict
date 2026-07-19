@@ -1953,6 +1953,8 @@ static void search_palette_render(WindowContext* ctx)
 
                                     /* commit: close popup on click or Enter */
                                     b32 commit_this = row_res.clicked;
+                                    if (commit_this)
+                                        ctx->palette_selected_index = i;
                                     if (!commit_this && ctx->palette_activate_pending &&
                                         i == ctx->palette_selected_index)
                                     {
@@ -2078,6 +2080,10 @@ static void search_palette_render(WindowContext* ctx)
                                 ctx->palette_selected_index < item_count)
                             {
                                 const DictWordIndex* w = items[ctx->palette_selected_index].entry;
+                                const char* word = DICT_STR(&shared->dict_db, w->word_stroff);
+                                if (ctx->ui.clipboard_copy)
+                                    ctx->ui.clipboard_copy(ctx->window,
+                                                           (String){ (u8*)word, (isize)strlen(word) });
                                 ctx->quick_search_result_confirmed = True;
                             }
                             ctx->palette_popup.open = False;
